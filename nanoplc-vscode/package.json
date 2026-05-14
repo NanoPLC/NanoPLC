@@ -1,0 +1,172 @@
+{
+  "name": "nanoplc-iec",
+  "displayName": "NanoPLC IEC 61131-3",
+  "description": "Foundation for ESP32 and MCU programming in IEC ST, LAD, and FBD",
+  "version": "0.1.0",
+  "publisher": "nanoplc",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nanoplc/nanoplc.git",
+    "directory": "nanoplc-vscode"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "keywords": [
+    "PLC",
+    "IEC 61131-3",
+    "Structured Text",
+    "Ladder",
+    "FBD",
+    "ESP32"
+  ],
+  "activationEvents": [
+    "onLanguage:iec-st",
+    "onLanguage:iec-lad",
+    "onLanguage:iec-fbd",
+    "onCommand:nanoplc.showTargetInfo",
+    "onCommand:nanoplc.setupToolchain",
+    "onCommand:nanoplc.checkToolchain",
+    "onCommand:nanoplc.addEspIdfToPowerShellProfile"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "iec-st",
+        "aliases": [
+          "IEC ST",
+          "Structured Text"
+        ],
+        "extensions": [
+          ".st",
+          ".iecst"
+        ],
+        "configuration": "./language-configuration/iec-st-language-configuration.json"
+      },
+      {
+        "id": "iec-lad",
+        "aliases": [
+          "IEC LAD",
+          "Ladder"
+        ],
+        "extensions": [
+          ".lad",
+          ".ld"
+        ],
+        "configuration": "./language-configuration/iec-lad-language-configuration.json"
+      },
+      {
+        "id": "iec-fbd",
+        "aliases": [
+          "IEC FBD",
+          "Function Block Diagram"
+        ],
+        "extensions": [
+          ".fbd"
+        ],
+        "configuration": "./language-configuration/iec-fbd-language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "iec-st",
+        "scopeName": "source.iec.st",
+        "path": "./syntaxes/iec-st.tmLanguage.json"
+      },
+      {
+        "language": "iec-lad",
+        "scopeName": "source.iec.lad",
+        "path": "./syntaxes/iec-lad.tmLanguage.json"
+      },
+      {
+        "language": "iec-fbd",
+        "scopeName": "source.iec.fbd",
+        "path": "./syntaxes/iec-fbd.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "nanoplc.showTargetInfo",
+        "title": "NanoPLC: Target platform info"
+      },
+      {
+        "command": "nanoplc.setupToolchain",
+        "title": "NanoPLC: Setup ESP-IDF toolchain (clone + install)"
+      },
+      {
+        "command": "nanoplc.checkToolchain",
+        "title": "NanoPLC: Check idf.py in PATH"
+      },
+      {
+        "command": "nanoplc.addEspIdfToPowerShellProfile",
+        "title": "NanoPLC: Add ESP-IDF export to PowerShell profile(s)"
+      }
+    ],
+    "configuration": [
+      {
+        "title": "NanoPLC",
+        "properties": {
+          "nanoplc.targetChip": {
+            "type": "string",
+            "default": "esp32-s3",
+            "description": "Target MCU preset (primary focus: ESP32-S3).",
+            "enum": [
+              "esp32",
+              "esp32-c3",
+              "esp32-s3",
+              "rp2040",
+              "stm32",
+              "generic"
+            ]
+          },
+          "nanoplc.firmwareRoot": {
+            "type": "string",
+            "default": "firmware",
+            "description": "Relative path from the workspace root to the ESP-IDF application (see docs/VIRTUAL_PLC_PLAN.md)."
+          }
+        }
+      },
+      {
+        "title": "NanoPLC ESP-IDF",
+        "properties": {
+          "nanoplc-idf.distRoot": {
+            "type": "string",
+            "default": "",
+            "description": "Toolchain install root (empty = ~/.nanoplc or %USERPROFILE%\\.nanoplc). See docs/BOOTSTRAP_TOOLCHAIN.md."
+          },
+          "nanoplc-idf.idfRelease": {
+            "type": "string",
+            "default": "v5.3.3",
+            "description": "Git tag for espressif/esp-idf shallow clone (--branch)."
+          },
+          "nanoplc-idf.idfSetupScript": {
+            "type": "string",
+            "default": "",
+            "description": "Path to export.ps1 (Windows) or export.sh (Unix) after installation; paste from bootstrap output."
+          },
+          "nanoplc-idf.buildTarget": {
+            "type": "string",
+            "default": "esp32s3",
+            "description": "Target passed to install.bat / install.sh (same as idf.py set-target)."
+          }
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.3"
+  }
+}

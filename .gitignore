@@ -1,0 +1,39 @@
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# --- Secrets / env ---
+.env
+.env.*
+!.env.example
+
+# --- Node (VS Code extension) ---
+nanoplc-vscode/node_modules/
+nanoplc-vscode/out/
+nanoplc-vscode/*.vsix
+nanoplc-vscode/.vscode-test/
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+
+# --- Python ---
+**/__pycache__/
+**/*.py[cod]
+**/.venv/
+**/venv/
+
+# --- ESP-IDF / firmware ---
+firmware/build/
+firmware/sdkconfig
+firmware/sdkconfig.old
+firmware/sdkconfig.ci
+firmware/managed_components/
+firmware/dependencies.lock
+firmware/.cache/
+
+# --- Tooling ---
+**/compile_commands.json
+*.pyc

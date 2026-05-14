@@ -1,0 +1,143 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "IEC Structured Text",
+  "scopeName": "source.iec.st",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#pragma-directives" },
+    { "include": "#keywords-control" },
+    { "include": "#keywords-decl" },
+    { "include": "#types" },
+    { "include": "#operators" },
+    { "include": "#builtin-funcs" },
+    { "include": "#identifiers" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.iec.st",
+          "match": "//.*"
+        },
+        {
+          "name": "comment.block.iec.st",
+          "begin": "\\(\\*",
+          "end": "\\*\\)"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.iec.st",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [{ "name": "constant.character.escape.iec.st", "match": "\\\\." }]
+        },
+        {
+          "name": "string.quoted.single.iec.st",
+          "begin": "'",
+          "end": "'",
+          "patterns": [{ "name": "constant.character.escape.iec.st", "match": "\\\\." }]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.iec.st",
+          "match": "\\b16#[0-9A-Fa-f_]+\\b"
+        },
+        {
+          "name": "constant.numeric.hex.iec.st",
+          "match": "\\b2#[01_]+\\b"
+        },
+        {
+          "name": "constant.numeric.duration.iec.st",
+          "match": "\\b(T|TIME|t|time)#\\d+[smhd_]?\\d*\\b"
+        },
+        {
+          "name": "constant.numeric.float.iec.st",
+          "match": "\\b\\d+_\\d+|\\d+\\.\\d*([eE][+-]?\\d+)?\\b"
+        },
+        {
+          "name": "constant.numeric.integer.iec.st",
+          "match": "\\b\\d+\\b"
+        }
+      ]
+    },
+    "pragma-directives": {
+      "patterns": [
+        {
+          "name": "meta.preprocessor.iec.st",
+          "begin": "\\{",
+          "end": "\\}",
+          "beginCaptures": { "0": { "name": "punctuation.definition.meta.iec.st" } },
+          "endCaptures": { "0": { "name": "punctuation.definition.meta.iec.st" } }
+        }
+      ]
+    },
+    "keywords-control": {
+      "patterns": [
+        {
+          "name": "keyword.control.iec.st",
+          "match": "(?i)\\b(IF|THEN|ELSIF|ELSE|END_IF|CASE|OF|END_CASE|FOR|TO|BY|DO|END_FOR|WHILE|END_WHILE|REPEAT|UNTIL|END_REPEAT|RETURN|EXIT|CONTINUE|JMP|GOTO)\\b"
+        }
+      ]
+    },
+    "keywords-decl": {
+      "patterns": [
+        {
+          "name": "keyword.other.iec.st",
+          "match": "(?i)\\b(PROGRAM|END_PROGRAM|FUNCTION_BLOCK|END_FUNCTION_BLOCK|FUNCTION|END_FUNCTION|METHOD|END_METHOD|PROPERTY|END_PROPERTY|ACTION|END_ACTION|VAR_GLOBAL|VAR_INPUT|VAR_OUTPUT|VAR_IN_OUT|VAR_TEMP|VAR_EXTERNAL|VAR_ACCESS|VAR_CONFIG|VAR|END_VAR|CONSTANT|RETAIN|PERSISTENT|INTERNAL|PUBLIC|PRIVATE|PROTECTED|ABSTRACT|FINAL|OVERRIDE|IMPLEMENTS|EXTENDS|USING|INTERFACE|END_INTERFACE|STEP|END_STEP|INITIAL_STEP|TRANSITION|END_TRANSITION|NAMESPACE|END_NAMESPACE|STRUCT|END_STRUCT|TYPE|END_TYPE|AT|WITH|FROM|THIS|SUPER)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "support.type.primitive.iec.st",
+          "match": "(?i)\\b(BOOL|BYTE|WORD|DWORD|LWORD|SINT|INT|DINT|LINT|USINT|UINT|UDINT|ULINT|REAL|LREAL|STRING|WSTRING|CHAR|TIME|DATE|TIME_OF_DAY|DATE_AND_TIME|TOD|DT|LTIME)\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.assignment.iec.st",
+          "match": "(:=)|(=>)"
+        },
+        {
+          "name": "keyword.operator.logical.iec.st",
+          "match": "(?i)\\b(NOT|AND|OR|XOR|MOD)\\b"
+        },
+        {
+          "name": "keyword.operator.comparison.iec.st",
+          "match": "(<=)|(>=)|(<>)|(=)|(<)|(>)"
+        },
+        {
+          "name": "keyword.operator.arithmetic.iec.st",
+          "match": "(\\+)|(\\-)|(\\*)|(/)(?!\\*)"
+        }
+      ]
+    },
+    "builtin-funcs": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.iec.st",
+          "match": "(?i)\\b(ABS|SQRT|SIN|COS|TAN|ASIN|ACOS|ATAN|EXP|LN|LOG|MIN|MAX|LIMIT|SEL|MUX|SHL|SHR|ROL|ROR|ADD|SUB|MUL|DIV|MOVE|CONCAT|LEN|LEFT|RIGHT|MID|REPLACE|FIND|ADTODATE|CONCAT_DATE|TOD_TO_TOD|LTIME_TO_TIME)\\b"
+        }
+      ]
+    },
+    "identifiers": {
+      "patterns": [
+        {
+          "name": "variable.other.iec.st",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?!\\s*\\()"
+        }
+      ]
+    }
+  }
+}

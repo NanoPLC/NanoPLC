@@ -1,0 +1,15 @@
+---
+description: All user-visible and repo-facing text in English
+alwaysApply: true
+---
+
+# Language (project)
+
+- Write **all** of the following in **English (US)** unless a file is explicitly a localized resource (e.g. `package.nls.ru.json`):
+  - UI strings, command titles, notifications, and button labels in VS Code extension code and `package.json` `contributes.*` text.
+  - User-facing `README`, `docs/` intended for contributors and end users, CLI help, and error messages shown in the editor.
+  - Identifiers in examples and public API names (already English by convention).
+- **Code comments**: English, short and purposeful.
+- Prefer **American spelling** (e.g. "color", "initialize") in UI and docs.
+
+If you add Russian localization later, keep English as the default/source strings; put Russian only in dedicated `nls`/locale files.

@@ -1,0 +1,20 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
+      "outFiles": ["${workspaceFolder}/out/**/*.js"],
+      "preLaunchTask": "${defaultBuildTask}"
+    },
+    {
+      "name": "Attach to Extension Host",
+      "type": "extensionHost",
+      "request": "attach",
+      "port": 5870,
+      "outFiles": ["${workspaceFolder}/out/**/*.js"]
+    }
+  ]
+}

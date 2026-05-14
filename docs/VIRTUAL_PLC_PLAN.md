@@ -1,0 +1,767 @@
+# Nano PLC plan: Virtual PLC, IDE, and firmware (ESP-IDF)
+
+This document captures the target architecture and roadmap—from FBD/LAD editing to desktop simulation and ESP32 firmware under **ESP-IDF**. Update it as implementation evolves.
+
+---
+
+## 1. Product positioning
+
+Goal: move from «block diagram editor» to a **lightweight PLC IDE**: one project, a single intermediate program representation, and a clear workflow **design → simulate on PC → build firmware → flash → debug hardware**.
+
+UX reference for engineers: patterns like TIA Portal (live values, flow highlighting), SoftPLC/CODESYS (desktop runtime), Factory I/O (virtual plant)—within an **open toolchain** focused on ESP32.
+
+---
+
+## 2. End-to-end pipeline
+
+```
+FBD / LAD (optional ST)
+        ↓
+Intermediate AST / IR  ← single source of truth for simulator and codegen
+        ↓
+┌────────────────────────┐
+│ Virtual PLC (PC)       │  simulation / debugging before hardware
+│ inside VS Code         │
+└────────────────────────┘
+        ↓
+C code generator
+        ↓
+ESP32 firmware (ESP-IDF)
+```
+
+### 2.1. Core simulator principle
+
+**Do not emulate the ESP32 cycle-accurately**; emulate **the PLC execution model**:
+
+- scan cycle;
+- deterministic order of logic execution;
+- timers and variable memory;
+- **process image I/O** (virtual inputs/outputs like a physical process).
+
+This keeps maintenance simpler and reduces «simulator differs from silicon» drift—controlled by IR semantics and (later) shared runtime code.
+
+---
+
+## 3. VS Code extension modules (target shape)
+
+| Module | Role |
+|--------|------|
+| Project tree (Device) | Hierarchy **device → modules → protocols → programs** akin to TIA Portal / CODESYS (§3.2) |
+| FBD editor | Flow canvas **Node-RED–like** UX: blocks, wires, palette (§3.1) |
+| LAD editor | Power rails / ladder (after FBD stabilizes; §22) |
+| ST editor | Standard **text** VS Code surface + grammar/services; **not** a canvas (§3.1) |
+| IR / AST layer | Graph normalization, checks, stable export format |
+| Simulator (Virtual PLC) | Scan cycle, vars, timers, virtual I/O |
+| Watch / live UI | Live values, highlight active flows (e.g. «green trace»); optional force |
+| C codegen | IR → C + headers/tables for runtime |
+| Build & flash | Invoke **ESP-IDF** (`idf.py build flash monitor`) from the workspace |
+| Online debug (later) | Device ↔ IDE protocol (Serial / WebSocket, etc.) |
+
+Existing foundation: `nanoplc-vscode` IEC ST/LAD/FBD grammar—**extend** into a full IDE rather than replace from scratch.
+
+### 3.1. Editors by language type
+
+- **FBD** — opening a user program (**Function Block Diagram**, FB-style POU files) uses a **dedicated flow editor** similar to [**Node-RED**](https://nodered.org/): pan/zoom canvas, drag blocks from a palette, **wire** outputs to inputs, per-block properties. This is **not** a plain syntax-highlighted `.fbd` text buffer without a WebView/React canvas.
+- **ST (Structured Text)** — opening uses the normal VS Code **text** `TextEditor` plus IEC ST grammar, completions, diagnostics. No graph canvas.
+- **LAD** — roadmap: dedicated graphic mode (rails, power flow). Until then: text highlighting only where applicable; no promise of a full PLC LAD editor before that ships.
+
+`package.json`: register FBD via **`customEditor`**, `WebviewPanel`, or **virtual document** canvas; ST via the standard language contribution on text URIs.
+
+### 3.2. Project tree: device, modules, protocols, programs
+
+A dedicated NanoPLC **Tree View** («Project» / «Device»), similar to **TIA Portal** and **CODESYS**: the root is the **selected device** (logical controller / platform preset, e.g. ESP32-S3). Child nodes are **structured configuration**, not a raw file dump:
+
+| Tree node | Meaning (example) |
+|-----------|-------------------|
+| Device | Target platform, PLC project name, default scan period |
+| Modules / I/O | I/O map, «field» modules, binding to `io-map` and hardware |
+| Protocols & comms | Modbus (later), MQTT, online-debug service, bus settings as supported |
+| Programs (POU) | References to user FBD/ST objects; opens **graph** editor for FBD or **text** for ST (§3.1) |
+
+- The tree **serializes into** project markers (`nanoplc.project.json`, see §20 and future schema) and **mirrors** `src/` / `build/`, but users work primarily from the **logical** device root.
+- Adding a «module» or «protocol» runs **templates** that create JSON entries and source files for version control as usual.
+
+---
+
+## 4. Runtime strategy: two phases
+
+### 4.1. Phase A — MVP in JavaScript/TypeScript
+
+- IR runs in an interpreter inside the extension (or a small Node sidecar).
+- **Pros:** fast MVP, easy debugging, tight VS Code integration.
+- **Cons:** behaviour can diverge from the MCU unless IR semantics are strict.
+
+### 4.2. Phase B — shared C execution core
+
+- One implementation for **desktop (x86/host)** and **ESP32 (Xtensa)**—a «mini-CODESYS» style core.
+- **Pros:** best simulator/hardware parity, SoftPLC-class trust.
+- **Cons:** build matrix, tests, possible host target outside `idf.py`.
+
+**Practical path:** start with **phase A**; design IR and API boundaries so the engine can **swap to phase B** without rewriting the editor.
+
+---
+
+## 5. Execution model (must be specified)
+
+1. **Scan cycle** — configurable period (e.g. 10 ms) in the simulator; on ESP32 the same **intent** (project-level scan contract).
+2. **Execution order** — derived **topological order** (or explicit compiler/user order). **Drawn graph ≠ execution order**—surface order diagnostics in the IDE.
+3. **Typical PLC I/O boundary:** read inputs → run logic → write outputs in one scan.
+
+Define timer behaviour (TON/TOF, etc.) up front: **`esp_timer` / RTOS tick** vs **delta time between scans**—document in IR spec.
+
+---
+
+## 6. What to simulate (order)
+
+1. Digital I/O (buttons, coils, lamps).
+2. Standard timers (TON, TOF, pulse—per your block library).
+3. Analog stubs (temperature, pressure, ADC).
+4. Virtual devices (tank, motor, conveyor, valve)—layer above I/O («mini Factory I/O»).
+5. Virtual fieldbuses (Modbus, MQTT, OPC UA—as needed to test SCADA without hardware).
+
+---
+
+## 7. Firmware build: ESP-IDF as source of truth
+
+### 7.1. Why ESP-IDF first
+
+- Official toolchain and releases for ESP32-S3.
+- Straightforward loop: `idf.py build flash monitor`, `sdkconfig`, Kconfig.
+- Reproducible on CI and for third-party devs.
+
+Wrappers like PlatformIO may exist as **optional** paths for some users, but the **canonical** firmware tree remains native ESP-IDF in-repo.
+
+### 7.2. Suggested repo layout (concept)
+
+```
+firmware/                          ← ESP-IDF app root
+├── CMakeLists.txt
+├── sdkconfig.defaults             ← pinned defaults for S3
+├── main/
+│   ├── CMakeLists.txt
+│   └── app_main.c                 ← platform bring-up, PLC runtime hook
+└── components/
+    ├── nanoplc_runtime/           ← scan, timers, process image I/O, HAL hooks
+    │   └── CMakeLists.txt
+    └── nanoplc_generated/         ← codegen output (or firmware/generated/)
+        └── CMakeLists.txt
+```
+
+- **`main`** — thin; do **not** hand-write FBD logic here.
+- **`nanoplc_generated`** — generated files only; CMake lists **`SRCS` explicitly** (better for CI) or via an editor-produced list.
+- Consider embedding **program / IR identity** (hash or build stamp) into build metadata.
+
+### 7.3. FreeRTOS and networking
+
+- A dedicated **high-priority task** owns the PLC scan loop; Wi‑Fi, OTA, heavy TCP must not starve scans.
+- Prefer **Kconfig** toggles (WebSocket debug, Modbus TCP, OTA) so minimal firmware stays small.
+
+### 7.4. VS Code integration
+
+1. Recommend the official **Espressif ESP-IDF** extension for toolchain setup and `sdkconfig` ergonomics.
+2. NanoPLC **Build / Flash / Monitor** commands invoke `idf.py ...` under `firmware/` after user environment activation (**no hard-coded absolute IDF paths**—settings / Espressif compatibility).
+
+### 7.5. CI (when added)
+
+- Pin ESP-IDF version.
+- `idf.py set-target esp32s3` and `idf.py build` without flashing.
+- Document IDF version and install steps next to the repo (script or Espressif doc link).
+
+---
+
+## 8. Aligning simulator and firmware
+
+1. For a given IR program, maintain **golden scenarios**: after N scans, specific variable/output values are expected.
+2. Run them in the TS simulator for regression; later, the same scenarios on C (host tests or shared core).
+
+---
+
+## 9. «Killer» user workflow
+
+**Design → Simulate → Build (ESP-IDF) → Flash ESP32 → Online debug**
+
+One project, one IR, predictable handoff from PC to silicon.
+
+---
+
+## 10. Risks and hardest parts
+
+In similar systems, the hard problems are usually **not** a bare simulator, but:
+
+- a stable **graph engine** (editing, persistence, performance);
+- **UX** for live mode (smooth updates, no UI overload);
+- **online-debug protocol & data model**.
+
+Mitigate simulator/MCU mismatch: tight IR spec + tests + (later) shared C runtime.
+
+---
+
+## 11. Roadmap phases
+
+### Phase 0 — Foundation
+
+- [ ] Lock **IR** format choice (JSON/binary/DSL—record decision here).
+- [ ] Compile graph → **ordered step list** + cycle diagnostics.
+- [ ] Minimal block set and variable types.
+
+### Phase 1 — MVP «mini PLC IDE»
+
+1. [ ] IDE structure: **Device/project tree** (§3.2); **FBD** Node-RED–style canvas (§3.1); **ST** plain VS Code editor (§3.1).
+2. [ ] **JS/TS Virtual PLC** + **Run Simulation** (basic highlighting / live values).
+3. [ ] **C codegen** from IR → `firmware/components/nanoplc_generated/`.
+4. [ ] **ESP-IDF** skeleton under `firmware/` with working `idf.py build`; flash/monitor from IDE or documented CLI.
+5. [ ] **NanoPLC: Setup toolchain** wizard installs pinned ESP-IDF + tools into the OS user profile (**§48**); writes §18 keys; wires Build/Flash/Monitor behind activated env.
+
+### Phase 2 — Closer to metal
+
+- [ ] Align timer / scan semantics with on-chip runtime.
+- [ ] Online debug (simple transport + variable map).
+- [ ] Migration plan to **shared C core** when parity demands it.
+
+### Phase 3 — «Factory I/O lite»
+
+- [ ] Virtual devices and I/O panels over the process image.
+
+### Phase 4 — Virtual fieldbuses
+
+- [ ] Virtual Modbus / MQTT / (optional) OPC UA in simulator for SCADA linkage.
+
+---
+
+## 12. ESP32-S3 platform fit
+
+ESP32-S3 is capable enough for:
+
+- PLC-like realtime scans with disciplined RTOS partitioning;
+- WebSocket/USB/Serial debug channels;
+- MQTT, Modbus, web HMI, OTA as later layers.
+
+This supports the claim the stack can be **lightweight but not a toy**.
+
+---
+
+## 13. Monorepo layout (target)
+
+Example future layout (names may evolve):
+
+```
+nanoplc/
+├── docs/
+│   └── VIRTUAL_PLC_PLAN.md
+├── nanoplc-vscode/              ← VS Code extension (editor, simulator, tasks)
+├── packages/
+│   └── ir-schema/               ← IR schema, validator, TS types (optional)
+├── tools/
+│   └── codegen/                 ← C codegen CLI from IR
+└── firmware/                    ← ESP-IDF app (see §7)
+```
+
+Rule: **`firmware/` must not depend on Node** during CI builds—only ESP-IDF and generated `*.c`/`*.h` committed or reproduced by codegen.
+
+---
+
+## 14. Next concrete commit: firmware bootstrap
+
+Goal: blinky/empty PLC task + successful `idf.py build` for `esp32s3` **without** editor codegen yet.
+
+Checklist:
+
+1. Create **`firmware/`** ESP-IDF project (root CMake + `main`).
+2. **`firmware/sdkconfig.defaults`** for ESP32-S3 (clocking, UART log, minimals).
+3. **`components/nanoplc_runtime/`** with public API such as  
+   `void nanoplc_runtime_init(uint32_t scan_period_ms);`  
+   and either `void nanoplc_runtime_scan_tick(void);` or an internal task calling stub `void nanoplc_generated_program_scan(void);`
+4. **`components/nanoplc_generated/`** stub:
+
+   ```c
+   void nanoplc_generated_program_scan(void) {
+       /* temporary empty or test counter */
+   }
+   ```
+
+5. **`main/app_main.c`** — optional UART init; create scan task or FreeRTOS tick source.
+6. Local verify: `idf.py set-target esp32s3`, `idf.py build`; flash + monitor optional.
+
+Afterward, codegen replaces the stub body and expands `SRCS` in `nanoplc_generated`.
+
+---
+
+## 15. IR contract sketch (spec prep)
+
+Until a serializer is chosen, record these **conceptual entities**:
+
+| Entity | Role |
+|--------|------|
+| `project` | metadata, target MCU, default scan period |
+| `variables` | global/instance vars with types (BOOL, INT, REAL, …) and debug addressing |
+| `io_image` | I/O mapping (symbolic name ↔ process-image index) |
+| `network` | POU set / ladder rungs OR FBD blocks and wires |
+| `instances` | FB instances (timers etc.) with parameters and variable refs |
+| `schedule` | final **ordered** execution steps (compile output) |
+
+Compatibility: **`ir_version`** integer/semver semantics—bump and migrate when meaning changes.
+
+---
+
+## 16. C codegen ↔ runtime contract
+
+Split **fixed runtime** (never generated) vs **generated user logic**.
+
+### 16.1. Stable names (example contract)
+
+- `nanoplc_runtime_*` live in `nanoplc_runtime`, never generated.
+- Single user program entry:
+
+  ```c
+  void nanoplc_generated_program_scan(void);
+  ```
+
+- Optional introspection / debug:
+
+  ```c
+  uint32_t nanoplc_generated_magic(void);           /* IR version / CRC */
+  const nanoplc_VarMeta *nanoplc_generated_var_meta(size_t *out_count);
+  ```
+
+Define `nanoplc_VarMeta` once in `nanoplc_runtime` (`name`, `type`, offset or index).
+
+### 16.2. Codegen
+
+- Input: **validated IR**.
+- Output: under `nanoplc_generated`: `plc_program.c`, `plc_program.h`, optional `SOURCES.lst` for CMake.
+
+### 16.3. Timers
+
+MVP suggestion: propagate **Δt between scans** (argument to scan or runtime field) so TON/TOF advance deterministically per scan—keeps parity with TS simulator.
+
+---
+
+## 17. Online debug phases
+
+### Phase 1 — telemetry
+
+Periodic snapshots: vars + critical I/O, **DEVICE → IDE** stream.
+
+### Phase 2 — control
+
+- Force/unforce a limited point set.
+- Mirror commands on simulator ↔ hardware where feasible.
+
+### Phase 3 — time sync & events
+
+Scan indices or timestamps; optional «stop after N scans» gated to dev builds.
+
+Transport (pick **one** for MVP): framed **UART/USB CDC** or **Wi‑Fi + WebSocket** behind Kconfig. Packet format: length-prefixed binary with CRC/CBOR/MessagePack; header carries protocol version + sequence.
+
+Security: networked debug toggles off by default on shipping firmware; authenticate when enabled.
+
+---
+
+## 18. Workspace extension settings
+
+Example keys (`nanoplc-vscode`, user or `.vscode/settings.json`):
+
+| Key | Meaning |
+|-----|---------|
+| `nanoplc.firmwareRoot` | Relative path from workspace root to `firmware/` |
+| `nanoplc-idf.idfSetupScript` | Path to `export.ps1` / `export.sh`, or omit if PATH already wired |
+| `nanoplc-idf.python` | Optional IDF-managed Python interpreter |
+| `nanoplc-idf.distRoot` | Toolchain install root (`~/.nanoplc`)—§48 |
+| `nanoplc-idf.idfRelease` | Pinned Espressif tag—align §40 |
+| `nanoplc.buildTarget` | e.g. `esp32s3` |
+
+Build/flash failures should log the active **`idf.py --version`** or env-derived IDF version line.
+
+---
+
+## 19. Testing
+
+- Snapshots: **IR → JSON** fixtures for editor IR compiler regression.
+- **Golden tests**: simulator harness (§8).
+- Firmware **CI builds** without flash.
+- Fuzz/debug-decode malformed packets once a debug protocol lands.
+
+---
+
+## 20. User project (workspace layout)
+
+Unified **Nano PLC Project** markers (filename TBD):
+
+```
+my-line/
+├── nanoplc.project.json          ← schema_version, board, scan defaults
+├── src/
+│   ├── main.fbd.json             ← tie format to IR pipeline
+│   └── io-map.json               ← optional symbolic pin map
+├── build/
+│   ├── ir.bin / ir.json          ← compiled IR artefacts
+│   └── generated.manifest.json   ← hashes, codegen + toolchain stamps
+└── firmware/                     ← symlink/submodule/monorepo path
+```
+
+- Separate **diagram sources** (diff-friendly JSON/binary + optional text peer) vs **derived IR from *Build PLC program***.
+- On open: check `nanoplc.project.json.schema_version` and migrate (§21).
+- **Device panel tree** (§3.2) edits the same conceptual objects as `nanoplc.project.json` + `src/`—avoid a stray «second» project root.
+
+---
+
+## 21. IR and project migrations
+
+- Store transformation tables (`1 → 2`) in `packages/ir-schema` or the extension runtime.
+- On mismatch: modal **backup-before-auto-patch**.
+- Maintain backward compatibility for `examples/` (one-two minors) or explicit upgrade demos.
+
+---
+
+## 22. MVP editor languages & rollout order
+
+UX requirements recap: **§3.1** (FBD canvas = Node-RED style; ST = plain text).
+
+1. **FBD first**—natural DAG + IR wires + topo ordering.
+2. **LAD second**—rungs, power rails, explicit internal order map into same IR with more work.
+
+Concurrent POUs in MVP restrict to **one active program module invoked every scan**; subroutine tables later via IR calls.
+
+---
+
+## 23. Minimum block library (v0 spec)
+
+Enough for drills + golden regressions:
+
+| Block | Purpose |
+|-------|---------|
+| I/O coupling (BOOL) | map to process image |
+| AND, OR, NOT | Boolean logic |
+| RS / SR latch (optional v0.1) | persistent state |
+| TON, TOF | timers with PT/ET/Q |
+| MOVE (INT/REAL) | when MVP exposes analog-ish types |
+| INT GT/EQ compare | sequencing |
+
+Document semantics in **`docs/BLOCK_SEMANTICS.md`**: evaluation order, PT=0 edge cases, cold-start behaviour.
+
+---
+
+## 24. Graph diagnostics / compile UX
+
+Surface Problems entries:
+
+- **Structural:** dangling wire, incompatible types, unresolved variable refs.
+- **Ordering:** combinational-feedback cycles without deliberate trigger semantics—either forbid or insert implicit delay with warning (product rule).
+- **Resource:** FB instance/IR size caps on low-end targets.
+
+Stable codes (**`NP-xxxx`**) anchor docs; diagnostics link graph node IDs.
+
+---
+
+## 25. Performance budgets
+
+| Area | Guideline |
+|------|-----------|
+| Hardware scan interval | Tunable (~10 ms) small programmes should not peg CPU at idle |
+| IR + codegen on desktop | Roughly `<1 s` ~500-node graphs via background worker |
+| Live simulator UI refresh | Batch 33–50 ms; push dirty subscriptions only |
+| Debug transport | Avoid full snapshots of 10k vars every tick without subscription |
+
+Log **max-scan-time** overrun via `esp_timer` when helpful.
+
+---
+
+## 26. Simulator replay
+
+For QA reproducibility:
+
+- Log virtual field inputs («operator trace»): time or scan index + I/O mutations.
+- Re-run in TS simulator.
+- Save `.nanoplc-replay.json` (binary optional).
+
+MCU full replay unnecessary for MVP—same IR plus manual stimuli suffices early.
+
+---
+
+## 27. Security & product posture
+
+- **Network debug OFF** default in releases; gated secrets/subnet allowances if temporarily ON.
+- **OTA:** signed images once shipped; differentiate debug prod vs dev firmware bundles.
+- **Online force indicators** mandatory; optionally auto-clear on disconnect / timeout.
+
+---
+
+## 28. Spin-off documents
+
+| Doc | Topics |
+|-----|--------|
+| `docs/IR_SCHEMA.md` or JSON Schema | IR wire format + trivial sample |
+| `docs/BLOCK_SEMANTICS.md` | MVP IEC-like interpretations |
+| `docs/DEBUG_PROTOCOL.md` | Framing/versioning/handshake samples |
+| `docs/TROUBLESHOOTING.md` | Expanded §44 |
+| `docs/BOOTSTRAP_TOOLCHAIN.md` | ESP-IDF bootstrap variants (offline/proxy/rollback) |
+| `docs/CONTRIBUTING.md` | build extension + firmware locally |
+
+Keep `VIRTUAL_PLC_PLAN.md` roadmap-level—link outward for detail.
+
+---
+
+## 29. Version matrix
+
+| Artefact | Source | Meaning |
+|---------|--------|---------|
+| `extension_version` | `nanoplc-vscode/package.json` | VS Code SemVer |
+| `project.schema_version` | `nanoplc.project.json` | On-disk project/diagram packaging |
+| `ir_version` | IR header fields | Semantic meaning of intermediate representation |
+| `runtime_abi_version` | Const in `nanoplc_runtime` + codegen coupling | Stability of generated entrypoints |
+| `codegen_cli_version` | `--version`, `generated.manifest.json` | Tool that emitted firmware C |
+
+Bump **runtime ABI**: firmware image and generated sources must advance **together**; IDE may compare manifest versus local CLI and prompt regenerate.
+
+---
+
+## 30. Hardware I/O abstraction
+
+- **`io-map.json`** maps IR symbols (`DI_Start`, `DO_Lamp`) to board pins (GPIO port/pin, active level, pulls).
+- Implement **`nanoplc_hal`** (inside runtime or sibling component):
+
+  - `hal_read_di(index)` / `hal_write_do(index)` drive hardware tables compiled or loaded at boot;
+  - the desktop simulator swaps in a **pure software** process image sharing the **same indexes**.
+
+Digital-only MVP; analog ADC/PWM after BOOL path stabilizes (`BLOCK_SEMANTICS` captures limits).
+
+Treat **ESP32-S3** as reference hardware; alternate MCUs arrive via presets and CI matrices later.
+
+---
+
+## 31. Naming conventions
+
+| Context | Guideline |
+|---------|-----------|
+| Diagram node/wire IDs | Stable UUID or `nk_<ulid>` unaffected by captions |
+| IR variable identifiers | PLC-style ALL CAPS optional; restrict to `[A-Za-z0-9_]` namespaces |
+| Generated C identifiers | ASCII-sanitized only; prefix `npgen_` internal static helpers |
+| User diagnostics | Stable `NP-xxxx` codes (section 24) |
+
+---
+
+## 32. Git policy
+
+Possible `.gitignore` trade-offs:
+
+- Commit IDE `build/` IR artefacts or regenerate every time (*developer convenience* versus support reproducibility bundles).
+- Always ignore firmware `CMakeCache.txt`, ESP-IDF `build/`, `sdkconfig.old`, etc.
+- Ignore transient simulator dumps except checked-in `.nanoplc-replay` QA fixtures.
+
+Template READMEs must state which artefacts belong in reproducible bundles.
+
+---
+
+## 33. Post-MVP multitasking and libraries
+
+1. Multiple **PROGRAM** scopes plus explicit PLC task invocation order.
+2. **FB libraries** modeled as reusable IR subgraph definitions (`fb_def` plus instances).
+3. User packages keyed to compatible **`ir_version`** branches.
+
+Single-program MVP stays valid for section 22; this section pins future roadmap.
+
+---
+
+## 34. `examples/` bundles
+
+| Example | Behaviour |
+|---------|-----------|
+| `blink_fbd` | Blink driven by `TON` |
+| `and_gate` | Dual inputs into output plus golden asserts |
+| `debounce_rs` | RS latch once library ships |
+
+Each packs diagram sources and `ir.json`; ship generated `*.c` only for offline demos—otherwise regenerate from docs or scripts.
+
+---
+
+## 35. Extension localization strategy
+
+- Start from English `package.nls.json`; layer locales (`package.nls.ru.json`) on demand.
+- Keep machine-readable codes **`NP-xxxx`** stable everywhere; localize human hints and deep-link docs independently.
+- **Repository language:** treat **English** as the default authoring language for tracked source, `docs/`, README, UI strings shipped by this project, and meaningful code comments—unless the file path is intentionally a localized resource (`package.nls.*.json`, etc.).
+- **`node_modules`:** do **not** translate or rewrite dependency trees for locale; bundled vendor localization (for example TypeScript `lib/*/diagnosticMessages.*.json`) is upstream-owned and excluded from NanoPLC wording policy.
+
+---
+
+## 36. Parity checklist before shipping
+
+Golden IR programmes must behave the same:
+
+| Check | TS simulator | MCU firmware |
+|-------|---------------|---------------|
+| Scan cadence versus timer deltas | deterministic tick clock | scheduler-bound |
+| `schedule` traversal | honours ordered steps | codegen matches |
+| TON extremes (PT=0, reset IN) | spec documented | MCU matches documented rules |
+| Post-scan snapshots | asserts | MCU golden harness or emulator |
+
+Mismatch blocks coordinated **IDE + codegen + firmware** releases unless recorded as deliberate platform caveat.
+
+---
+
+## 37. Autosave / undo roadmap
+
+- Autosave diagram sources; optional checkpoints before heavyweight codegen/IR migrations.
+- Later: **Revert to last compiled** resurrecting artefacts from `build/` if editable JSON corrupts.
+
+---
+
+## 38. Developer flow diagram
+
+```mermaid
+flowchart LR
+  subgraph ide [VS Code]
+    ED[FBD editor]
+    CMP[Compile to IR]
+    SIM[TS simulator]
+    CG[C codegen]
+    TSK[idf.py tasks]
+  end
+  subgraph target [Embedded target]
+    FW[ESP-IDF build]
+    MCU[ESP32-S3]
+  end
+  ED --> CMP --> IR[(IR artefact)]
+  IR --> SIM
+  IR --> CG --> GEN[nanoplc_generated component]
+  GEN --> FW --> MCU
+```
+
+---
+
+## 39. IEC disclaimers and safety stance
+
+- FBD/LAD vocabulary may evoke IEC 61131-3 but **never promises formal conformance** absent explicit certification workstreams.
+- Block behaviour lives under **`docs/BLOCK_SEMANTICS.md`** keyed to **`ir_version`**—gaps versus canonical IEC enumerated there.
+- **Functional safety/SIL workloads** unsupported by default—users shoulder risk evaluations.
+
+---
+
+## 40. Toolchain support matrix
+
+Update per release with `CONTRIBUTING`:
+
+| Component | Policy |
+|-----------|--------|
+| VS Code | Last **two majors** stable (trim if constrained) |
+| Node.js builder | LTS per `engines` in `package.json` |
+| ESP-IDF | **Single pinned minor** per IDE milestone (example 5.3.x); changelog calls bumps |
+| Python for `idf.py` | Follow Espressif guidance for pinned IDF |
+
+User-facing troubleshooting should stress **«IDF version mismatch == top build breaker»**.
+
+---
+
+## 41. MCU resilience
+
+- Document cold-start outputs before scan cycle one (normally `LOW`/`off` safest for driven pins).
+- Register PLC scan work under ESP-IDF **task watchdog** plus fail-safe output policy toggles.
+- Respect brownout resets; disclaim timing jitter on awful power rails without UPS.
+- Dual-slot OTA rollback remains future backlog.
+
+---
+
+## 42. On-device logging conventions
+
+- Base tag `nanoplc`; subtopics `scan`, `io`, `debug`.
+- ERROR: watchdog/ABI conflicts; WARN: scan overrun; INFO sparse lifecycle logs; DEBUG only via `sdkconfig`.
+- Thin logging over slow transports in production builds—reserve verbose tracing for experimental builds.
+
+---
+
+## 43. Feature-flag coupling
+
+| Layer | Mechanism |
+|-------|-----------|
+| Firmware | `Kconfig` and `sdkconfig.defaults` knobs |
+| VS Code extension | Namespaces such as `nanoplc.experimental.*` |
+| IR / codegen | Mandatory **`ir_version` bump plus migrations** for semantic changes |
+
+---
+
+## 44. Troubleshooting primer (`docs/TROUBLESHOOTING.md`)
+
+| Symptom | First check |
+|---------|-------------|
+| `idf.py` refuses to run | `%IDF_PATH%` / `$env:IDF_PATH`, compare with section 40 |
+| Firmware blank screen after merges | Manifest `runtime_abi_version` mismatched headers |
+| Simulator disagrees hardware | Section 36 checklist; verify `io-map` polarity |
+| Live UI jitter | Lower redraw cadence/narrow subscribed nodes |
+| Timers jittery | PCs tolerate OS jitter; MCU scan overrun detectors |
+
+---
+
+## 45. MVP non-goals
+
+- PLC-quality ST authoring parity alongside FBD.
+- SCADA-grade HMI builder (debug overlays only).
+- Certified industrial cybersecurity program.
+- One-click importer for proprietary PLC vendor exchange formats.
+
+---
+
+## 46. Third-party licences
+
+- Maintain repo-level `NOTICE` / `THIRD_PARTY` bundles for npm artefacts and downloadable toolchains ahead of Marketplace reviews.
+- Keep dual firmware/extension artefacts under coherent **SPDX** statements; reconcile incompatible combos before redistribution.
+
+---
+
+## 47. Industry analog references
+
+Explain NanoPLC using parallels like **TIA Portal**, **CODESYS SoftPLC**, or **Factory I/O** yet clarify this project covers **open** design/sim/build cycles for ESP32—not regulated-field drop-in replacements.
+
+---
+
+## 48. Toolchain packaging (thin `.vsix` plus bootstrap assist)
+
+### 48.1. Principles
+
+- Post-install onboarding (command **NanoPLC: Setup ESP-IDF toolchain** or gated first-build prompt).
+- With consent, bootstrap **pinned Espressif artefacts** plus toolchains directly into **user-profile directories**, not bundled inside VSIX bytes.
+- Default locations tunable via **`nanoplc-idf.distRoot`** (aligned with section 18).
+
+  | OS | Example root |
+  |----|--------------|
+  | Windows | `%USERPROFILE%\.nanoplc\` (+ `esp-idf`, cached tools) |
+  | Linux | `~/.nanoplc/` |
+  | macOS | Pick ONE convention versus `~/Library/Application Support/NanoPLC/toolchain` |
+
+- Persist `IDF_PATH`, `export.*`, python interpreter, optional `TOOLS_PATH`.
+
+### 48.2. Implementation knobs
+
+- Windows path may favor official installers when Espressif recommends them.
+- Cross-platform fallback: shallow git-tag checkout followed by `install.bat`/`install.sh` then `export.*` before invoking `idf.py`.
+- Log progress/resume downloads/free-space prerequisite checks.
+
+### 48.3. UX transparency checklist
+
+| Area | Requirement |
+|------|---------------|
+| Time or download size | Multi-minute/multi-GB workloads require explicit disclosures |
+| Enterprise networks | Manual proxy/custom CA escapes |
+| Supply chain hygiene | Verified endpoints plus checksum attestations plus consent logging |
+| Windows antivirus churn | Mention unpack slowdown mitigation inside `BOOTSTRAP_TOOLCHAIN.md` |
+| Binary licences | Post-download artefacts documented in `NOTICE` |
+| Version retention policy | Permit multiple IDF trees under dist root for downgrade safety |
+
+### 48.4. Optional Espressif extension coupling
+
+- Depend on **`espressif.esp-idf-extension`** to outsource bootstrap UX (less NanoPLC bespoke code yet shared branding quirks).
+- Or fully custom wizard aligning strictly with NanoPLC versioning—more maintenance overhead.
+
+Expert users bypass wizards entirely by pointing NanoPLC JSON settings at vendor-managed installs.
+
+---
+
+## Document history
+
+- Initial roadmap derived from Virtual PLC ideation; anchored canonical firmware under **ESP-IDF**.
+- Added sections13-19: monorepo layout concepts, bootstrap firmware scaffolding, IR/C contracts, debugger phases, settings matrix, testing notes.
+- Added sections20-28: structured user project blobs, migrations, editor sequencing priorities, MVP block catalogue, UX diagnostics/replay/security appendices plus satellite documentation map.
+- Added sections29-38: versioning HAL blueprint, naming + git rationale, multitasking backlog, parity checklist + autosave ideas, refreshed ASCII-safe mermaid flow.
+- Added sections39-47: IEC posture disclaimers, tooling support matrix, reliability/logging/feature-flag guidance, troubleshooting seed, intentional non-goals, licensing/competitive analog bullets.
+- Landed **`firmware/` ESP-IDF project** scaffolding plus ignore rules tying back to bootstrap instructions.
+- Added section48 toolchain packaging strategy plus authored `BOOTSTRAP_TOOLCHAIN.md`; documented `nanoplc-idf.*` prefs.
+- Refined VS Code module blueprint (§3): TIA-inspired device explorer, layered FBD Node-RED editor expectations, ST text modality, clarified runtime section numbering.
+- **Translated entire roadmap prose to English (2026 maintenance pass)** whilst preserving numbering and anchors.

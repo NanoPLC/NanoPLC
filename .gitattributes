@@ -1,0 +1,17 @@
+# Normalize line endings; keep shell scripts LF for Git + Unix CI
+* text=auto
+
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Optional: Windows scripts may use CRLF locally; Git will normalize on checkout per platform
+*.ps1 text
+
+# Treat as text for diffs
+*.md text
+*.json text
+*.ts text
+*.c text
+*.h text
+*.cmake text
+CMakeLists.txt text

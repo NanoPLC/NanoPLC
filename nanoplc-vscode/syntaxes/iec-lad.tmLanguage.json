@@ -1,0 +1,64 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "IEC Ladder (textual)",
+  "scopeName": "source.iec.lad",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#rung-header" },
+    { "include": "#ladder-symbols" },
+    { "include": "#keywords" },
+    { "include": "#identifiers" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.double-slash.iec.lad", "match": "//.*" },
+        {
+          "name": "comment.block.iec.lad",
+          "begin": "\\(\\*",
+          "end": "\\*\\)"
+        }
+      ]
+    },
+    "rung-header": {
+      "patterns": [
+        {
+          "name": "entity.name.section.rung.iec.lad",
+          "match": "^\\s*(RUNG|SCAN|SECTION)\\s+\\d+\\b"
+        }
+      ]
+    },
+    "ladder-symbols": {
+      "patterns": [
+        {
+          "name": "keyword.operator.ladder.contact.no.iec.lad",
+          "match": "--\\|(?:/|N)?\\|--"
+        },
+        {
+          "name": "keyword.operator.ladder.coil.no.iec.lad",
+          "match": "--\\(\\)|--\\(/\\)|--\\(N\\)|--\\(S\\)|--\\(R\\)"
+        },
+        {
+          "name": "keyword.operator.ladder.branch.iec.lad",
+          "match": "[+|]+----+"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.other.iec.lad",
+          "match": "(?i)\\b(IF|THEN|ELSIF|ELSE|END_IF|BOOL|TON|TOF|TP|CTU|CTD|CTUD|SR|RS|F_TRIG|R_TRIG|SEL|MUX|MOVE)\\b"
+        }
+      ]
+    },
+    "identifiers": {
+      "patterns": [
+        {
+          "name": "variable.other.iec.lad",
+          "match": "%[IQM][XBWDL]?\\d+(\\.\\d+)*|\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+        }
+      ]
+    }
+  }
+}

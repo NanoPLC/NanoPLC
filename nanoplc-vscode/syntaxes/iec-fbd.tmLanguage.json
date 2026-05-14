@@ -1,0 +1,69 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "IEC FBD (textual)",
+  "scopeName": "source.iec.fbd",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#block-decl" },
+    { "include": "#ports" },
+    { "include": "#wire" },
+    { "include": "#keywords" },
+    { "include": "#identifiers" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.double-slash.iec.fbd", "match": "//.*" },
+        {
+          "name": "comment.block.iec.fbd",
+          "begin": "\\(\\*",
+          "end": "\\*\\)"
+        }
+      ]
+    },
+    "block-decl": {
+      "patterns": [
+        {
+          "name": "entity.name.type.function-block.iec.fbd",
+          "match": "(?i)\\b(BLOCK|FUNCTION_BLOCK)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.other.iec.fbd" },
+            "2": { "name": "entity.name.type.iec.fbd" }
+          }
+        }
+      ]
+    },
+    "ports": {
+      "patterns": [
+        {
+          "name": "variable.parameter.port.iec.fbd",
+          "match": "(?i)\\b(IN|OUT|IN_OUT)\\s*:\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*="
+        }
+      ]
+    },
+    "wire": {
+      "patterns": [
+        {
+          "name": "string.unquoted.connection.iec.fbd",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\s*->\\s*[A-Za-z_][A-Za-z0-9_]*"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.other.iec.fbd",
+          "match": "(?i)\\b(AND|OR|XOR|NOT|ADD|SUB|MUL|DIV|GT|GE|LT|LE|EQ|NE|MOVE|SEL|MUX|TON|TOF|TP|SR|RS|CTU|CTD|END_BLOCK|NETWORK)\\b"
+        }
+      ]
+    },
+    "identifiers": {
+      "patterns": [
+        {
+          "name": "variable.other.iec.fbd",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+        }
+      ]
+    }
+  }
+}
