@@ -1,6 +1,9 @@
 # Build and verify the NanoPLC VS Code extension (no release).
 name: VS Code extension CI
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   push:
     branches: [main, master]
@@ -54,7 +57,7 @@ jobs:
         run: npm run package:vsix
 
       - name: Upload VSIX artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: nanoplc-vscode-vsix
           path: nanoplc-vscode/*.vsix

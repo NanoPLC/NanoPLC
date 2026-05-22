@@ -94,22 +94,66 @@ npm run package:vsix
 
 This produces `nanoplc-iec-0.1.0.vsix` in the extension directory.
 
-### GitHub Releases
+### Releasing the extension
 
-CI builds the extension on changes under `nanoplc-vscode/` and `packages/ir-schema/` (workflow: **VS Code extension CI**).
+Publishing uses two GitHub Actions workflows in the monorepo root (`.github/workflows/`):
 
-To publish a release:
+| Workflow | When it runs | Result |
+|----------|----------------|--------|
+| **VS Code extension CI** | Push or PR to `main` when `nanoplc-vscode/`, `packages/ir-schema/`, or `firmware/` change | Builds and uploads a **workflow artifact** (`nanoplc-vscode-vsix`). Does **not** create a GitHub Release. |
+| **VS Code extension release** | Push of a `vscode-v*` tag, or manual **Run workflow** | Creates a **GitHub Release** with the `.vsix` attached and release notes from commits. |
 
-1. Bump `"version"` in `package.json`.
-2. Commit and push.
-3. Tag and push (tag must match the version):
+CI artifacts are only visible under **Actions → workflow run → Artifacts**. End users install from **Releases**, not from CI artifacts.
+
+#### Publish a GitHub Release (recommended)
+
+From the **repository root** (`nanoplc/`, not only `nanoplc-vscode/`):
+
+1. **Bump the version** in `nanoplc-vscode/package.json` (semver, e.g. `0.1.0` → `0.1.1`).
+
+2. **Commit and push** to `main`:
 
    ```bash
-   git tag vscode-v0.1.0
-   git push origin vscode-v0.1.0
+   git add nanoplc-vscode/package.json
+   git commit -m "chore(vscode): release v0.1.1"
+   git push origin main
    ```
 
-The **VS Code extension release** workflow uploads the `.vsix` to GitHub Releases. Release notes list commits since the previous `vscode-v*` tag that touch `nanoplc-vscode/` or `packages/ir-schema/`.
+   Wait for **VS Code extension CI** to pass (optional but recommended).
+
+3. **Create and push a tag** that matches the new version:
+
+   - Tag format: `vscode-v<version>` (e.g. `vscode-v0.1.1` for `"version": "0.1.1"`).
+   - The release workflow fails if the tag version and `package.json` disagree.
+
+   ```bash
+   git tag vscode-v0.1.1
+   git push origin vscode-v0.1.1
+   ```
+
+4. Open **Actions → VS Code extension release** and confirm the run succeeded.
+
+5. Open **Releases** on GitHub. The new release includes:
+   - `nanoplc-iec-<version>.vsix` (install via **Extensions → … → Install from VSIX…**)
+   - Notes listing commits since the previous `vscode-v*` tag under `nanoplc-vscode/` and `packages/ir-schema/`
+
+#### Re-run or publish an existing tag
+
+If the tag already exists but the release failed or was skipped:
+
+1. **Actions → VS Code extension release → Run workflow**
+2. Enter the existing tag (e.g. `vscode-v0.1.1`) and run.
+
+#### Local VSIX (without GitHub Releases)
+
+```bash
+cd nanoplc-vscode
+npm install
+npm run compile
+npm run package:vsix
+```
+
+Output: `nanoplc-iec-<version>.vsix` in this directory. Share or install manually; this does not update GitHub Releases.
 
 Bootstrap scripts shipped with the extension: `scripts/bootstrap-idf.ps1`, `scripts/bootstrap-idf.sh`.
 
