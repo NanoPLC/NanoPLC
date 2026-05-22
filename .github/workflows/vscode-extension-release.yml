@@ -1,0 +1,134 @@
+# Build the VS Code extension and publish a GitHub Release with a VSIX asset.
+# Create a tag matching package.json, e.g. git tag vscode-v0.1.0 && git push origin vscode-v0.1.0
+name: VS Code extension release
+
+on:
+  push:
+    tags:
+      - "vscode-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release (e.g. vscode-v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Resolve release tag
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          if ! echo "$TAG" | grep -qE '^vscode-v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "Tag must look like vscode-v1.2.3 (got: $TAG)"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#vscode-v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag matches package.json version
+        run: |
+          PKG_VER=$(node -p "require('./nanoplc-vscode/package.json').version")
+          if [ "${{ steps.meta.outputs.version }}" != "$PKG_VER" ]; then
+            echo "Tag version (${{ steps.meta.outputs.version }}) != package.json ($PKG_VER)"
+            exit 1
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            packages/ir-schema/package-lock.json
+            nanoplc-vscode/package-lock.json
+
+      - name: Install @nanoplc/ir-schema dependencies
+        working-directory: packages/ir-schema
+        run: npm ci
+
+      - name: Install extension dependencies
+        working-directory: nanoplc-vscode
+        run: npm ci
+
+      - name: Compile extension
+        working-directory: nanoplc-vscode
+        run: npm run compile
+
+      - name: Package VSIX
+        working-directory: nanoplc-vscode
+        run: npm run package:vsix
+
+      - name: Locate VSIX
+        id: vsix
+        working-directory: nanoplc-vscode
+        run: |
+          VSIX=$(ls -1 *.vsix | head -1)
+          if [ -z "$VSIX" ]; then
+            echo "No .vsix file produced"
+            exit 1
+          fi
+          echo "path=nanoplc-vscode/$VSIX" >> "$GITHUB_OUTPUT"
+          echo "name=$VSIX" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes from commits
+        id: changelog
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          VERSION="${{ steps.meta.outputs.version }}"
+          PATHS="nanoplc-vscode packages/ir-schema"
+          PREV_TAG=$(git tag -l 'vscode-v*' --sort=-v:refname | grep -v "^${TAG}$" | head -1 || true)
+
+          if [ -z "$PREV_TAG" ]; then
+            RANGE="HEAD"
+            SINCE_LINE="All commits touching the extension and IR schema:"
+          else
+            RANGE="${PREV_TAG}..HEAD"
+            SINCE_LINE="Commits since \`${PREV_TAG}\` (${RANGE}):"
+          fi
+
+          NOTES=$(git log "$RANGE" --pretty=format:'- %s (%h)' --no-merges -- $PATHS || true)
+          if [ -z "$NOTES" ]; then
+            NOTES="- No commits under \`${PATHS}\` in this range."
+          fi
+
+          {
+            echo "body<<RELEASE_EOF"
+            echo "## NanoPLC VS Code extension v${VERSION}"
+            echo ""
+            echo "${SINCE_LINE}"
+            echo ""
+            echo "${NOTES}"
+            echo ""
+            echo "### Install"
+            echo "1. Download \`${{ steps.vsix.outputs.name }}\` from the assets below."
+            echo "2. In VS Code: **Extensions** → **...** → **Install from VSIX...**"
+            echo ""
+            echo "Requires VS Code **1.85** or newer (see \`engines.vscode\` in \`nanoplc-vscode/package.json\`)."
+            echo "RELEASE_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: NanoPLC VS Code v${{ steps.meta.outputs.version }}
+          body: ${{ steps.changelog.outputs.body }}
+          files: ${{ steps.vsix.outputs.path }}
+          fail_on_unmatched_files: true

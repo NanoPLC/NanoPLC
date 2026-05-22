@@ -94,6 +94,23 @@ npm run package:vsix
 
 This produces `nanoplc-iec-0.1.0.vsix` in the extension directory.
 
+### GitHub Releases
+
+CI builds the extension on changes under `nanoplc-vscode/` and `packages/ir-schema/` (workflow: **VS Code extension CI**).
+
+To publish a release:
+
+1. Bump `"version"` in `package.json`.
+2. Commit and push.
+3. Tag and push (tag must match the version):
+
+   ```bash
+   git tag vscode-v0.1.0
+   git push origin vscode-v0.1.0
+   ```
+
+The **VS Code extension release** workflow uploads the `.vsix` to GitHub Releases. Release notes list commits since the previous `vscode-v*` tag that touch `nanoplc-vscode/` or `packages/ir-schema/`.
+
 Bootstrap scripts shipped with the extension: `scripts/bootstrap-idf.ps1`, `scripts/bootstrap-idf.sh`.
 
 ## License
