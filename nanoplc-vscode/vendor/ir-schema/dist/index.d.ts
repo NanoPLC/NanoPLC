@@ -1,0 +1,10 @@
+export { FBD_SOURCE_SCHEMA_VERSION, IO_MAP_SCHEMA_VERSION, IR_VERSION, PROJECT_SCHEMA_VERSION, } from "./constants";
+export { compileFbdToIr } from "./compileFbd";
+export { codegenC, computeIrMagic, codegenFirmware } from "./codegen/cGenerator";
+export type { CodegenCResult } from "./codegen/cGenerator";
+export type { CodegenFirmwareOutput } from "./codegen/codegenFirmware";
+export { PlcSimulator } from "./simulator/PlcSimulator";
+export type { SimulatorSnapshot, TonInstanceState } from "./simulator/types";
+export { createSimState, executeScheduleStep, runScan, snapshot } from "./simulator/executeScan";
+export type { CompileDiagnostic, CompileResult, FbdBlock, FbdPortRef, FbdSource, FbdWire, IoMap, IoMapEntry, IrIoImage, IrVariable, NanoPlcProgramRef, NanoPlcProject, PlcIr, PlcPrimitiveType, ScheduleOp, ScheduleStep, } from "./types";
+export { validateFbdSource, validateProject } from "./validate";

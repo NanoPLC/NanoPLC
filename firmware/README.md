@@ -27,6 +27,7 @@ idf.py flash monitor
 |------|------|
 | `main/` | `app_main` bootstraps `nanoplc_runtime_init` |
 | `components/nanoplc_runtime/` | Scan cadence, watchdog, scan duration metrics |
-| `components/nanoplc_generated/` | Codegen output zone (`plc_program.c` placeholder today) |
+| `components/nanoplc_hal/` | GPIO process-image HAL (`nanoplc_hal_read_di` / `write_do`) |
+| `components/nanoplc_generated/` | Codegen output (`plc_program.c`, `io_hal_config.c`) |
 
 **`NANOPLC_RUNTIME_ABI_VERSION`** lives in `nanoplc_runtime.h`. **`nanoplc_generated_magic`** lives in `nanoplc_generated.h` / `plc_program.c`.

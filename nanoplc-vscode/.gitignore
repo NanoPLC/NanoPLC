@@ -1,4 +1,6 @@
 node_modules
 out
 *.vsix
+packaged-deps/node_modules/@nanoplc/ir-schema/dist
+packaged-deps/node_modules/@nanoplc/ir-schema/schemas
 .DS_Store

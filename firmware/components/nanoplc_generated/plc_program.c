@@ -1,22 +1,37 @@
+/* Auto-generated from IR v1 — do not edit. */
 #include "nanoplc_generated.h"
-#include "esp_log.h"
+#include "nanoplc_hal.h"
 
-#include <inttypes.h>
+#include <stdbool.h>
+#include <stdint.h>
 
-static const char *TAG = "np_gen";
+/* Provided by nanoplc_runtime — forward declare to avoid CMake cycle (generated ↔ runtime). */
+uint32_t nanoplc_runtime_scan_period_ms(void);
+
+#define NPGEN_SCAN_DT_MS 10u
+
+static bool npgen_di[2];
+static bool npgen_do[1];
+static bool npgen_v_DI_Enable;
+static bool npgen_v_DI_Start;
+static bool npgen_v_DO_Lamp;
+static bool npgen_v___and1_Q;
 
 uint32_t nanoplc_generated_magic(void)
 {
-    return NANOPLC_GENERATED_MAGIC_STUB;
+    return 0x01e81e01u;
 }
 
 void nanoplc_generated_program_scan(void)
 {
-    /* Placeholder: FBD/IR codegen injects real logic here. */
-    static uint32_t s_ticks;
-    s_ticks++;
+    const uint32_t npgen_scan_dt_ms = nanoplc_runtime_scan_period_ms();
 
-    if ((s_ticks % 1000u) == 0u) {
-        ESP_LOGD(TAG, "scan stub tick %" PRIu32, s_ticks);
-    }
+    npgen_di[0] = nanoplc_hal_read_di(0);
+    npgen_v_DI_Start = npgen_di[0];
+    npgen_di[1] = nanoplc_hal_read_di(1);
+    npgen_v_DI_Enable = npgen_di[1];
+    npgen_v___and1_Q = (npgen_v_DI_Start && npgen_v_DI_Enable);
+    npgen_do[0] = npgen_v___and1_Q;
+    nanoplc_hal_write_do(0, npgen_v___and1_Q);
+    npgen_v_DO_Lamp = npgen_v___and1_Q;
 }

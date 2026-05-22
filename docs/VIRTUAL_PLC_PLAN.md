@@ -57,7 +57,7 @@ This keeps maintenance simpler and reduces «simulator differs from silicon» dr
 | Build & flash | Invoke **ESP-IDF** (`idf.py build flash monitor`) from the workspace |
 | Online debug (later) | Device ↔ IDE protocol (Serial / WebSocket, etc.) |
 
-Existing foundation: `nanoplc-vscode` IEC ST/LAD/FBD grammar—**extend** into a full IDE rather than replace from scratch.
+Existing foundation: `nanoplc-vscode` contributes **IEC ST/LAD/FBD grammars** and toolchain/bootstrap commands; **full IDE** scope (FBD canvas, device tree, simulator, codegen) remains per §11 / §49—**extend**, do not replace wholesale.
 
 ### 3.1. Editors by language type
 
@@ -69,16 +69,45 @@ Existing foundation: `nanoplc-vscode` IEC ST/LAD/FBD grammar—**extend** into a
 
 ### 3.2. Project tree: device, modules, protocols, programs
 
-A dedicated NanoPLC **Tree View** («Project» / «Device»), similar to **TIA Portal** and **CODESYS**: the root is the **selected device** (logical controller / platform preset, e.g. ESP32-S3). Child nodes are **structured configuration**, not a raw file dump:
+A dedicated NanoPLC **Tree View** («**Project**», activity bar), similar to **TIA Portal** and **CODESYS**: the root is the **device** (logical controller / platform preset, e.g. ESP32-S3). Child nodes are **structured configuration**, not a raw file dump:
 
-| Tree node | Meaning (example) |
-|-----------|-------------------|
-| Device | Target platform, PLC project name, default scan period |
-| Modules / I/O | I/O map, «field» modules, binding to `io-map` and hardware |
-| Protocols & comms | Modbus (later), MQTT, online-debug service, bus settings as supported |
-| Programs (POU) | References to user FBD/ST objects; opens **graph** editor for FBD or **text** for ST (§3.1) |
+| Tree node | Meaning (example) | Opens / action |
+|-----------|-------------------|----------------|
+| **Device** | PLC project + board (`nanoplc.project.json`) | Expand hierarchy |
+| **Device configuration** | Scan period, `idf_target`, board preset | `nanoplc.project.json` |
+| **Modules** | Field I/O modules (GPIO, future racks) | — |
+| ↳ Module | e.g. Onboard GPIO (digital) | `src/io-map.json` |
+| **Drivers** | HAL / fieldbus stacks bound to modules | — |
+| ↳ Driver | e.g. `nanoplc_hal` → module | Driver info dialog (v0) |
+| **Communication** | Modbus, MQTT, online debug (later) | Placeholder until Phase 3+ |
+| **Application → Programs** | POUs (FBD / ST / LAD) | — |
+| ↳ Program | e.g. Main (FBD) | **FBD Diagram** custom editor or ST text |
+| **Firmware** | ESP-IDF tree path | Folder link |
 
-- The tree **serializes into** project markers (`nanoplc.project.json`, see §20 and future schema) and **mirrors** `src/` / `build/`, but users work primarily from the **logical** device root.
+Target hierarchy (ASCII):
+
+```
+Device (and_gate · esp32-s3)
+├── Device configuration
+├── Modules
+│   └── Onboard GPIO (digital)  → io-map.json
+├── Drivers
+│   └── GPIO process image (nanoplc_hal)
+├── Communication
+│   └── (none yet)
+├── Application
+│   └── Programs
+│       └── Main (FBD)          → FBD canvas editor
+└── Firmware (ESP-IDF)
+```
+
+**Workflow (v0):** **Add device** → pick from **device catalog** (I/O counts pre-filled) → optional **Add module** / **Add driver** → **Add program** → click program to edit. Context **+** on group rows; toolbar **+** for new device.
+
+- **Device catalog (v0):** [M5Stack StamPLC K141](https://shop.m5stack.com/products/m5stamp-plc-controller-with-m5stamps3) (8 DI / 4 relay via AW9523), generic ESP32-S3 GPIO template. Stored in `device.catalog_id`; `io-map.json` generated from template. Implementation: `packages/ir-schema/src/deviceCatalog.ts`, `DEVICE_CATALOG`.
+- **Per-project firmware tree (v0):** **Add device** scaffolds `firmware/` under the project from `nanoplc-vscode/firmware-template/` (synced from repo `firmware/` at extension compile). **Compile PLC program** auto-creates or **patches** an existing tree (e.g. IDF 5.3 `esp_task_wdt` → `esp_system`). Command **NanoPLC: Init firmware tree** for manual init.
+
+- The tree **serializes into** `nanoplc.project.json` (`modules[]`, `drivers[]`, `programs[]`) and **mirrors** `src/` / `build/`—users work from the logical device root, not loose files.
+- When `modules` / `drivers` are omitted on disk, the IDE shows **sensible defaults** (onboard GPIO + `nanoplc_hal`) via `resolveDeviceTree()` in `packages/ir-schema`.
 - Adding a «module» or «protocol» runs **templates** that create JSON entries and source files for version control as usual.
 
 ---
@@ -159,7 +188,9 @@ firmware/                          ← ESP-IDF app root
 ### 7.4. VS Code integration
 
 1. Recommend the official **Espressif ESP-IDF** extension for toolchain setup and `sdkconfig` ergonomics.
-2. NanoPLC **Build / Flash / Monitor** commands invoke `idf.py ...` under `firmware/` after user environment activation (**no hard-coded absolute IDF paths**—settings / Espressif compatibility).
+2. NanoPLC **Build / Flash / Monitor** commands invoke `idf.py ...` under the **project** `firmware_root` (fallback: workspace `nanoplc.firmwareRoot`) after user environment activation (**no hard-coded absolute IDF paths**—settings / Espressif compatibility).
+3. **Compile PLC program** pipeline (v0): FBD → `build/ir.json` + `build/generated.manifest.json` → C codegen into `{firmware_root}/components/nanoplc_generated/` → optional **`idf.py set-target`** (from `device.idf_target`) + **`idf.py build`** when `nanoplc.buildFirmwareOnCompile` is true (default). Build runs in terminal **NanoPLC Build**; manifest records `device`, `codegen`, and `firmware` status.
+4. Standalone user projects keep ESP-IDF under **`my-project/firmware/`**—run `idf.py` from that folder, not the PLC project root.
 
 ### 7.5. CI (when added)
 
@@ -200,17 +231,19 @@ Mitigate simulator/MCU mismatch: tight IR spec + tests + (later) shared C runtim
 
 ### Phase 0 — Foundation
 
-- [ ] Lock **IR** format choice (JSON/binary/DSL—record decision here).
-- [ ] Compile graph → **ordered step list** + cycle diagnostics.
-- [ ] Minimal block set and variable types.
+- [x] Lock **IR** format choice (**JSON** on disk — see `docs/IR_SCHEMA.md`).
+- [x] Compile graph → **ordered step list** + cycle diagnostics (`packages/ir-schema`, **NanoPLC: Compile PLC program**).
+- [ ] Minimal block set and variable types (partial: DI/DO/AND/OR/NOT/TON in compiler; semantics doc pending).
 
 ### Phase 1 — MVP «mini PLC IDE»
 
-1. [ ] IDE structure: **Device/project tree** (§3.2); **FBD** Node-RED–style canvas (§3.1); **ST** plain VS Code editor (§3.1).
-2. [ ] **JS/TS Virtual PLC** + **Run Simulation** (basic highlighting / live values).
-3. [ ] **C codegen** from IR → `firmware/components/nanoplc_generated/`.
-4. [ ] **ESP-IDF** skeleton under `firmware/` with working `idf.py build`; flash/monitor from IDE or documented CLI.
-5. [ ] **NanoPLC: Setup toolchain** wizard installs pinned ESP-IDF + tools into the OS user profile (**§48**); writes §18 keys; wires Build/Flash/Monitor behind activated env.
+1. [ ] IDE structure: **Device/project tree** (§3.2); **FBD** Node-RED–style canvas (§3.1); **ST** plain VS Code editor (§3.1). **Done so far:** TIA-style **Project tree** (device → modules → drivers → application → programs); **FBD canvas v0**; ST/LAD grammar-only text—see §49.
+2. [x] **JS/TS Virtual PLC** + **Run Simulation** (basic I/O panel, scan loop; flow highlighting todo).
+3. [x] **C codegen** from IR → `firmware/components/nanoplc_generated/` (auto on compile; CLI `tools/codegen`).
+4. [x] **ESP-IDF** skeleton under `firmware/` with working `idf.py build`; **manual** CLI flash/monitor. **Done:** NanoPLC IDE commands for Build/Flash/Monitor (§7.4); **per-project firmware scaffold** + **build on compile** (§7.4 item 3).
+5. [x] **NanoPLC: Setup toolchain** flow installs pinned ESP-IDF via bundled bootstrap (`install.bat` / `install.sh`); settings keys §18 wired. Optional on Windows: command **NanoPLC: Add ESP-IDF export to PowerShell profile(s)** for `export.ps1`. **Todo:** gated first-build onboarding (§48) and coupling to the Espressif extension (§48.4).
+
+_Current progress versus phases is summarized in §49._
 
 ### Phase 2 — Closer to metal
 
@@ -256,6 +289,8 @@ nanoplc/
 └── firmware/                    ← ESP-IDF app (see §7)
 ```
 
+**In repo today:** `docs/`, `nanoplc-vscode/`, `firmware/`, `packages/ir-schema/` (incl. `deviceCatalog.ts`), `tools/codegen/`, and `examples/` match the skeleton above. Extension ships **`nanoplc-vscode/firmware-template/`** (synced from `firmware/` at compile) for per-project scaffold.
+
 Rule: **`firmware/` must not depend on Node** during CI builds—only ESP-IDF and generated `*.c`/`*.h` committed or reproduced by codegen.
 
 ---
@@ -266,21 +301,12 @@ Goal: blinky/empty PLC task + successful `idf.py build` for `esp32s3` **without*
 
 Checklist:
 
-1. Create **`firmware/`** ESP-IDF project (root CMake + `main`).
-2. **`firmware/sdkconfig.defaults`** for ESP32-S3 (clocking, UART log, minimals).
-3. **`components/nanoplc_runtime/`** with public API such as  
-   `void nanoplc_runtime_init(uint32_t scan_period_ms);`  
-   and either `void nanoplc_runtime_scan_tick(void);` or an internal task calling stub `void nanoplc_generated_program_scan(void);`
-4. **`components/nanoplc_generated/`** stub:
-
-   ```c
-   void nanoplc_generated_program_scan(void) {
-       /* temporary empty or test counter */
-   }
-   ```
-
-5. **`main/app_main.c`** — optional UART init; create scan task or FreeRTOS tick source.
-6. Local verify: `idf.py set-target esp32s3`, `idf.py build`; flash + monitor optional.
+1. [x] Create **`firmware/`** ESP-IDF project (root CMake + `main`).
+2. [x] **`firmware/sdkconfig.defaults`** for ESP32-S3 (`CONFIG_IDF_TARGET="esp32s3"`, clocking, UART log, minimals).
+3. [x] **`components/nanoplc_runtime/`** with `nanoplc_runtime_init` plus internal scan task calling stub `nanoplc_generated_program_scan`; WDT and scan overrun logging (see §41).
+4. [x] **`components/nanoplc_generated/`** stub (`plc_program.c` placeholder matching §16).
+5. [x] **`main/app_main.c`** — firmware boot hook calling `nanoplc_runtime_init`.
+6. [x] Local verify: `idf.py set-target esp32s3`, `idf.py build` (maintainer workflow); flash + monitor optional. **Todo:** CI build job (§7.5).
 
 Afterward, codegen replaces the stub body and expands `SRCS` in `nanoplc_generated`.
 
@@ -363,12 +389,14 @@ Example keys (`nanoplc-vscode`, user or `.vscode/settings.json`):
 
 | Key | Meaning |
 |-----|---------|
-| `nanoplc.firmwareRoot` | Relative path from workspace root to `firmware/` |
+| `nanoplc.firmwareRoot` | Relative path from workspace root to `firmware/` (fallback when project has no `firmware_root`) |
+| `nanoplc.codegenOnCompile` | After compile, emit `plc_program.c` + `io_hal_config.c` into `nanoplc_generated` (default `true`) |
+| `nanoplc.buildFirmwareOnCompile` | After codegen, run `idf.py set-target` + `idf.py build` for project device (default `true`) |
 | `nanoplc-idf.idfSetupScript` | Path to `export.ps1` / `export.sh`, or omit if PATH already wired |
 | `nanoplc-idf.python` | Optional IDF-managed Python interpreter |
 | `nanoplc-idf.distRoot` | Toolchain install root (`~/.nanoplc`)—§48 |
 | `nanoplc-idf.idfRelease` | Pinned Espressif tag—align §40 |
-| `nanoplc.buildTarget` | e.g. `esp32s3` |
+| `nanoplc-idf.buildTarget` | Default ESP-IDF target when project omits `device.idf_target` (e.g. `esp32s3`) |
 
 Build/flash failures should log the active **`idf.py --version`** or env-derived IDF version line.
 
@@ -389,14 +417,17 @@ Unified **Nano PLC Project** markers (filename TBD):
 
 ```
 my-line/
-├── nanoplc.project.json          ← schema_version, board, scan defaults
+├── nanoplc.project.json          ← schema_version, board, scan, firmware_root, catalog_id
 ├── src/
 │   ├── main.fbd.json             ← tie format to IR pipeline
-│   └── io-map.json               ← optional symbolic pin map
+│   └── io-map.json               ← optional symbolic pin map (from device catalog or manual)
 ├── build/
-│   ├── ir.bin / ir.json          ← compiled IR artefacts
-│   └── generated.manifest.json   ← hashes, codegen + toolchain stamps
-└── firmware/                     ← symlink/submodule/monorepo path
+│   ├── ir.json                   ← compiled IR artefacts
+│   └── generated.manifest.json   ← ir_sha256, device, codegen + firmware build stamps
+└── firmware/                     ← per-project ESP-IDF app (scaffolded from extension template)
+    ├── CMakeLists.txt
+    ├── sdkconfig.defaults        ← includes CONFIG_IDF_TARGET="esp32s3"
+    └── components/nanoplc_generated/  ← codegen output
 ```
 
 - Separate **diagram sources** (diff-friendly JSON/binary + optional text peer) vs **derived IR from *Build PLC program***.
@@ -754,6 +785,62 @@ Expert users bypass wizards entirely by pointing NanoPLC JSON settings at vendor
 
 ---
 
+## 49. Implementation status (snapshot)
+
+Rolling record of **what exists in-tree** versus this roadmap—update after meaningful merges.
+
+_Last reviewed: 2026-05-21._
+
+### Repository and documentation
+
+| Item | Status |
+|------|--------|
+| Layout `docs/`, `nanoplc-vscode/`, `firmware/` | **Done** |
+| Root `README.md`, `LICENSE`, `.gitignore`, `.gitattributes`, `.editorconfig` | **Done** |
+| Git repository initialized on `main` | **Done** (`remote` target is organizational choice) |
+| `docs/BOOTSTRAP_TOOLCHAIN.md` | **Done** |
+| English authoring policy (`/.cursor/rules/`, §35) | **Done** |
+
+### VS Code extension (`nanoplc-vscode/`)
+
+| Item | Status |
+|------|--------|
+| ST / LAD / FBD language IDs, configuration, TextMate grammars | **Done** |
+| Settings `nanoplc.*` and `nanoplc-idf.*` (§18) | **Done** |
+| Command: **Setup ESP-IDF toolchain** (bundled `bootstrap-idf.ps1` / `.sh`) | **Done** |
+| Command: **Check idf.py in PATH** | **Done** |
+| Command: **Add ESP-IDF export to PowerShell profile(s)** (Windows) | **Done** |
+| FBD graph editor / `customEditor` canvas | **Partial (v0)** — `*.fbd.json` canvas: palette, pan/zoom, drag, wire, properties; green trace todo |
+| Device / project tree (§3.2) | **Partial (v0)** — TIA-style hierarchy; **device catalog** picker; Add device/module/driver/program |
+| `packages/ir-schema` + `docs/IR_SCHEMA.md` | **Done** |
+| Example `examples/and_gate` | **Done** |
+| TS **Virtual PLC** simulator (`PlcSimulator`, Run/Stop + I/O panel) | **Done** (v0; no green-trace yet) |
+| **C codegen** → `nanoplc_generated/plc_program.c` | **Done** (v0 schedule ops; auto on compile via `nanoplc.codegenOnCompile`) |
+| **`nanoplc_hal`** GPIO from `io-map.json` | **Done** (v0 digital I/O) |
+| **Device catalog** + scaffold on **Add device** | **Done** (v0 — StamPLC K141, generic ESP32-S3 GPIO) |
+| **Per-project `firmware/` scaffold** + template in VSIX | **Done** (`firmware-template/`, `scripts/sync-firmware-template.js`) |
+| **Compile → codegen → `idf.py build`** (project-aware) | **Done** (v0 — `device.idf_target`, `firmware_root`; setting `nanoplc.buildFirmwareOnCompile`) |
+| Command **Init firmware tree** | **Done** |
+| Tasks: `idf.py build` / `flash` / `monitor` (project `firmware_root`) | **Done** |
+
+### Firmware (`firmware/`)
+
+| Item | Status |
+|------|--------|
+| ESP-IDF app + `main` + `nanoplc_runtime` + `nanoplc_generated` (§7.2, §14) | **Done** |
+| `sdkconfig.defaults` for ESP32-S3 (`CONFIG_IDF_TARGET="esp32s3"`) | **Done** |
+| `nanoplc_runtime` CMake: `esp_system` (IDF 5.3; replaces removed `esp_task_wdt` component) | **Done** |
+| PLC scan FreeRTOS task, WDT, overrun logging, stub `nanoplc_generated_program_scan` | **Done** |
+| Maintainer workflow `idf.py set-target esp32s3` + `idf.py build` | **Done** (see `firmware/README.md`) |
+| **StamPLC AW9523 driver** (`m5_aw9523` in catalog; process-image I/O without direct GPIO) | **Todo** |
+| CI `idf.py build` (§7.5) | **Todo** |
+
+### Phase 0 / later phases
+
+Unchanged: IR format lock, ordered graph compile, TS simulator, C codegen, online debug, virtual I/O—see §11.
+
+---
+
 ## Document history
 
 - Initial roadmap derived from Virtual PLC ideation; anchored canonical firmware under **ESP-IDF**.
@@ -765,3 +852,13 @@ Expert users bypass wizards entirely by pointing NanoPLC JSON settings at vendor
 - Added section48 toolchain packaging strategy plus authored `BOOTSTRAP_TOOLCHAIN.md`; documented `nanoplc-idf.*` prefs.
 - Refined VS Code module blueprint (§3): TIA-inspired device explorer, layered FBD Node-RED editor expectations, ST text modality, clarified runtime section numbering.
 - **Translated entire roadmap prose to English (2026 maintenance pass)** whilst preserving numbering and anchors.
+- **§49 implementation snapshot** plus §11 / §14 checkmarks aligned to current repo (`firmware/` bootstrap shipped, extension grammars + toolchain commands; IDE build/flash and FBD canvas still open).
+- Extension: **Build / Flash / Monitor / Set target / Diagnose** commands invoking `idf.py` under `nanoplc.firmwareRoot` with ESP-IDF export activation (§7.4, §49).
+- **Phase 0:** JSON IR (`docs/IR_SCHEMA.md`), `packages/ir-schema` compiler, project scaffold + **Compile PLC program**, Device tree, `examples/and_gate`.
+- **Phase 1 (partial):** `PlcSimulator` scan runtime + **Run simulation** webview for virtual DI/DO.
+- **FBD editor v0:** `customEditor` for `*.fbd.json` — Node-RED–style canvas (palette, wires, layout); opens from Device tree program nodes.
+- **Project tree v0 (TIA/CODESYS-style):** device → configuration → modules → drivers → communication → application/programs; `modules[]` / `drivers[]` in `nanoplc.project.json`.
+- **Device catalog (v0):** QuickPick on **Add device**; StamPLC K141 (8 DI / 4 DO) + generic ESP32-S3; `deviceCatalog.ts`, auto `io-map.json`.
+- **Firmware per project (v0):** `firmware-template/` packaged in VSIX; scaffold on **Add device** / **Compile** / **Init firmware tree**; auto-patch legacy trees for IDF 5.3.
+- **Compile pipeline (v0):** `build/ir.json` + expanded `generated.manifest.json` (`device`, `codegen`, `firmware`); optional `idf.py build` for `device.idf_target`.
+- **IDF 5.3 fix:** `nanoplc_runtime` requires `esp_system` instead of removed `esp_task_wdt` component; default target in `sdkconfig.defaults`.

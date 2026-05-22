@@ -15,6 +15,9 @@ extern "C" {
 
 void nanoplc_generated_program_scan(void);
 
+/** Binds generated GPIO tables to nanoplc_hal (call before scan task starts). */
+void nanoplc_generated_io_bind(void);
+
 uint32_t nanoplc_generated_magic(void);
 
 #ifdef __cplusplus

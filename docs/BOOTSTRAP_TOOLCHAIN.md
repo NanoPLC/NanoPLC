@@ -20,6 +20,7 @@ After installing NanoPLC the user should be able to:
 |------------------------|-----------|
 | **NanoPLC: Setup ESP-IDF toolchain (clone + install)** | Opens **NanoPLC ESP-IDF setup** terminal and invokes `scripts/bootstrap-idf.ps1` (Windows) or `scripts/bootstrap-idf.sh` (Linux/macOS) from the bundled extension folder |
 | **NanoPLC: Check idf.py in PATH** | Spawns `idf.py --version`; if inactive environment, explains how to rerun Setup or set `nanoplc-idf.idfSetupScript` |
+| **NanoPLC: Build / Flash / Monitor / Flash+Monitor / Set target / Diagnose** | Sources `export.ps1` or `export.sh`, runs `idf.py` in `nanoplc.firmwareRoot` (default `firmware/`) |
 
 Scripts live inside **`nanoplc-vscode/scripts/`**: shallow `git clone --depth 1 --branch <tag>` followed by **`install.bat` / `./install.sh`** for the MCU target encoded in **`nanoplc-idf.buildTarget`**.
 

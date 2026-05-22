@@ -58,6 +58,8 @@ void nanoplc_runtime_init(uint32_t scan_period_ms)
         nanoplc_generated_magic()
     );
 
+    nanoplc_generated_io_bind();
+
     const BaseType_t status = xTaskCreatePinnedToCore(
         nanoplc_scan_task,
         "np_scan",
@@ -71,4 +73,9 @@ void nanoplc_runtime_init(uint32_t scan_period_ms)
     if (status != pdPASS) {
         ESP_LOGE(TAG, "failed to create plc scan task");
     }
+}
+
+uint32_t nanoplc_runtime_scan_period_ms(void)
+{
+    return s_scan_period_ms;
 }

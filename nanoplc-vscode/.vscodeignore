@@ -6,3 +6,7 @@ out/**/*.map
 tsconfig.json
 **/*.ts
 !out/**/*.js
+node_modules/**
+!packaged-deps/**
+!firmware-template/**
+vendor/**

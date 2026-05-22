@@ -1,0 +1,12 @@
+{
+  "name": "@nanoplc/codegen",
+  "version": "0.1.0",
+  "description": "NanoPLC IR to C firmware codegen CLI",
+  "license": "MIT",
+  "bin": {
+    "nanoplc-codegen": "./cli.js"
+  },
+  "dependencies": {
+    "@nanoplc/ir-schema": "file:../../packages/ir-schema"
+  }
+}

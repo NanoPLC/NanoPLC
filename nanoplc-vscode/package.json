@@ -32,7 +32,26 @@
     "onCommand:nanoplc.showTargetInfo",
     "onCommand:nanoplc.setupToolchain",
     "onCommand:nanoplc.checkToolchain",
-    "onCommand:nanoplc.addEspIdfToPowerShellProfile"
+    "onCommand:nanoplc.addEspIdfToPowerShellProfile",
+    "onCommand:nanoplc.firmwareBuild",
+    "onCommand:nanoplc.firmwareFlash",
+    "onCommand:nanoplc.firmwareMonitor",
+    "onCommand:nanoplc.firmwareFlashMonitor",
+    "onCommand:nanoplc.firmwareSetTarget",
+    "onCommand:nanoplc.firmwareDiagnose",
+    "onView:nanoplcProject",
+    "onCommand:nanoplc.createProject",
+    "onCommand:nanoplc.addDevice",
+    "onCommand:nanoplc.addModule",
+    "onCommand:nanoplc.addDriver",
+    "onCommand:nanoplc.addProgram",
+    "onCommand:nanoplc.compileProgram",
+    "onCommand:nanoplc.refreshProjectTree",
+    "onCommand:nanoplc.startSimulation",
+    "onCommand:nanoplc.stopSimulation",
+    "onCommand:nanoplc.codegenFirmware",
+    "onCustomEditor:nanoplc.fbdEditor",
+    "workspaceContains:**/nanoplc.project.json"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -90,6 +109,18 @@
         "path": "./syntaxes/iec-fbd.tmLanguage.json"
       }
     ],
+    "customEditors": [
+      {
+        "viewType": "nanoplc.fbdEditor",
+        "displayName": "FBD Diagram",
+        "selector": [
+          {
+            "filenamePattern": "*.fbd.json"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
     "commands": [
       {
         "command": "nanoplc.showTargetInfo",
@@ -106,8 +137,150 @@
       {
         "command": "nanoplc.addEspIdfToPowerShellProfile",
         "title": "NanoPLC: Add ESP-IDF export to PowerShell profile(s)"
+      },
+      {
+        "command": "nanoplc.firmwareBuild",
+        "title": "NanoPLC: Build firmware (idf.py build)",
+        "icon": "$(tools)"
+      },
+      {
+        "command": "nanoplc.firmwareFlash",
+        "title": "NanoPLC: Flash firmware (idf.py flash)",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "nanoplc.firmwareMonitor",
+        "title": "NanoPLC: Serial monitor (idf.py monitor)",
+        "icon": "$(output)"
+      },
+      {
+        "command": "nanoplc.firmwareFlashMonitor",
+        "title": "NanoPLC: Flash and monitor (idf.py flash monitor)"
+      },
+      {
+        "command": "nanoplc.firmwareSetTarget",
+        "title": "NanoPLC: Set ESP-IDF target (idf.py set-target)"
+      },
+      {
+        "command": "nanoplc.firmwareDiagnose",
+        "title": "NanoPLC: Diagnose firmware build environment"
+      },
+      {
+        "command": "nanoplc.initFirmwareTree",
+        "title": "NanoPLC: Init firmware tree (ESP-IDF skeleton)"
+      },
+      {
+        "command": "nanoplc.createProject",
+        "title": "NanoPLC: Add device",
+        "icon": "$(add)"
+      },
+      {
+        "command": "nanoplc.addDevice",
+        "title": "NanoPLC: Add device (alias)"
+      },
+      {
+        "command": "nanoplc.addModule",
+        "title": "NanoPLC: Add I/O module",
+        "icon": "$(add)"
+      },
+      {
+        "command": "nanoplc.addDriver",
+        "title": "NanoPLC: Add driver",
+        "icon": "$(add)"
+      },
+      {
+        "command": "nanoplc.addProgram",
+        "title": "NanoPLC: Add program (POU)",
+        "icon": "$(add)"
+      },
+      {
+        "command": "nanoplc.compileProgram",
+        "title": "NanoPLC: Compile PLC program",
+        "icon": "$(play)"
+      },
+      {
+        "command": "nanoplc.refreshProjectTree",
+        "title": "NanoPLC: Refresh project tree",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "nanoplc.startSimulation",
+        "title": "NanoPLC: Run simulation",
+        "icon": "$(debug-start)"
+      },
+      {
+        "command": "nanoplc.stopSimulation",
+        "title": "NanoPLC: Stop simulation",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "nanoplc.codegenFirmware",
+        "title": "NanoPLC: Generate firmware C from IR"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "nanoplc",
+          "title": "NanoPLC",
+          "icon": "$(circuit-board)"
+        }
+      ]
+    },
+    "views": {
+      "nanoplc": [
+        {
+          "id": "nanoplcProject",
+          "name": "Project"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "nanoplc.createProject",
+          "when": "view == nanoplcProject",
+          "group": "navigation@1"
+        },
+        {
+          "command": "nanoplc.refreshProjectTree",
+          "when": "view == nanoplcProject",
+          "group": "navigation"
+        },
+        {
+          "command": "nanoplc.compileProgram",
+          "when": "view == nanoplcProject",
+          "group": "navigation"
+        },
+        {
+          "command": "nanoplc.startSimulation",
+          "when": "view == nanoplcProject",
+          "group": "navigation"
+        },
+        {
+          "command": "nanoplc.stopSimulation",
+          "when": "view == nanoplcProject",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "nanoplc.addModule",
+          "when": "view == nanoplcProject && viewItem == modules_group",
+          "group": "inline@1"
+        },
+        {
+          "command": "nanoplc.addDriver",
+          "when": "view == nanoplcProject && viewItem == drivers_group",
+          "group": "inline@1"
+        },
+        {
+          "command": "nanoplc.addProgram",
+          "when": "view == nanoplcProject && viewItem == programs_group",
+          "group": "inline@1"
+        }
+      ]
+    },
     "configuration": [
       {
         "title": "NanoPLC",
@@ -129,6 +302,22 @@
             "type": "string",
             "default": "firmware",
             "description": "Relative path from the workspace root to the ESP-IDF application (see docs/VIRTUAL_PLC_PLAN.md)."
+          },
+          "nanoplc.simulatorRefreshMs": {
+            "type": "number",
+            "default": 50,
+            "minimum": 16,
+            "description": "Minimum interval (ms) for refreshing the simulator I/O panel during a run."
+          },
+          "nanoplc.codegenOnCompile": {
+            "type": "boolean",
+            "default": true,
+            "description": "After Compile PLC program, emit plc_program.c into the firmware nanoplc_generated component."
+          },
+          "nanoplc.buildFirmwareOnCompile": {
+            "type": "boolean",
+            "default": true,
+            "description": "After Compile PLC program (and codegen), run idf.py build for the project device (uses device.idf_target and project firmware_root)."
           }
         }
       },
@@ -161,12 +350,17 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "compile": "node scripts/sync-ir-schema.js && node scripts/sync-firmware-template.js && tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package:vsix": "vsce package --no-dependencies"
+  },
+  "dependencies": {
+    "@nanoplc/ir-schema": "file:../packages/ir-schema"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
     "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.2.1",
     "typescript": "^5.3.3"
   }
 }

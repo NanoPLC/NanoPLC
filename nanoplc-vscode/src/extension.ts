@@ -1,11 +1,22 @@
+import "./modulePaths";
 import * as vscode from "vscode";
 
+import * as fbdEditor from "./fbdEditor/fbdEditorProvider";
+import * as firmwareTasks from "./firmwareTasks";
 import * as powershellProfileEspIdf from "./powershellProfileEspIdf";
+import * as compileProgram from "./project/compileProgram";
+import * as deviceTreeCommands from "./project/deviceTreeCommands";
+import * as codegenFirmware from "./project/codegenFirmware";
+import * as scaffoldFirmware from "./project/scaffoldFirmware";
+import * as projectTree from "./project/projectTree";
+import * as simulatorPanel from "./simulator/simulatorPanel";
 import * as setupToolchain from "./setupToolchain";
 
 const CONFIG_SECTION = "nanoplc";
 
 export function activate(context: vscode.ExtensionContext): void {
+  scaffoldFirmware.setExtensionPathForFirmware(context.extensionPath);
+
   const disposable = vscode.commands.registerCommand("nanoplc.showTargetInfo", () => {
     const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
     const target = cfg.get<string>("targetChip", "esp32-s3");
@@ -17,11 +28,22 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 
   context.subscriptions.push(
+    compileProgram.registerCreateProject(),
     disposable,
     setupToolchain.registerSetupToolchain(context),
     setupToolchain.registerCheckToolchain(),
-    powershellProfileEspIdf.registerAddEspIdfToPowerShellProfile()
+    powershellProfileEspIdf.registerAddEspIdfToPowerShellProfile(),
+    firmwareTasks.registerFirmwareTasks(context),
+    compileProgram.registerCompileProgram(context),
+    projectTree.registerProjectTree(context),
+    deviceTreeCommands.registerDeviceTreeCommands(context),
+    simulatorPanel.registerSimulator(context),
+    codegenFirmware.registerCodegenFirmware(),
+    scaffoldFirmware.registerInitFirmwareTree(),
+    fbdEditor.registerFbdEditor(context)
   );
 }
 
-export function deactivate(): void {}
+export function deactivate(): void {
+  simulatorPanel.disposeSimulator();
+}

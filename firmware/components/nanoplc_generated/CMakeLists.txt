@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "plc_program.c"
+    SRCS "plc_program.c" "io_hal_config.c"
     INCLUDE_DIRS "include"
-    REQUIRES log
+    REQUIRES log nanoplc_hal
 )

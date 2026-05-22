@@ -15,6 +15,9 @@ extern "C" {
  */
 void nanoplc_runtime_init(uint32_t scan_period_ms);
 
+/** Current PLC scan period in milliseconds (for generated timer blocks). */
+uint32_t nanoplc_runtime_scan_period_ms(void);
+
 #ifdef __cplusplus
 }
 #endif
