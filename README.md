@@ -66,8 +66,13 @@ See [`firmware/README.md`](firmware/README.md).
 
 ## Build the extension
 
+`npm run compile` builds `@nanoplc/ir-schema` from `packages/ir-schema/` first — install its dependencies before compiling the extension:
+
 ```bash
-cd nanoplc-vscode
+cd packages/ir-schema
+npm install
+
+cd ../../nanoplc-vscode
 npm install
 npm run compile          # syncs ir-schema + firmware-template, compiles TypeScript
 npm run package:vsix     # nanoplc-iec-*.vsix
@@ -89,6 +94,7 @@ Install the VSIX → **Developer: Reload Window**. Details: [`nanoplc-vscode/REA
 
 ```bash
 cd packages/ir-schema
+npm install   # skip if already done for extension build
 npm test
 ```
 
