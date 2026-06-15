@@ -12,6 +12,8 @@
   let selectedWireIndex = null;
   /** @type {{ block: string, port: string } | null} */
   let wireFrom = null;
+  /** @type {{ from: { block: string, port: string, kind: "in"|"out" }, start: {x:number,y:number}, cursor: {x:number,y:number}, moved: boolean } | null} */
+  let wireDrag = null;
   let panX = 0;
   let panY = 0;
   let zoom = 1;
@@ -76,12 +78,8 @@
       const layout = doc?.layout?.[blockId];
       return { x: (layout?.x || 0) + (kind === "out" ? BLOCK_W : 0), y: (layout?.y || 0) + BLOCK_H / 2 };
     }
-    const blockEl = node.closest(".fbd-block");
-    const bx = parseFloat(blockEl.style.left) || 0;
-    const by = parseFloat(blockEl.style.top) || 0;
-    const offset = node.offsetTop + node.offsetHeight / 2;
-    const x = bx + (kind === "out" ? BLOCK_W : 0);
-    return { x, y: by + offset };
+    const rect = node.getBoundingClientRect();
+    return screenToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
   }
 
   function wirePath(from, to) {
@@ -97,19 +95,43 @@
     doc.wires.forEach((wire, index) => {
       const from = portCenter(wire.from.block, wire.from.port, "out");
       const to = portCenter(wire.to.block, wire.to.port, "in");
+      const d = wirePath(from, to);
+
+      const hit = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      hit.setAttribute("d", d);
+      hit.setAttribute("class", "wire-hit");
+      hit.dataset.index = String(index);
+      hit.style.pointerEvents = "stroke";
+      // Use mousedown + stopPropagation so the canvas pan handler doesn't
+      // re-render (and destroy) this element before click/dblclick fire.
+      hit.addEventListener("mousedown", (ev) => {
+        ev.stopPropagation();
+        selectWire(index);
+      });
+      hit.addEventListener("dblclick", (ev) => {
+        ev.stopPropagation();
+        deleteWire(index);
+      });
+
       const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      path.setAttribute("d", wirePath(from, to));
+      path.setAttribute("d", d);
       path.setAttribute("class", "wire-path" + (selectedWireIndex === index ? " selected" : ""));
       path.dataset.index = String(index);
-      path.style.pointerEvents = "stroke";
-      path.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        selectedWireIndex = index;
-        selectedBlockId = null;
-        renderAll();
-      });
+      path.style.pointerEvents = "none";
+
+      el.wires.appendChild(hit);
       el.wires.appendChild(path);
     });
+
+    if (wireDrag && wireDrag.moved) {
+      const a = wireDrag.from.kind === "out" ? wireDrag.start : wireDrag.cursor;
+      const b = wireDrag.from.kind === "out" ? wireDrag.cursor : wireDrag.start;
+      const preview = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      preview.setAttribute("d", wirePath(a, b));
+      preview.setAttribute("class", "wire-path wire-preview");
+      preview.style.pointerEvents = "none";
+      el.wires.appendChild(preview);
+    }
   }
 
   function blockSubtitle(block) {
@@ -157,6 +179,7 @@
         pin.className = "port port-in";
         pin.dataset.port = p;
         pin.title = p;
+        pin.addEventListener("mousedown", (ev) => startWireDrag(ev, block.id, p, "in"));
         pin.addEventListener("click", (ev) => onPortClick(ev, block.id, p, "in"));
         ports.appendChild(pin);
       }
@@ -165,6 +188,7 @@
         pin.className = "port port-out";
         pin.dataset.port = p;
         pin.title = p;
+        pin.addEventListener("mousedown", (ev) => startWireDrag(ev, block.id, p, "out"));
         pin.addEventListener("click", (ev) => onPortClick(ev, block.id, p, "out"));
         ports.appendChild(pin);
       }
@@ -223,28 +247,179 @@
       highlightWirePorts();
       return;
     }
-    const exists = doc.wires.some(
-      (w) =>
-        w.from.block === wireFrom.block &&
-        w.from.port === wireFrom.port &&
-        w.to.block === blockId &&
-        w.to.port === port
-    );
-    if (!exists) {
-      doc.wires.push({
-        from: { block: wireFrom.block, port: wireFrom.port },
-        to: { block: blockId, port: port },
-      });
-      commit();
-    }
+    addWire({ block: wireFrom.block, port: wireFrom.port }, { block: blockId, port });
     wireFrom = null;
     highlightWirePorts();
   }
 
+  function portInfoFromElement(node) {
+    if (!node || !node.classList || !node.classList.contains("port")) {
+      return null;
+    }
+    const blockEl = node.closest(".fbd-block");
+    if (!blockEl) {
+      return null;
+    }
+    return {
+      block: blockEl.dataset.id,
+      port: node.dataset.port,
+      kind: node.classList.contains("port-out") ? "out" : "in",
+    };
+  }
+
+  function setDragTargets(sourceKind) {
+    const targetSelector = sourceKind === "out" ? ".port-in" : ".port-out";
+    document.querySelectorAll(".port").forEach((p) => p.classList.remove("wire-drag-ok"));
+    document.querySelectorAll(targetSelector).forEach((p) => p.classList.add("wire-drag-ok"));
+  }
+
+  function clearDragTargets() {
+    document.querySelectorAll(".port").forEach((p) => p.classList.remove("wire-drag-ok"));
+  }
+
+  function addWire(out, inp) {
+    if (!doc || !out || !inp || out.block === inp.block) {
+      return false;
+    }
+    const alreadyConnected = doc.wires.some(
+      (w) =>
+        w.from.block === out.block &&
+        w.from.port === out.port &&
+        w.to.block === inp.block &&
+        w.to.port === inp.port
+    );
+    if (alreadyConnected) {
+      return false;
+    }
+    // Each input accepts only one connection: drop any wire already targeting it.
+    doc.wires = doc.wires.filter((w) => !(w.to.block === inp.block && w.to.port === inp.port));
+    doc.wires.push({
+      from: { block: out.block, port: out.port },
+      to: { block: inp.block, port: inp.port },
+    });
+    commit();
+    return true;
+  }
+
+  function tryCreateWire(a, b) {
+    if (!a || !b || a.block === b.block) {
+      return false;
+    }
+    if (a.kind === "out" && b.kind === "in") {
+      return addWire(a, b);
+    }
+    if (a.kind === "in" && b.kind === "out") {
+      return addWire(b, a);
+    }
+    return false;
+  }
+
+  function startWireDrag(ev, blockId, port, kind) {
+    if (ev.button !== 0) {
+      return;
+    }
+    ev.stopPropagation();
+    ev.preventDefault();
+    const start = portCenter(blockId, port, kind);
+    wireDrag = {
+      from: { block: blockId, port, kind },
+      start,
+      cursor: { ...start },
+      moved: false,
+    };
+    setDragTargets(kind);
+
+    function onMove(e) {
+      wireDrag.cursor = screenToWorld(e.clientX, e.clientY);
+      if (!wireDrag.moved) {
+        const dx = Math.abs(e.clientX - (ev.clientX || 0));
+        const dy = Math.abs(e.clientY - (ev.clientY || 0));
+        if (dx + dy > 3) {
+          wireDrag.moved = true;
+        }
+      }
+      renderWires();
+    }
+
+    function onUp(e) {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      const fromDrag = wireDrag.from;
+      const dragged = wireDrag.moved;
+      wireDrag = null;
+      clearDragTargets();
+      if (dragged) {
+        const target = portInfoFromElement(document.elementFromPoint(e.clientX, e.clientY));
+        const created = tryCreateWire(fromDrag, target);
+        // Suppress the trailing click so it doesn't start a click-to-connect.
+        wireFrom = null;
+        if (!created) {
+          renderWires();
+        }
+      }
+    }
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  function selectWire(index) {
+    selectedWireIndex = index;
+    selectedBlockId = null;
+    // Update selection styling in place; do NOT recreate wire elements,
+    // otherwise a following dblclick (for deletion) would target a stale node.
+    el.wires.querySelectorAll(".wire-path").forEach((p) => {
+      p.classList.toggle("selected", Number(p.dataset.index) === index);
+    });
+    renderBlocks();
+    renderProperties();
+  }
+
+  function deleteWire(index) {
+    if (!doc || index === null || index < 0 || index >= doc.wires.length) {
+      return;
+    }
+    doc.wires.splice(index, 1);
+    selectedWireIndex = null;
+    commit();
+  }
+
+  function renderWireProperties() {
+    const wire = doc.wires[selectedWireIndex];
+    if (!wire) {
+      selectedWireIndex = null;
+      el.properties.innerHTML = "<p class=\"muted\">Select a block or a connection</p>";
+      return;
+    }
+    const fromRow = document.createElement("div");
+    fromRow.className = "prop-row";
+    fromRow.innerHTML = `<label>From</label><input readonly value="${wire.from.block} . ${wire.from.port}" />`;
+    el.properties.appendChild(fromRow);
+
+    const toRow = document.createElement("div");
+    toRow.className = "prop-row";
+    toRow.innerHTML = `<label>To</label><input readonly value="${wire.to.block} . ${wire.to.port}" />`;
+    el.properties.appendChild(toRow);
+
+    const del = document.createElement("button");
+    del.className = "btn-danger";
+    del.textContent = "Delete connection";
+    del.addEventListener("click", () => deleteWire(selectedWireIndex));
+    el.properties.appendChild(del);
+  }
+
   function renderProperties() {
     el.properties.innerHTML = "";
-    if (!doc || !selectedBlockId) {
-      el.properties.innerHTML = "<p class=\"muted\">Select a block</p>";
+    if (!doc) {
+      el.properties.innerHTML = "<p class=\"muted\">Select a block or a connection</p>";
+      return;
+    }
+    if (selectedWireIndex !== null) {
+      renderWireProperties();
+      return;
+    }
+    if (!selectedBlockId) {
+      el.properties.innerHTML = "<p class=\"muted\">Select a block or a connection</p>";
       return;
     }
     const block = doc.blocks.find((b) => b.id === selectedBlockId);
@@ -465,9 +640,7 @@
   window.addEventListener("keydown", (ev) => {
     if (ev.key === "Delete" || ev.key === "Backspace") {
       if (selectedWireIndex !== null && doc) {
-        doc.wires.splice(selectedWireIndex, 1);
-        selectedWireIndex = null;
-        commit();
+        deleteWire(selectedWireIndex);
         ev.preventDefault();
       }
     }

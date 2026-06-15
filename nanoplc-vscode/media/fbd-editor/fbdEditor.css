@@ -131,10 +131,12 @@ body {
 #blocks {
   position: absolute;
   inset: 0;
+  pointer-events: none;
 }
 
 .fbd-block {
   position: absolute;
+  pointer-events: auto;
   width: 128px;
   min-height: 56px;
   border: 1px solid var(--vscode-focusBorder);
@@ -228,6 +230,15 @@ body {
   box-shadow: 0 0 0 3px var(--vscode-charts-green);
 }
 
+.port.wire-drag-ok {
+  box-shadow: 0 0 0 3px var(--vscode-charts-green);
+}
+
+.port.wire-drag-ok:hover {
+  background: var(--vscode-charts-green);
+  border-color: var(--vscode-charts-green);
+}
+
 .wire-path {
   fill: none;
   stroke: var(--vscode-charts-blue);
@@ -237,6 +248,20 @@ body {
 .wire-path.selected {
   stroke: var(--vscode-charts-yellow);
   stroke-width: 3;
+}
+
+.wire-path.wire-preview {
+  stroke: var(--vscode-charts-green);
+  stroke-width: 2;
+  stroke-dasharray: 5 4;
+  opacity: 0.85;
+}
+
+.wire-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 12;
+  cursor: pointer;
 }
 
 .prop-row {

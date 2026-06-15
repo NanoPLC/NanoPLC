@@ -810,7 +810,7 @@ _Last reviewed: 2026-05-21._
 | Command: **Setup ESP-IDF toolchain** (bundled `bootstrap-idf.ps1` / `.sh`) | **Done** |
 | Command: **Check idf.py in PATH** | **Done** |
 | Command: **Add ESP-IDF export to PowerShell profile(s)** (Windows) | **Done** |
-| FBD graph editor / `customEditor` canvas | **Partial (v0)** — `*.fbd.json` canvas: palette, pan/zoom, drag, wire, properties; green trace todo |
+| FBD graph editor / `customEditor` canvas | **Partial (v0)** — `*.fbd.json` canvas: palette, pan/zoom, drag blocks, properties; **wiring** by drag-to-connect or click output→input (one wire per input, output fan-out); **delete wire** via click + Delete, dblclick, or properties button; green trace todo |
 | Device / project tree (§3.2) | **Partial (v0)** — TIA-style hierarchy; **device catalog** picker; Add device/module/driver/program |
 | `packages/ir-schema` + `docs/IR_SCHEMA.md` | **Done** |
 | Example `examples/and_gate` | **Done** |
@@ -857,6 +857,7 @@ Unchanged: IR format lock, ordered graph compile, TS simulator, C codegen, onlin
 - **Phase 0:** JSON IR (`docs/IR_SCHEMA.md`), `packages/ir-schema` compiler, project scaffold + **Compile PLC program**, Device tree, `examples/and_gate`.
 - **Phase 1 (partial):** `PlcSimulator` scan runtime + **Run simulation** webview for virtual DI/DO.
 - **FBD editor v0:** `customEditor` for `*.fbd.json` — Node-RED–style canvas (palette, wires, layout); opens from Device tree program nodes.
+- **FBD wiring UX pass:** drag-to-connect (mousedown port → drag → release on compatible port) alongside click output→input; inputs accept a single wire (new connection replaces old), outputs fan out freely; wire selection/deletion fixed (click + Delete/Backspace, double-click, or **Delete connection** in properties).
 - **Project tree v0 (TIA/CODESYS-style):** device → configuration → modules → drivers → communication → application/programs; `modules[]` / `drivers[]` in `nanoplc.project.json`.
 - **Device catalog (v0):** QuickPick on **Add device**; StamPLC K141 (8 DI / 4 DO) + generic ESP32-S3; `deviceCatalog.ts`, auto `io-map.json`.
 - **Firmware per project (v0):** `firmware-template/` packaged in VSIX; scaffold on **Add device** / **Compile** / **Init firmware tree**; auto-patch legacy trees for IDF 5.3.

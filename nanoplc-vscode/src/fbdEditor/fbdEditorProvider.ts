@@ -140,7 +140,7 @@ export class FbdEditorProvider implements vscode.CustomTextEditorProvider {
 <body>
   <div id="toolbar">
     <span id="doc-title">FBD</span>
-    <span id="wire-hint" class="hint hidden">Click an output port, then an input port</span>
+    <span id="wire-hint" class="hint hidden">Drag from one port to another to connect (or click output then input)</span>
     <span id="parse-error" class="error hidden"></span>
   </div>
   <div id="workspace">
