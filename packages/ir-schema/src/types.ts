@@ -5,7 +5,16 @@ import {
   PROJECT_SCHEMA_VERSION,
 } from "./constants";
 
-export type PlcPrimitiveType = "BOOL" | "INT" | "REAL";
+export type PlcPrimitiveType = "BOOL" | "INT" | "DINT" | "UINT" | "WORD" | "REAL";
+
+export const PLC_PRIMITIVE_TYPES: readonly PlcPrimitiveType[] = [
+  "BOOL",
+  "INT",
+  "DINT",
+  "UINT",
+  "WORD",
+  "REAL",
+];
 
 export interface NanoPlcProgramRef {
   id: string;
@@ -110,7 +119,8 @@ export type ScheduleOp =
   | "or"
   | "not"
   | "move"
-  | "ton";
+  | "ton"
+  | "const";
 
 export interface ScheduleStep {
   step: number;
@@ -124,6 +134,10 @@ export interface ScheduleStep {
   /** Block instance id for FB ops (e.g. TON). */
   block_id?: string;
   pt_ms?: number;
+  /** Literal value for `const` ops. */
+  value?: boolean | number;
+  /** PLC type of the `const` literal / destination. */
+  value_type?: PlcPrimitiveType;
 }
 
 export interface PlcIr {

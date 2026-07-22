@@ -461,11 +461,12 @@ Enough for drills + golden regressions:
 
 | Block | Purpose |
 |-------|---------|
-| I/O coupling (BOOL) | map to process image |
+| I/O coupling (BOOL) | map to process image via `params.channel` + device catalog / `io-map` |
 | AND, OR, NOT | Boolean logic |
+| CONST | Typed literal (`BOOL`, `INT`, `DINT`, `UINT`, `WORD`, `REAL`) |
 | RS / SR latch (optional v0.1) | persistent state |
 | TON, TOF | timers with PT/ET/Q |
-| MOVE (INT/REAL) | when MVP exposes analog-ish types |
+| MOVE (INT/REAL) | when MVP exposes analog-ish consumers for CONST |
 | INT GT/EQ compare | sequencing |
 
 Document semantics in **`docs/BLOCK_SEMANTICS.md`**: evaluation order, PT=0 edge cases, cold-start behaviour.
@@ -476,11 +477,12 @@ Document semantics in **`docs/BLOCK_SEMANTICS.md`**: evaluation order, PT=0 edge
 
 Surface Problems entries:
 
-- **Structural:** dangling wire, incompatible types, unresolved variable refs.
+- **Structural:** dangling wire, incompatible types (`NP-0305`), unresolved variable refs.
+- **I/O binding:** DI/DO missing channel (`NP-0214`), duplicate channel (`NP-0212`) or symbol (`NP-0213`); invalid CONST (`NP-0215`).
 - **Ordering:** combinational-feedback cycles without deliberate trigger semantics—either forbid or insert implicit delay with warning (product rule).
 - **Resource:** FB instance/IR size caps on low-end targets.
 
-Stable codes (**`NP-xxxx`**) anchor docs; diagnostics link graph node IDs.
+Stable codes (**`NP-xxxx`**) anchor docs; diagnostics link graph node IDs. **Build firmware** and **Compile** both run these checks (Build refuses `idf.py build` on failure).
 
 ---
 
@@ -810,8 +812,8 @@ _Last reviewed: 2026-05-21._
 | Command: **Setup ESP-IDF toolchain** (bundled `bootstrap-idf.ps1` / `.sh`) | **Done** |
 | Command: **Check idf.py in PATH** | **Done** |
 | Command: **Add ESP-IDF export to PowerShell profile(s)** (Windows) | **Done** |
-| FBD graph editor / `customEditor` canvas | **Partial (v0)** — `*.fbd.json` canvas: palette, pan/zoom, drag blocks, properties; **wiring** by drag-to-connect or click output→input (one wire per input, output fan-out); **delete wire** via click + Delete, dblclick, or properties button; green trace todo |
-| Device / project tree (§3.2) | **Partial (v0)** — TIA-style hierarchy; **device catalog** picker; Add device/module/driver/program |
+| FBD graph editor / `customEditor` canvas | **Partial (v0)** — palette, pan/zoom, wiring, properties; **DI/DO channel** picker from device profile (unique channels); **CONST** typed literals; toolbar **Compile** / **Build firmware**; green trace todo |
+| Device / project tree (§3.2) | **Partial (v0)** — TIA-style hierarchy; **device catalog** picker (`di_count` / `do_count`, optional `di_channels` / `do_channels`); Add device/module/driver/program |
 | `packages/ir-schema` + `docs/IR_SCHEMA.md` | **Done** |
 | Example `examples/and_gate` | **Done** |
 | TS **Virtual PLC** simulator (`PlcSimulator`, Run/Stop + I/O panel) | **Done** (v0; no green-trace yet) |
@@ -819,7 +821,7 @@ _Last reviewed: 2026-05-21._
 | **`nanoplc_hal`** GPIO from `io-map.json` | **Done** (v0 digital I/O) |
 | **Device catalog** + scaffold on **Add device** | **Done** (v0 — StamPLC K141, generic ESP32-S3 GPIO) |
 | **Per-project `firmware/` scaffold** + template in VSIX | **Done** (`firmware-template/`, `scripts/sync-firmware-template.js`) |
-| **Compile → codegen → `idf.py build`** (project-aware) | **Done** (v0 — `device.idf_target`, `firmware_root`; setting `nanoplc.buildFirmwareOnCompile`) |
+| **Compile → codegen → `idf.py build`** (project-aware) | **Done** (v0 — compile validates I/O channels; **Build firmware** compiles then always runs idf; setting `nanoplc.buildFirmwareOnCompile` for Compile-only path) |
 | Command **Init firmware tree** | **Done** |
 | Tasks: `idf.py build` / `flash` / `monitor` (project `firmware_root`) | **Done** |
 
@@ -862,4 +864,5 @@ Unchanged: IR format lock, ordered graph compile, TS simulator, C codegen, onlin
 - **Device catalog (v0):** QuickPick on **Add device**; StamPLC K141 (8 DI / 4 DO) + generic ESP32-S3; `deviceCatalog.ts`, auto `io-map.json`.
 - **Firmware per project (v0):** `firmware-template/` packaged in VSIX; scaffold on **Add device** / **Compile** / **Init firmware tree**; auto-patch legacy trees for IDF 5.3.
 - **Compile pipeline (v0):** `build/ir.json` + expanded `generated.manifest.json` (`device`, `codegen`, `firmware`); optional `idf.py build` for `device.idf_target`.
+- **FBD I/O + CONST + build gate:** DI/DO `params.channel` from device profile (unique); typed **CONST**; compile/`Build firmware` require channels (`NP-0214`); editor toolbar Compile / Build firmware.
 - **IDF 5.3 fix:** `nanoplc_runtime` requires `esp_system` instead of removed `esp_task_wdt` component; default target in `sdkconfig.defaults`.

@@ -72,6 +72,19 @@ export function executeScheduleStep(state: SimState, step: ScheduleStep, dt_ms: 
     case "ton":
       executeTon(state, step, dt_ms);
       break;
+    case "const": {
+      if (!step.out) {
+        break;
+      }
+      const t = step.value_type ?? "BOOL";
+      if (t === "BOOL") {
+        writeBool(state, step.out, step.value === true || step.value === 1);
+      } else {
+        const n = typeof step.value === "number" ? step.value : Number(step.value);
+        state.vars[step.out] = Number.isFinite(n) ? n : 0;
+      }
+      break;
+    }
     case "move":
       if (step.out && step.in1) {
         state.vars[step.out] = state.vars[step.in1] ?? false;

@@ -24,6 +24,10 @@ import { tryCodegenAfterCompile } from "./codegenFirmware";
 import { pickProjectLocation, readJsonFile, writeJsonFile } from "./projectPaths";
 import { ensureProjectFirmwareTree } from "./scaffoldFirmware";
 import { tryBuildFirmwareAfterCompile } from "./projectFirmware";
+import {
+  flushPendingFbdDocumentEdits,
+  saveDirtyFbdDocuments,
+} from "../fbdEditor/fbdEditorProvider";
 
 const DIAG_COLLECTION = "nanoplc";
 let diagnosticCollection: vscode.DiagnosticCollection | undefined;
@@ -74,13 +78,114 @@ function sha256(text: string): string {
   return crypto.createHash("sha256").update(text, "utf8").digest("hex");
 }
 
-export async function compileActiveProject(): Promise<void> {
-  const location = await pickProjectLocation();
-  if (!location) {
-    return;
+export interface ProjectFbdGateResult {
+  ok: boolean;
+  unboundIoBlocks: string[];
+  diagnostics: CompileDiagnostic[];
+}
+
+function loadFbdRaw(rootPath: string, relSource: string): unknown {
+  const abs = path.normalize(path.join(rootPath, relSource));
+  const open = vscode.workspace.textDocuments.find(
+    (d) => path.normalize(d.uri.fsPath) === abs
+  );
+  if (open) {
+    return JSON.parse(open.getText()) as unknown;
+  }
+  return readJsonFile<unknown>(abs);
+}
+
+/**
+ * Validate the project's FBD (including DI/DO channel bindings) without writing IR.
+ * Publishes Problems diagnostics. Used by Compile and by Build firmware.
+ */
+export function gateProjectFbd(rootPath: string, project: NanoPlcProject): ProjectFbdGateResult {
+  const program = project.programs[0];
+  if (!program) {
+    return {
+      ok: false,
+      unboundIoBlocks: [],
+      diagnostics: [{ code: "NP-0105", message: "No program defined in project.", severity: "error" }],
+    };
   }
 
-  const rootPath = location.rootPath;
+  if (program.language !== "fbd") {
+    return {
+      ok: false,
+      unboundIoBlocks: [],
+      diagnostics: [
+        {
+          code: "NP-0205",
+          message: `Compile supports FBD JSON only (${program.language} not yet implemented).`,
+          severity: "error",
+        },
+      ],
+    };
+  }
+
+  let fbdRaw: unknown;
+  try {
+    fbdRaw = loadFbdRaw(rootPath, program.source);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return {
+      ok: false,
+      unboundIoBlocks: [],
+      diagnostics: [{ code: "NP-0200", message: `Cannot read FBD source: ${msg}`, severity: "error" }],
+    };
+  }
+
+  let ioMap: IoMap | undefined;
+  const ioMapPath = path.join(rootPath, "src", "io-map.json");
+  if (fs.existsSync(ioMapPath)) {
+    try {
+      ioMap = readJsonFile<IoMap>(ioMapPath);
+    } catch {
+      ioMap = undefined;
+    }
+  }
+
+  const result = compileFbdToIr(project, fbdRaw, program.id, ioMap);
+  publishDiagnostics(rootPath, program.source, result.diagnostics);
+
+  return {
+    ok: result.ok,
+    unboundIoBlocks: result.diagnostics
+      .filter((d) => d.code === "NP-0214")
+      .map((d) => d.block_id ?? "?"),
+    diagnostics: result.diagnostics,
+  };
+}
+
+export function showFbdGateFailure(gate: ProjectFbdGateResult, action = "compile"): void {
+  if (gate.unboundIoBlocks.length > 0) {
+    void vscode.window.showErrorMessage(
+      `NanoPLC: Assign an I/O channel to every Digital In / Digital Out before ${action} (${gate.unboundIoBlocks.join(", ")}). See Problems.`
+    );
+    return;
+  }
+  const first = gate.diagnostics.find((d) => d.severity === "error");
+  void vscode.window.showErrorMessage(
+    first
+      ? `NanoPLC: ${first.message} See Problems.`
+      : "NanoPLC: PLC program is invalid. See Problems."
+  );
+}
+
+export interface CompileProjectOptions {
+  /** When false, never start idf.py build. When true, always try. Default: respect setting. */
+  buildFirmware?: boolean;
+  /** Suppress the success toast (caller shows its own). */
+  quietSuccess?: boolean;
+}
+
+/** Flush editor buffers, then compile the project at `rootPath`. Returns false on failure. */
+export async function compileProjectAt(
+  rootPath: string,
+  options: CompileProjectOptions = {}
+): Promise<boolean> {
+  await saveDirtyFbdDocuments(rootPath);
+
   const projectPath = path.join(rootPath, "nanoplc.project.json");
   let projectRaw: unknown;
   try {
@@ -88,37 +193,36 @@ export async function compileActiveProject(): Promise<void> {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     void vscode.window.showErrorMessage(`NanoPLC: Cannot read project file: ${msg}`);
-    return;
+    return false;
   }
 
   const { project, diagnostics: projectDiags } = validateProject(projectRaw);
   if (!project) {
     publishDiagnostics(rootPath, "nanoplc.project.json", projectDiags);
     void vscode.window.showErrorMessage("NanoPLC: Project validation failed. See Problems.");
-    return;
+    return false;
   }
 
   const program = project.programs[0];
   if (!program) {
     void vscode.window.showErrorMessage("NanoPLC: No program defined in project.");
-    return;
+    return false;
   }
 
   if (program.language !== "fbd") {
     void vscode.window.showWarningMessage(
       `NanoPLC: Compile supports FBD JSON only in this release (${program.language} not yet implemented).`
     );
-    return;
+    return false;
   }
 
-  const fbdPath = path.join(rootPath, program.source);
   let fbdRaw: unknown;
   try {
-    fbdRaw = readJsonFile<unknown>(fbdPath);
+    fbdRaw = loadFbdRaw(rootPath, program.source);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     void vscode.window.showErrorMessage(`NanoPLC: Cannot read FBD source: ${msg}`);
-    return;
+    return false;
   }
 
   let ioMap: IoMap | undefined;
@@ -136,8 +240,17 @@ export async function compileActiveProject(): Promise<void> {
   publishDiagnostics(rootPath, program.source, [...projectDiags, ...result.diagnostics]);
 
   if (!result.ok || !result.ir) {
-    void vscode.window.showErrorMessage("NanoPLC: Compile failed. See Problems.");
-    return;
+    showFbdGateFailure(
+      {
+        ok: false,
+        unboundIoBlocks: result.diagnostics
+          .filter((d) => d.code === "NP-0214")
+          .map((d) => d.block_id ?? "?"),
+        diagnostics: result.diagnostics,
+      },
+      options.buildFirmware === false ? "build" : "compile"
+    );
+    return false;
   }
 
   const buildDir = path.join(rootPath, "build");
@@ -154,7 +267,14 @@ export async function compileActiveProject(): Promise<void> {
   const codegenResult = tryCodegenAfterCompile(rootPath, project, result.ir, irSha256);
 
   let firmwareBuildResult: ReturnType<typeof tryBuildFirmwareAfterCompile> | undefined;
-  if (codegenResult.ok) {
+  const shouldBuildFirmware =
+    options.buildFirmware === true
+      ? true
+      : options.buildFirmware === false
+        ? false
+        : codegenResult.ok;
+  if (shouldBuildFirmware && codegenResult.ok) {
+    // When buildFirmware is undefined, tryBuildFirmwareAfterCompile still respects the setting.
     firmwareBuildResult = tryBuildFirmwareAfterCompile(rootPath, project);
   }
 
@@ -191,18 +311,31 @@ export async function compileActiveProject(): Promise<void> {
 
   writeJsonFile(path.join(buildDir, "generated.manifest.json"), manifest);
 
-  let detail = `Compiled "${program.name}" → build/ir.json (${result.ir.schedule.length} steps).`;
-  if (codegenResult.ok && codegenResult.message.startsWith("Generated")) {
-    detail += ` ${codegenResult.message}`;
-  } else if (!codegenResult.ok) {
-    detail += ` Codegen: ${codegenResult.message}`;
+  if (!options.quietSuccess) {
+    let detail = `Compiled "${program.name}" → build/ir.json (${result.ir.schedule.length} steps).`;
+    if (codegenResult.ok && codegenResult.message.startsWith("Generated")) {
+      detail += ` ${codegenResult.message}`;
+    } else if (!codegenResult.ok) {
+      detail += ` Codegen: ${codegenResult.message}`;
+    }
+    if (firmwareBuildResult?.ok && firmwareBuildResult.message.startsWith("Building")) {
+      detail += ` ${firmwareBuildResult.message}`;
+    } else if (firmwareBuildResult && !firmwareBuildResult.ok) {
+      detail += ` Firmware: ${firmwareBuildResult.message}`;
+    }
+    void vscode.window.showInformationMessage(`NanoPLC: ${detail}`);
   }
-  if (firmwareBuildResult?.ok && firmwareBuildResult.message.startsWith("Building")) {
-    detail += ` ${firmwareBuildResult.message}`;
-  } else if (firmwareBuildResult && !firmwareBuildResult.ok) {
-    detail += ` Firmware: ${firmwareBuildResult.message}`;
+
+  return true;
+}
+
+export async function compileActiveProject(options?: CompileProjectOptions): Promise<boolean> {
+  await flushPendingFbdDocumentEdits();
+  const location = await pickProjectLocation();
+  if (!location) {
+    return false;
   }
-  void vscode.window.showInformationMessage(`NanoPLC: ${detail}`);
+  return compileProjectAt(location.rootPath, options);
 }
 
 export async function scaffoldProject(
@@ -242,8 +375,8 @@ export async function scaffoldProject(
     schema_version: FBD_SOURCE_SCHEMA_VERSION,
     name: "Main",
     blocks: [
-      { id: "di1", type: "DI", params: { symbol: diSymbol } },
-      { id: "do1", type: "DO", params: { symbol: doSymbol } },
+      { id: "di1", type: "DI", params: { channel: 1, symbol: diSymbol } },
+      { id: "do1", type: "DO", params: { channel: 1, symbol: doSymbol } },
     ],
     wires: [{ from: { block: "di1", port: "Q" }, to: { block: "do1", port: "IN" } }],
   };

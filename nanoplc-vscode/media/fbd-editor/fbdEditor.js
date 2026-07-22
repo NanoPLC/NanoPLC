@@ -8,6 +8,8 @@
 
   /** @type {import('@nanoplc/ir-schema').FbdSource & { layout: Record<string, {x:number,y:number}> } | null} */
   let doc = null;
+  /** @type {{ di: Array<{channel:number,symbol:string,index:number}>, do: Array<{channel:number,symbol:string,index:number}>, source: string }} */
+  let ioProfile = { di: [], do: [], source: "none" };
   let selectedBlockId = null;
   let selectedWireIndex = null;
   /** @type {{ block: string, port: string } | null} */
@@ -29,6 +31,8 @@
     blocks: document.getElementById("blocks"),
     wires: document.getElementById("wires"),
     properties: document.getElementById("properties-body"),
+    btnCompile: document.getElementById("btn-compile"),
+    btnBuild: document.getElementById("btn-build"),
   };
 
   function findDef(type) {
@@ -57,6 +61,64 @@
       }
     }
     return params;
+  }
+
+  function ioChannelsForType(type) {
+    const t = String(type).toUpperCase();
+    if (t === "DI") {
+      return ioProfile.di || [];
+    }
+    if (t === "DO") {
+      return ioProfile.do || [];
+    }
+    return [];
+  }
+
+  function usedChannels(type, exceptBlockId) {
+    const t = String(type).toUpperCase();
+    const channels = ioChannelsForType(t);
+    const used = new Set();
+    for (const block of doc?.blocks || []) {
+      if (block.type.toUpperCase() !== t || block.id === exceptBlockId) {
+        continue;
+      }
+      const ch = Number(block.params?.channel);
+      if (Number.isFinite(ch) && ch >= 1) {
+        used.add(ch);
+        continue;
+      }
+      const symbol = String(block.params?.symbol || "");
+      const bySymbol = channels.find((c) => c.symbol === symbol);
+      if (bySymbol) {
+        used.add(bySymbol.channel);
+      }
+    }
+    return used;
+  }
+
+  function firstFreeChannel(type) {
+    const channels = ioChannelsForType(type);
+    const used = usedChannels(type, null);
+    for (const entry of channels) {
+      if (!used.has(entry.channel)) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  function paramsForNewIoBlock(type) {
+    const params = defaultParams(type);
+    const free = firstFreeChannel(type);
+    if (free) {
+      params.channel = free.channel;
+      params.symbol = free.symbol;
+    }
+    return params;
+  }
+
+  function channelLabel(entry) {
+    return `${entry.channel} — ${entry.symbol}`;
   }
 
   function applyTransform() {
@@ -136,6 +198,15 @@
 
   function blockSubtitle(block) {
     const def = findDef(block.type);
+    const t = String(block.type).toUpperCase();
+    if ((t === "DI" || t === "DO") && block.params?.channel !== undefined && block.params?.channel !== "") {
+      const ch = Number(block.params.channel);
+      const symbol = block.params?.symbol ? String(block.params.symbol) : `${t}_${ch}`;
+      return Number.isFinite(ch) ? `${ch} · ${symbol}` : symbol;
+    }
+    if (t === "CONST") {
+      return formatConstSubtitle(block.params);
+    }
     if (block.params?.symbol) {
       return String(block.params.symbol);
     }
@@ -143,6 +214,54 @@
       return `PT ${block.params.pt_ms} ms`;
     }
     return def?.label || block.type;
+  }
+
+  function constDataType(params) {
+    const raw = String(params?.data_type ?? params?.type ?? "BOOL").toUpperCase();
+    const allowed = ["BOOL", "INT", "DINT", "UINT", "WORD", "REAL"];
+    return allowed.includes(raw) ? raw : "BOOL";
+  }
+
+  function formatConstSubtitle(params) {
+    const dataType = constDataType(params);
+    if (dataType === "BOOL") {
+      return `${dataType} · ${formatBoolConst(params?.value)}`;
+    }
+    const n = Number(params?.value);
+    const shown = Number.isFinite(n) ? String(params?.value ?? 0) : "0";
+    return `${dataType} · ${shown}`;
+  }
+
+  function formatBoolConst(value) {
+    if (typeof value === "boolean") {
+      return value ? "TRUE" : "FALSE";
+    }
+    if (typeof value === "number") {
+      return value !== 0 ? "TRUE" : "FALSE";
+    }
+    if (typeof value === "string") {
+      const s = value.trim().toLowerCase();
+      return s === "true" || s === "1" || s === "on" ? "TRUE" : "FALSE";
+    }
+    return "FALSE";
+  }
+
+  function parseBoolParam(value) {
+    if (typeof value === "boolean") {
+      return value;
+    }
+    if (typeof value === "number") {
+      return value !== 0;
+    }
+    if (typeof value === "string") {
+      const s = value.trim().toLowerCase();
+      return s === "true" || s === "1" || s === "on";
+    }
+    return false;
+  }
+
+  function defaultValueForType(dataType) {
+    return dataType === "BOOL" ? false : 0;
   }
 
   function renderBlocks() {
@@ -408,6 +527,176 @@
     el.properties.appendChild(del);
   }
 
+  function renderChannelParam(block, paramDef) {
+    const row = document.createElement("div");
+    row.className = "prop-row";
+    const label = document.createElement("label");
+    label.textContent = paramDef.label;
+    const select = document.createElement("select");
+    const channels = ioChannelsForType(block.type);
+    const used = usedChannels(block.type, block.id);
+    let current = Number(block.params?.channel);
+    if (!Number.isFinite(current) || current < 1) {
+      const bySymbol = channels.find((c) => c.symbol === String(block.params?.symbol || ""));
+      if (bySymbol) {
+        current = bySymbol.channel;
+      }
+    }
+
+    const empty = document.createElement("option");
+    empty.value = "";
+    empty.textContent = channels.length ? "Select channel…" : "No device channels";
+    select.appendChild(empty);
+
+    if (channels.length === 0) {
+      select.disabled = true;
+    }
+
+    for (const entry of channels) {
+      const opt = document.createElement("option");
+      opt.value = String(entry.channel);
+      opt.textContent = channelLabel(entry);
+      const taken = used.has(entry.channel);
+      if (taken && entry.channel !== current) {
+        opt.disabled = true;
+        opt.textContent += " (in use)";
+      }
+      if (entry.channel === current) {
+        opt.selected = true;
+      }
+      select.appendChild(opt);
+    }
+
+    if (Number.isFinite(current) && current >= 1 && !channels.some((c) => c.channel === current)) {
+      const orphan = document.createElement("option");
+      orphan.value = String(current);
+      orphan.textContent = `${current} — ${block.params?.symbol || "unmapped"} (not on device)`;
+      orphan.selected = true;
+      select.appendChild(orphan);
+    }
+
+    select.addEventListener("change", () => {
+      block.params = block.params || {};
+      if (!select.value) {
+        delete block.params.channel;
+        delete block.params.symbol;
+      } else {
+        const channel = Number(select.value);
+        const entry = channels.find((c) => c.channel === channel);
+        block.params.channel = channel;
+        block.params.symbol = entry?.symbol || `${String(block.type).toUpperCase()}_${channel}`;
+      }
+      commit();
+    });
+
+    row.appendChild(label);
+    row.appendChild(select);
+
+    if (ioProfile.source === "none") {
+      const hint = document.createElement("p");
+      hint.className = "prop-hint";
+      hint.textContent = "Open a NanoPLC project with a device catalog or io-map.json to list channels.";
+      row.appendChild(hint);
+    } else if (channels.length > 0 && used.size >= channels.length && !(Number.isFinite(current) && current >= 1)) {
+      const hint = document.createElement("p");
+      hint.className = "prop-hint";
+      hint.textContent = "All channels of this type are already assigned.";
+      row.appendChild(hint);
+    }
+
+    el.properties.appendChild(row);
+  }
+
+  function renderPlcTypeParam(block, paramDef) {
+    const row = document.createElement("div");
+    row.className = "prop-row";
+    const label = document.createElement("label");
+    label.textContent = paramDef.label;
+    const select = document.createElement("select");
+    const current = constDataType(block.params);
+    for (const t of ["BOOL", "INT", "DINT", "UINT", "WORD", "REAL"]) {
+      const opt = document.createElement("option");
+      opt.value = t;
+      opt.textContent = t;
+      if (t === current) {
+        opt.selected = true;
+      }
+      select.appendChild(opt);
+    }
+    select.addEventListener("change", () => {
+      block.params = block.params || {};
+      const nextType = select.value;
+      const prevType = constDataType(block.params);
+      block.params.data_type = nextType;
+      if (prevType === "BOOL" && nextType !== "BOOL") {
+        block.params.value = 0;
+      } else if (prevType !== "BOOL" && nextType === "BOOL") {
+        block.params.value = false;
+      } else if (block.params.value === undefined) {
+        block.params.value = defaultValueForType(nextType);
+      }
+      commit();
+    });
+    row.appendChild(label);
+    row.appendChild(select);
+    el.properties.appendChild(row);
+  }
+
+  function renderConstValueParam(block, paramDef) {
+    const row = document.createElement("div");
+    row.className = "prop-row";
+    const label = document.createElement("label");
+    label.textContent = paramDef.label;
+    row.appendChild(label);
+
+    const dataType = constDataType(block.params);
+    if (dataType === "BOOL") {
+      const select = document.createElement("select");
+      const current = parseBoolParam(block.params?.value ?? false);
+      for (const [val, text] of [
+        [false, "FALSE"],
+        [true, "TRUE"],
+      ]) {
+        const opt = document.createElement("option");
+        opt.value = val ? "true" : "false";
+        opt.textContent = text;
+        if (val === current) {
+          opt.selected = true;
+        }
+        select.appendChild(opt);
+      }
+      select.addEventListener("change", () => {
+        block.params = block.params || {};
+        block.params.value = select.value === "true";
+        commit();
+      });
+      row.appendChild(select);
+    } else {
+      const input = document.createElement("input");
+      input.type = "number";
+      if (dataType === "REAL") {
+        input.step = "any";
+      } else {
+        input.step = "1";
+      }
+      const n = Number(block.params?.value);
+      input.value = Number.isFinite(n) ? String(block.params.value) : "0";
+      input.addEventListener("change", () => {
+        block.params = block.params || {};
+        const parsed = Number(input.value);
+        block.params.value = Number.isFinite(parsed)
+          ? dataType === "REAL"
+            ? parsed
+            : Math.trunc(parsed)
+          : 0;
+        commit();
+      });
+      row.appendChild(input);
+    }
+
+    el.properties.appendChild(row);
+  }
+
   function renderProperties() {
     el.properties.innerHTML = "";
     if (!doc) {
@@ -433,21 +722,65 @@
     el.properties.appendChild(idRow);
 
     for (const p of def?.params || []) {
+      if (p.type === "channel") {
+        renderChannelParam(block, p);
+        continue;
+      }
+      if (p.type === "plc_type") {
+        renderPlcTypeParam(block, p);
+        continue;
+      }
+      if (p.type === "const_value") {
+        renderConstValueParam(block, p);
+        continue;
+      }
       const row = document.createElement("div");
       row.className = "prop-row";
       const label = document.createElement("label");
       label.textContent = p.label;
-      const input = document.createElement("input");
-      input.type = p.type === "number" ? "number" : "text";
-      input.value = block.params?.[p.key] ?? p.default ?? "";
-      input.addEventListener("change", () => {
-        block.params = block.params || {};
-        block.params[p.key] = p.type === "number" ? Number(input.value) : input.value;
-        commit();
-      });
       row.appendChild(label);
-      row.appendChild(input);
+
+      if (p.type === "boolean") {
+        const select = document.createElement("select");
+        const current = parseBoolParam(block.params?.[p.key] ?? p.default);
+        for (const [val, text] of [
+          [false, "FALSE"],
+          [true, "TRUE"],
+        ]) {
+          const opt = document.createElement("option");
+          opt.value = val ? "true" : "false";
+          opt.textContent = text;
+          if (val === current) {
+            opt.selected = true;
+          }
+          select.appendChild(opt);
+        }
+        select.addEventListener("change", () => {
+          block.params = block.params || {};
+          block.params[p.key] = select.value === "true";
+          commit();
+        });
+        row.appendChild(select);
+      } else {
+        const input = document.createElement("input");
+        input.type = p.type === "number" ? "number" : "text";
+        input.value = block.params?.[p.key] ?? p.default ?? "";
+        input.addEventListener("change", () => {
+          block.params = block.params || {};
+          block.params[p.key] = p.type === "number" ? Number(input.value) : input.value;
+          commit();
+        });
+        row.appendChild(input);
+      }
       el.properties.appendChild(row);
+    }
+
+    const t = String(block.type).toUpperCase();
+    if ((t === "DI" || t === "DO") && block.params?.symbol) {
+      const symRow = document.createElement("div");
+      symRow.className = "prop-row";
+      symRow.innerHTML = `<label>Symbol</label><input readonly value="${String(block.params.symbol)}" />`;
+      el.properties.appendChild(symRow);
     }
 
     const del = document.createElement("button");
@@ -504,7 +837,9 @@
       x: (-panX + el.viewport.clientWidth / 2) / zoom - BLOCK_W / 2,
       y: (-panY + el.viewport.clientHeight / 2) / zoom - BLOCK_H / 2,
     };
-    doc.blocks.push({ id, type: type.toUpperCase(), params: defaultParams(type) });
+    const upper = String(type).toUpperCase();
+    const params = upper === "DI" || upper === "DO" ? paramsForNewIoBlock(type) : defaultParams(type);
+    doc.blocks.push({ id, type: upper, params });
     doc.layout[id] = { x: Math.round(center.x), y: Math.round(center.y) };
     selectedBlockId = id;
     selectedWireIndex = null;
@@ -584,8 +919,21 @@
         const mx = ev.clientX - rect.left;
         const my = ev.clientY - rect.top;
         const worldBefore = screenToWorld(ev.clientX, ev.clientY);
-        const factor = ev.deltaY > 0 ? 0.9 : 1.1;
-        zoom = Math.min(2.5, Math.max(0.35, zoom * factor));
+
+        // Normalize to pixels (mouse notch ≈ 100px; trackpad sends small deltas).
+        let dy = ev.deltaY;
+        if (ev.deltaMode === 1) {
+          dy *= 16;
+        } else if (ev.deltaMode === 2) {
+          dy *= rect.height;
+        }
+        // ~4–5% per mouse notch; smooth for trackpad pixel deltas.
+        const factor = Math.exp(-dy * 0.00045);
+        const next = Math.min(2.5, Math.max(0.35, zoom * factor));
+        if (next === zoom) {
+          return;
+        }
+        zoom = next;
         panX = mx - worldBefore.x * zoom;
         panY = my - worldBefore.y * zoom;
         applyTransform();
@@ -627,6 +975,21 @@
     window.__nanoplcPendingKey = sentKey;
   }
 
+  function requestHostAction(type) {
+    if (doc) {
+      commit();
+    }
+    vscode.postMessage({ type });
+  }
+
+  if (el.btnCompile) {
+    el.btnCompile.addEventListener("click", () => requestHostAction("compile"));
+  }
+  if (el.btnBuild) {
+    el.btnBuild.classList.add("primary");
+    el.btnBuild.addEventListener("click", () => requestHostAction("buildFirmware"));
+  }
+
   function renderAll() {
     if (!doc) {
       return;
@@ -663,6 +1026,12 @@
       doc = incoming;
       el.parseError.classList.add("hidden");
       renderAll();
+    } else if (msg.type === "ioProfile") {
+      ioProfile = msg.payload || { di: [], do: [], source: "none" };
+      if (doc) {
+        renderProperties();
+        renderBlocks();
+      }
     } else if (msg.type === "parseError") {
       el.parseError.textContent = msg.message;
       el.parseError.classList.remove("hidden");

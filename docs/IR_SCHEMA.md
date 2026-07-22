@@ -64,7 +64,13 @@ Optional **`layout`** map (`block id → { x, y }`) stores canvas positions for 
 
 Open `*.fbd.json` in VS Code with the **FBD Diagram** custom editor (palette, pan/zoom, wiring, properties).
 
-Supported block types (v0): `DI`, `DO`, `AND`, `OR`, `NOT`, `TON`.
+Supported block types (v0): `DI`, `DO`, `AND`, `OR`, `NOT`, `TON`, `CONST`.
+
+For `DI` / `DO`, set `params.channel` (1-based hardware channel from the device catalog / `io-map`) and `params.symbol` (usually `DI_n` / `DO_n`). The FBD editor lists free channels from the project device profile and prevents selecting the same channel twice. Compile diagnostics: `NP-0212` (duplicate channel), `NP-0213` (duplicate symbol), `NP-0214` (missing channel assignment).
+
+`CONST` is a typed literal (`params.data_type` + `params.value`) with output `Q`. Supported types: `BOOL`, `INT`, `DINT`, `UINT`, `WORD`, `REAL`. The type and value are shown on the block. Wiring a non-BOOL constant into a BOOL input (logic / DO / TON) produces `NP-0305`. Invalid values produce `NP-0215`.
+
+Device I/O counts live in `DeviceIoProfile` (`di_count` / `do_count`); optional `di_channels` / `do_channels` arrays override the default `1..N` numbering for modular devices.
 
 ## Compiled IR (`build/ir.json`)
 
@@ -95,7 +101,7 @@ Types, validation, and `compileFbdToIr()` live in **`packages/ir-schema/`**. The
 
 ### Simulator
 
-`PlcSimulator` loads compiled `PlcIr` and runs the ordered `schedule` each scan. Supported ops: `read_di`, `write_do`, `and`, `or`, `not`, `ton`, `move`.
+`PlcSimulator` loads compiled `PlcIr` and runs the ordered `schedule` each scan. Supported ops: `read_di`, `write_do`, `and`, `or`, `not`, `ton`, `move`, `const`.
 
 ### C codegen
 

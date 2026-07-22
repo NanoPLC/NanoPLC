@@ -1,9 +1,21 @@
+import * as fs from "fs";
+import * as path from "path";
 import * as vscode from "vscode";
 
-import { FBD_SOURCE_SCHEMA_VERSION, type FbdSource } from "@nanoplc/ir-schema";
+import {
+  FBD_SOURCE_SCHEMA_VERSION,
+  findDeviceCatalogEntry,
+  listDeviceIoChannels,
+  listIoChannelsFromMap,
+  type DeviceIoChannel,
+  type FbdSource,
+  type IoMap,
+  type NanoPlcProject,
+} from "@nanoplc/ir-schema";
 
 import { FBD_BLOCK_CATALOG } from "./blockCatalog";
 import { ensureLayout } from "./layout";
+import { PROJECT_FILENAME, readJsonFile } from "../project/projectPaths";
 
 const VIEW_TYPE = "nanoplc.fbdEditor";
 
@@ -14,6 +26,22 @@ interface WebviewDocumentPayload {
   wires: FbdSource["wires"];
   layout: Record<string, { x: number; y: number }>;
 }
+
+export interface EditorIoProfilePayload {
+  di: DeviceIoChannel[];
+  do: DeviceIoChannel[];
+  source: "catalog" | "io-map" | "none";
+}
+
+interface PendingFbdEdit {
+  timer: ReturnType<typeof setTimeout>;
+  apply: () => Promise<void>;
+  resolve: () => void;
+  reject: (err: unknown) => void;
+}
+
+/** Debounced webview→document edits awaiting flush (keyed by document URI). */
+const pendingFbdEdits = new Map<string, PendingFbdEdit>();
 
 function parseDocument(text: string): FbdSource {
   return JSON.parse(text) as FbdSource;
@@ -42,9 +70,90 @@ function toPayload(fbd: FbdSource): WebviewDocumentPayload {
   };
 }
 
-export class FbdEditorProvider implements vscode.CustomTextEditorProvider {
-  private readonly pendingUpdates = new WeakMap<vscode.TextDocument, ReturnType<typeof setTimeout>>();
+function findProjectRootForDocument(documentUri: vscode.Uri): string | undefined {
+  let dir = path.dirname(documentUri.fsPath);
+  const workspaceRoot = vscode.workspace.getWorkspaceFolder(documentUri)?.uri.fsPath;
+  while (true) {
+    if (fs.existsSync(path.join(dir, PROJECT_FILENAME))) {
+      return dir;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) {
+      break;
+    }
+    if (workspaceRoot && !dir.startsWith(workspaceRoot)) {
+      break;
+    }
+    dir = parent;
+  }
+  return undefined;
+}
 
+function loadEditorIoProfile(projectRoot: string): EditorIoProfilePayload {
+  try {
+    const project = readJsonFile<NanoPlcProject>(path.join(projectRoot, PROJECT_FILENAME));
+    const catalogId = project.device?.catalog_id;
+    if (catalogId) {
+      const entry = findDeviceCatalogEntry(catalogId);
+      if (entry) {
+        const channels = listDeviceIoChannels(entry.io);
+        return { di: channels.di, do: channels.do, source: "catalog" };
+      }
+    }
+  } catch {
+    // Fall through to io-map.
+  }
+
+  try {
+    const ioMapPath = path.join(projectRoot, "src", "io-map.json");
+    if (fs.existsSync(ioMapPath)) {
+      const ioMap = readJsonFile<IoMap>(ioMapPath);
+      const channels = listIoChannelsFromMap(ioMap);
+      return { di: channels.di, do: channels.do, source: "io-map" };
+    }
+  } catch {
+    // Ignore.
+  }
+
+  return { di: [], do: [], source: "none" };
+}
+
+/** Apply any debounced FBD webview edits so compile/build see the latest graph. */
+export async function flushPendingFbdDocumentEdits(): Promise<void> {
+  const pending = [...pendingFbdEdits.entries()];
+  pendingFbdEdits.clear();
+  await Promise.all(
+    pending.map(async ([, entry]) => {
+      clearTimeout(entry.timer);
+      try {
+        await entry.apply();
+        entry.resolve();
+      } catch (err) {
+        entry.reject(err);
+      }
+    })
+  );
+}
+
+/** Save dirty `*.fbd.json` documents (optionally under a project root). */
+export async function saveDirtyFbdDocuments(projectRoot?: string): Promise<void> {
+  await flushPendingFbdDocumentEdits();
+  const dirty = vscode.workspace.textDocuments.filter((doc) => {
+    if (!doc.isDirty) {
+      return false;
+    }
+    if (!doc.uri.fsPath.endsWith(".fbd.json")) {
+      return false;
+    }
+    if (projectRoot && !doc.uri.fsPath.startsWith(projectRoot)) {
+      return false;
+    }
+    return true;
+  });
+  await Promise.all(dirty.map((doc) => doc.save()));
+}
+
+export class FbdEditorProvider implements vscode.CustomTextEditorProvider {
   constructor(private readonly context: vscode.ExtensionContext) {}
 
   public static register(context: vscode.ExtensionContext): vscode.Disposable {
@@ -67,10 +176,19 @@ export class FbdEditorProvider implements vscode.CustomTextEditorProvider {
 
     let applyingExternalEdit = false;
 
+    const postIoProfile = (): void => {
+      const root = findProjectRootForDocument(document.uri);
+      const profile = root
+        ? loadEditorIoProfile(root)
+        : ({ di: [], do: [], source: "none" } satisfies EditorIoProfilePayload);
+      webviewPanel.webview.postMessage({ type: "ioProfile", payload: profile });
+    };
+
     const postDocument = (): void => {
       try {
         const fbd = parseDocument(document.getText());
         webviewPanel.webview.postMessage({ type: "document", payload: toPayload(fbd) });
+        postIoProfile();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         webviewPanel.webview.postMessage({ type: "parseError", message });
@@ -87,33 +205,69 @@ export class FbdEditorProvider implements vscode.CustomTextEditorProvider {
       postDocument();
     });
 
-    webviewPanel.webview.onDidReceiveMessage(async (message: { type: string; payload?: WebviewDocumentPayload }) => {
-      if (message.type !== "update" || !message.payload) {
-        return;
+    const projectRoot = findProjectRootForDocument(document.uri);
+    const watchers: vscode.Disposable[] = [];
+    if (projectRoot) {
+      const projectWatcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(projectRoot, `{${PROJECT_FILENAME},src/io-map.json}`)
+      );
+      const refreshProfile = (): void => postIoProfile();
+      projectWatcher.onDidChange(refreshProfile);
+      projectWatcher.onDidCreate(refreshProfile);
+      projectWatcher.onDidDelete(refreshProfile);
+      watchers.push(projectWatcher);
+    }
+
+    webviewPanel.webview.onDidReceiveMessage(
+      async (message: { type: string; payload?: WebviewDocumentPayload }) => {
+        if (message.type === "update" && message.payload) {
+          applyingExternalEdit = true;
+          try {
+            const fbd: FbdSource = {
+              schema_version: FBD_SOURCE_SCHEMA_VERSION,
+              name: message.payload.name,
+              blocks: message.payload.blocks,
+              wires: message.payload.wires,
+              layout: message.payload.layout,
+            };
+            await this.queueTextDocumentUpdate(document, serializeDocument(fbd));
+          } finally {
+            applyingExternalEdit = false;
+          }
+          return;
+        }
+
+        if (message.type === "compile" || message.type === "buildFirmware") {
+          applyingExternalEdit = true;
+          try {
+            await flushPendingFbdDocumentEdits();
+            if (document.isDirty) {
+              await document.save();
+            }
+          } finally {
+            applyingExternalEdit = false;
+          }
+          const command =
+            message.type === "compile" ? "nanoplc.compileProgram" : "nanoplc.firmwareBuild";
+          await vscode.commands.executeCommand(command);
+        }
       }
-      applyingExternalEdit = true;
-      try {
-        const fbd: FbdSource = {
-          schema_version: FBD_SOURCE_SCHEMA_VERSION,
-          name: message.payload.name,
-          blocks: message.payload.blocks,
-          wires: message.payload.wires,
-          layout: message.payload.layout,
-        };
-        await this.updateTextDocument(document, serializeDocument(fbd));
-      } finally {
-        applyingExternalEdit = false;
-      }
-    });
+    );
 
     webviewPanel.webview.html = this.getHtml(webviewPanel.webview);
     postDocument();
 
     webviewPanel.onDidDispose(() => {
       changeDocumentSubscription.dispose();
-      const pending = this.pendingUpdates.get(document);
+      for (const w of watchers) {
+        w.dispose();
+      }
+      const key = document.uri.toString();
+      const pending = pendingFbdEdits.get(key);
       if (pending) {
-        clearTimeout(pending);
+        clearTimeout(pending.timer);
+        pendingFbdEdits.delete(key);
+        pending.resolve();
       }
     });
   }
@@ -140,6 +294,10 @@ export class FbdEditorProvider implements vscode.CustomTextEditorProvider {
 <body>
   <div id="toolbar">
     <span id="doc-title">FBD</span>
+    <div id="toolbar-actions">
+      <button type="button" id="btn-compile" class="toolbar-btn">Compile</button>
+      <button type="button" id="btn-build" class="toolbar-btn">Build firmware</button>
+    </div>
     <span id="wire-hint" class="hint hidden">Drag from one port to another to connect (or click output then input)</span>
     <span id="parse-error" class="error hidden"></span>
   </div>
@@ -166,17 +324,18 @@ export class FbdEditorProvider implements vscode.CustomTextEditorProvider {
 </html>`;
   }
 
-  private async updateTextDocument(document: vscode.TextDocument, text: string): Promise<void> {
-    const pending = this.pendingUpdates.get(document);
-    if (pending) {
-      clearTimeout(pending);
+  private queueTextDocumentUpdate(document: vscode.TextDocument, text: string): Promise<void> {
+    const key = document.uri.toString();
+    const existing = pendingFbdEdits.get(key);
+    if (existing) {
+      clearTimeout(existing.timer);
+      existing.resolve();
+      pendingFbdEdits.delete(key);
     }
 
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(async () => {
-        this.pendingUpdates.delete(document);
+      const apply = async (): Promise<void> => {
         if (document.getText() === text) {
-          resolve();
           return;
         }
         const edit = new vscode.WorkspaceEdit();
@@ -185,18 +344,25 @@ export class FbdEditorProvider implements vscode.CustomTextEditorProvider {
           document.positionAt(document.getText().length)
         );
         edit.replace(document.uri, fullRange, text);
-        try {
-          const ok = await vscode.workspace.applyEdit(edit);
-          if (!ok) {
-            reject(new Error("Failed to apply FBD edit"));
-            return;
-          }
-          resolve();
-        } catch (err) {
-          reject(err);
+        const ok = await vscode.workspace.applyEdit(edit);
+        if (!ok) {
+          throw new Error("Failed to apply FBD edit");
         }
+      };
+
+      const timer = setTimeout(() => {
+        const entry = pendingFbdEdits.get(key);
+        if (!entry) {
+          return;
+        }
+        pendingFbdEdits.delete(key);
+        void entry
+          .apply()
+          .then(() => entry.resolve())
+          .catch((err) => entry.reject(err));
       }, 200);
-      this.pendingUpdates.set(document, timeout);
+
+      pendingFbdEdits.set(key, { timer, apply, resolve, reject });
     });
   }
 }

@@ -1,10 +1,14 @@
 /** Block metadata for the FBD canvas editor (mirrors compiler-supported types). */
 
+export const CONST_DATA_TYPES = ["BOOL", "INT", "DINT", "UINT", "WORD", "REAL"] as const;
+export type ConstDataType = (typeof CONST_DATA_TYPES)[number];
+
 export interface FbdBlockParamDef {
   key: string;
   label: string;
-  type?: "string" | "number";
-  default?: string | number;
+  /** `channel` renders as a device I/O channel dropdown in the editor. */
+  type?: "string" | "number" | "channel" | "boolean" | "plc_type" | "const_value";
+  default?: string | number | boolean;
 }
 
 export interface FbdBlockDef {
@@ -23,7 +27,7 @@ export const FBD_BLOCK_CATALOG: FbdBlockDef[] = [
     category: "io",
     inputs: [],
     outputs: ["Q"],
-    params: [{ key: "symbol", label: "Symbol", type: "string", default: "DI_New" }],
+    params: [{ key: "channel", label: "Input channel", type: "channel" }],
   },
   {
     type: "DO",
@@ -31,11 +35,22 @@ export const FBD_BLOCK_CATALOG: FbdBlockDef[] = [
     category: "io",
     inputs: ["IN"],
     outputs: [],
-    params: [{ key: "symbol", label: "Symbol", type: "string", default: "DO_New" }],
+    params: [{ key: "channel", label: "Output channel", type: "channel" }],
   },
   { type: "AND", label: "AND", category: "logic", inputs: ["IN1", "IN2"], outputs: ["Q"] },
   { type: "OR", label: "OR", category: "logic", inputs: ["IN1", "IN2"], outputs: ["Q"] },
   { type: "NOT", label: "NOT", category: "logic", inputs: ["IN"], outputs: ["Q"] },
+  {
+    type: "CONST",
+    label: "Constant",
+    category: "logic",
+    inputs: [],
+    outputs: ["Q"],
+    params: [
+      { key: "data_type", label: "Type", type: "plc_type", default: "BOOL" },
+      { key: "value", label: "Value", type: "const_value", default: false },
+    ],
+  },
   {
     type: "TON",
     label: "TON",

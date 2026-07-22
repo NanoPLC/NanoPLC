@@ -17,10 +17,10 @@ const andFbd: FbdSource = {
   schema_version: FBD_SOURCE_SCHEMA_VERSION,
   name: "Main",
   blocks: [
-    { id: "di_start", type: "DI", params: { symbol: "DI_Start" } },
-    { id: "di_en", type: "DI", params: { symbol: "DI_Enable" } },
+    { id: "di_start", type: "DI", params: { channel: 1, symbol: "DI_Start" } },
+    { id: "di_en", type: "DI", params: { channel: 2, symbol: "DI_Enable" } },
     { id: "and1", type: "AND" },
-    { id: "do_lamp", type: "DO", params: { symbol: "DO_Lamp" } },
+    { id: "do_lamp", type: "DO", params: { channel: 1, symbol: "DO_Lamp" } },
   ],
   wires: [
     { from: { block: "di_start", port: "Q" }, to: { block: "and1", port: "IN1" } },
@@ -57,4 +57,111 @@ test("compileFbdToIr detects cycle", () => {
   const result = compileFbdToIr(baseProject, cyclic, "main");
   assert.equal(result.ok, false);
   assert.ok(result.diagnostics.some((d) => d.code === "NP-0400"));
+});
+
+test("compileFbdToIr rejects duplicate DI channels", () => {
+  const fbd: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [
+      { id: "di1", type: "DI", params: { channel: 1, symbol: "DI_1" } },
+      { id: "di2", type: "DI", params: { channel: 1, symbol: "DI_1b" } },
+      { id: "do1", type: "DO", params: { channel: 1, symbol: "DO_1" } },
+    ],
+    wires: [{ from: { block: "di1", port: "Q" }, to: { block: "do1", port: "IN" } }],
+  };
+  const result = compileFbdToIr(baseProject, fbd, "main");
+  assert.equal(result.ok, false);
+  assert.ok(result.diagnostics.some((d) => d.code === "NP-0212"));
+});
+
+test("compileFbdToIr maps channel to process-image index", () => {
+  const fbd: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [
+      { id: "di1", type: "DI", params: { channel: 3, symbol: "DI_3" } },
+      { id: "do1", type: "DO", params: { channel: 2, symbol: "DO_2" } },
+    ],
+    wires: [{ from: { block: "di1", port: "Q" }, to: { block: "do1", port: "IN" } }],
+  };
+  const result = compileFbdToIr(baseProject, fbd, "main");
+  assert.equal(result.ok, true);
+  assert.equal(result.ir?.io_image.di[0]?.index, 2);
+  assert.equal(result.ir?.io_image.do[0]?.index, 1);
+});
+
+test("compileFbdToIr rejects DI/DO without channel", () => {
+  const fbd: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [
+      { id: "di1", type: "DI", params: { symbol: "DI_1" } },
+      { id: "do1", type: "DO", params: { channel: 1, symbol: "DO_1" } },
+    ],
+    wires: [{ from: { block: "di1", port: "Q" }, to: { block: "do1", port: "IN" } }],
+  };
+  const result = compileFbdToIr(baseProject, fbd, "main");
+  assert.equal(result.ok, false);
+  assert.ok(result.diagnostics.some((d) => d.code === "NP-0214" && d.block_id === "di1"));
+});
+
+test("compileFbdToIr CONST feeds BOOL literal to DO", () => {
+  const fbd: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [
+      { id: "c1", type: "CONST", params: { data_type: "BOOL", value: true } },
+      { id: "do1", type: "DO", params: { channel: 1, symbol: "DO_1" } },
+    ],
+    wires: [{ from: { block: "c1", port: "Q" }, to: { block: "do1", port: "IN" } }],
+  };
+  const result = compileFbdToIr(baseProject, fbd, "main");
+  assert.equal(result.ok, true);
+  assert.equal(result.ir?.schedule[0]?.op, "const");
+  assert.equal(result.ir?.schedule[0]?.value, true);
+  assert.equal(result.ir?.schedule[0]?.value_type, "BOOL");
+  assert.equal(result.ir?.schedule[0]?.out, "__c1_Q");
+  assert.equal(result.ir?.schedule[1]?.in1, "__c1_Q");
+});
+
+test("compileFbdToIr CONST INT has typed variable", () => {
+  const fbd: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [{ id: "c1", type: "CONST", params: { data_type: "INT", value: 42 } }],
+    wires: [],
+  };
+  const result = compileFbdToIr(baseProject, fbd, "main");
+  assert.equal(result.ok, true);
+  assert.equal(result.ir?.schedule[0]?.value, 42);
+  assert.equal(result.ir?.schedule[0]?.value_type, "INT");
+  assert.equal(result.ir?.variables.find((v) => v.name === "__c1_Q")?.type, "INT");
+});
+
+test("compileFbdToIr rejects INT CONST wired to BOOL input", () => {
+  const fbd: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [
+      { id: "c1", type: "CONST", params: { data_type: "INT", value: 1 } },
+      { id: "do1", type: "DO", params: { channel: 1, symbol: "DO_1" } },
+    ],
+    wires: [{ from: { block: "c1", port: "Q" }, to: { block: "do1", port: "IN" } }],
+  };
+  const result = compileFbdToIr(baseProject, fbd, "main");
+  assert.equal(result.ok, false);
+  assert.ok(result.diagnostics.some((d) => d.code === "NP-0305"));
+});
+
+test("compileFbdToIr rejects WORD constant out of range", () => {
+  const fbd: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [{ id: "c1", type: "CONST", params: { data_type: "WORD", value: 70000 } }],
+    wires: [],
+  };
+  const result = compileFbdToIr(baseProject, fbd, "main");
+  assert.equal(result.ok, false);
+  assert.ok(result.diagnostics.some((d) => d.code === "NP-0215"));
 });

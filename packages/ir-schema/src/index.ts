@@ -31,6 +31,7 @@ export type {
   ScheduleOp,
   ScheduleStep,
 } from "./types";
+export { PLC_PRIMITIVE_TYPES } from "./types";
 export {
   DEVICE_CATALOG,
   GENERIC_ESP32_S3_GPIO,
@@ -38,9 +39,13 @@ export {
   buildIoMapFromCatalog,
   buildProjectDeviceFields,
   catalogLabel,
+  deviceDiChannels,
+  deviceDoChannels,
   findDeviceCatalogEntry,
+  listDeviceIoChannels,
+  listIoChannelsFromMap,
 } from "./deviceCatalog";
-export type { DeviceCatalogEntry, DeviceIoProfile } from "./deviceCatalog";
+export type { DeviceCatalogEntry, DeviceIoChannel, DeviceIoProfile } from "./deviceCatalog";
 export { resolveDeviceTree, defaultProjectModules, defaultProjectDrivers, DEFAULT_GPIO_MODULE, DEFAULT_HAL_DRIVER } from "./projectTreeDefaults";
 export type { ResolvedDeviceTree } from "./projectTreeDefaults";
 export { validateFbdSource, validateProject } from "./validate";

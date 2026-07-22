@@ -236,6 +236,18 @@
       ]
     },
     "menus": {
+      "editor/title": [
+        {
+          "command": "nanoplc.compileProgram",
+          "when": "activeCustomEditorId == nanoplc.fbdEditor",
+          "group": "navigation@1"
+        },
+        {
+          "command": "nanoplc.firmwareBuild",
+          "when": "activeCustomEditorId == nanoplc.fbdEditor",
+          "group": "navigation@2"
+        }
+      ],
       "view/title": [
         {
           "command": "nanoplc.createProject",
@@ -249,6 +261,11 @@
         },
         {
           "command": "nanoplc.compileProgram",
+          "when": "view == nanoplcProject",
+          "group": "navigation"
+        },
+        {
+          "command": "nanoplc.firmwareBuild",
           "when": "view == nanoplcProject",
           "group": "navigation"
         },

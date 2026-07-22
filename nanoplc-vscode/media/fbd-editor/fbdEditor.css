@@ -16,7 +16,7 @@ body {
 #toolbar {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   height: 36px;
   padding: 0 12px;
   border-bottom: 1px solid var(--vscode-panel-border);
@@ -25,6 +25,37 @@ body {
 
 #doc-title {
   font-weight: 600;
+}
+
+#toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar-btn {
+  padding: 3px 10px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border));
+  border-radius: 2px;
+  background: var(--vscode-button-secondaryBackground, var(--vscode-input-background));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.toolbar-btn:hover {
+  background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground));
+}
+
+.toolbar-btn.primary {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border-color: transparent;
+}
+
+.toolbar-btn.primary:hover {
+  background: var(--vscode-button-hoverBackground);
 }
 
 .hint {
@@ -180,8 +211,9 @@ body {
 }
 
 .ports {
-  position: relative;
-  min-height: 24px;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
 }
 
 .port {
@@ -193,32 +225,32 @@ body {
   background: var(--vscode-editor-background);
   cursor: crosshair;
   z-index: 2;
+  pointer-events: auto;
+  transform: translateY(-50%);
 }
 
 .port-out {
   right: -6px;
   top: 50%;
-  transform: translateY(-50%);
 }
 
 .port-in {
   left: -6px;
 }
 
+/* Single input / primary output: vertically centered on the block. */
 .port-in[data-port="IN"],
-.port-in[data-port="IN1"],
 .port-out[data-port="Q"] {
-  top: 35%;
+  top: 50%;
+}
+
+/* Two inputs (AND / OR): spaced along the left edge. */
+.port-in[data-port="IN1"] {
+  top: 32%;
 }
 
 .port-in[data-port="IN2"] {
-  top: 65%;
-}
-
-.port-in[data-port="IN"]:only-of-type,
-.fbd-block .ports .port-in:only-child {
-  top: 50%;
-  transform: translateY(-50%);
+  top: 72%;
 }
 
 .port.wire-source {
@@ -275,13 +307,20 @@ body {
   color: var(--vscode-descriptionForeground);
 }
 
-.prop-row input {
+.prop-row input,
+.prop-row select {
   width: 100%;
   padding: 4px 6px;
   border: 1px solid var(--vscode-input-border);
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
   border-radius: 2px;
+}
+
+.prop-hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
 }
 
 .muted {

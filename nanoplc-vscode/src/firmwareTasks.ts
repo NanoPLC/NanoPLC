@@ -6,7 +6,10 @@ import * as vscode from "vscode";
 import type { NanoPlcProject } from "@nanoplc/ir-schema";
 
 import { resolveExportScriptPath, resolveFirmwareRoot } from "./idfPaths";
-import { pickProjectLocation, readJsonFile } from "./project/projectPaths";
+import {
+  pickProjectLocation,
+  readJsonFile,
+} from "./project/projectPaths";
 import { ensureProjectFirmwareTree } from "./project/scaffoldFirmware";
 import {
   buildIdfSteps,
@@ -15,6 +18,11 @@ import {
   runIdfInTerminal,
   runIdfPipelineInTerminal,
 } from "./project/projectFirmware";
+import { compileProjectAt } from "./project/compileProgram";
+import {
+  flushPendingFbdDocumentEdits,
+  saveDirtyFbdDocuments,
+} from "./fbdEditor/fbdEditorProvider";
 
 const OUTPUT_CHANNEL = "NanoPLC Firmware";
 
@@ -137,7 +145,18 @@ export function registerFirmwareTasks(_context: vscode.ExtensionContext): vscode
   const disposables: vscode.Disposable[] = [
     vscode.commands.registerCommand("nanoplc.firmwareBuild", async () => {
       const ctx = await resolveFirmwareContext(true);
-      if (!ctx?.project) {
+      if (!ctx?.project || !ctx.projectRoot) {
+        return;
+      }
+
+      // Persist the open FBD graph, then compile (I/O channel checks included).
+      await flushPendingFbdDocumentEdits();
+      await saveDirtyFbdDocuments(ctx.projectRoot);
+      const compiled = await compileProjectAt(ctx.projectRoot, {
+        buildFirmware: false,
+        quietSuccess: true,
+      });
+      if (!compiled) {
         return;
       }
 

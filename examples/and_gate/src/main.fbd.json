@@ -1,42 +1,21 @@
 {
-
   "schema_version": 1,
-
   "name": "Main",
-
   "blocks": [
-
-    { "id": "di_start", "type": "DI", "params": { "symbol": "DI_Start" } },
-
-    { "id": "di_enable", "type": "DI", "params": { "symbol": "DI_Enable" } },
-
+    { "id": "di_start", "type": "DI", "params": { "channel": 1, "symbol": "DI_Start" } },
+    { "id": "di_enable", "type": "DI", "params": { "channel": 2, "symbol": "DI_Enable" } },
     { "id": "and1", "type": "AND" },
-
-    { "id": "do_lamp", "type": "DO", "params": { "symbol": "DO_Lamp" } }
-
+    { "id": "do_lamp", "type": "DO", "params": { "channel": 1, "symbol": "DO_Lamp" } }
   ],
-
   "wires": [
-
     { "from": { "block": "di_start", "port": "Q" }, "to": { "block": "and1", "port": "IN1" } },
-
     { "from": { "block": "di_enable", "port": "Q" }, "to": { "block": "and1", "port": "IN2" } },
-
     { "from": { "block": "and1", "port": "Q" }, "to": { "block": "do_lamp", "port": "IN" } }
-
   ],
-
   "layout": {
-
     "di_start": { "x": 48, "y": 48 },
-
     "di_enable": { "x": 48, "y": 128 },
-
     "and1": { "x": 408, "y": 88 },
-
     "do_lamp": { "x": 768, "y": 88 }
-
   }
-
 }
-

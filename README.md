@@ -23,10 +23,13 @@ Each **user project** is a folder with `nanoplc.project.json`, `src/`, `build/`,
 2. **Setup ESP-IDF:** Command Palette → **NanoPLC: Setup ESP-IDF toolchain** — then set `nanoplc-idf.idfSetupScript` to the printed `export.ps1` / `export.sh` path ([`docs/BOOTSTRAP_TOOLCHAIN.md`](docs/BOOTSTRAP_TOOLCHAIN.md)).
 3. **Open an empty folder** as workspace.
 4. **NanoPLC: Add device** — pick a device from the catalog (e.g. **M5Stack StamPLC** — 8 DI / 4 DO, or **Generic ESP32-S3**). Creates `nanoplc.project.json`, FBD starter, `io-map.json`, and `firmware/`.
-5. Edit **Main** in the FBD canvas (Project tree → Application → Programs).
-6. **NanoPLC: Compile PLC program** — writes `build/ir.json`, `build/generated.manifest.json`, generates `firmware/components/nanoplc_generated/*.c`, and runs **`idf.py build`** for the project device (when `nanoplc.buildFirmwareOnCompile` is true).
-7. **NanoPLC: Run simulation** — virtual DI/DO before hardware.
-8. **NanoPLC: Flash firmware** — after a successful build.
+5. Edit **Main** in the FBD canvas (Project tree → Application → Programs). Assign a **hardware channel** on every **Digital In** / **Digital Out** (from the device profile — e.g. StamPLC 8 DI / 4 DO). Optional: **Constant** (`BOOL` / `INT` / `WORD` / …).
+6. **Compile** (FBD toolbar or **NanoPLC: Compile PLC program**) — validates the graph (including I/O channels), writes `build/ir.json`, generates `firmware/components/nanoplc_generated/*.c`. When `nanoplc.buildFirmwareOnCompile` is true, also runs **`idf.py build`**.
+7. **Build firmware** (FBD toolbar or **NanoPLC: Build firmware**) — same PLC compile + checks, then always runs **`idf.py build`** for the project device. Refuses to build if a DI/DO has no channel.
+8. **NanoPLC: Run simulation** — virtual DI/DO before hardware.
+9. **NanoPLC: Flash firmware** — after a successful build.
+
+**Compile vs Build firmware:** Compile = FBD → IR → C (+ optional idf build via setting). Build firmware = that pipeline (with validation) + explicit ESP-IDF build.
 
 Device catalog and I/O templates live in [`packages/ir-schema/src/deviceCatalog.ts`](packages/ir-schema/src/deviceCatalog.ts). IR and project fields: [`docs/IR_SCHEMA.md`](docs/IR_SCHEMA.md).
 

@@ -6,15 +6,18 @@ import type {
   FbdSource,
   FbdWire,
   IoMap,
+  IoMapEntry,
   IrVariable,
   NanoPlcProject,
   PlcIr,
+  PlcPrimitiveType,
   ScheduleStep,
 } from "./types";
+import { PLC_PRIMITIVE_TYPES } from "./types";
 import { validateFbdSource } from "./validate";
 
 const BLOCK_OUTPUT_PORT = "Q";
-const SUPPORTED_BLOCKS = new Set(["DI", "DO", "AND", "OR", "NOT", "TON"]);
+const SUPPORTED_BLOCKS = new Set(["DI", "DO", "AND", "OR", "NOT", "TON", "CONST"]);
 
 function diag(
   code: string,
@@ -32,9 +35,109 @@ function outputVar(blockId: string): string {
   return `__${blockId}_Q`;
 }
 
+function parseConstDataType(params: FbdBlock["params"]): PlcPrimitiveType {
+  const raw = String(params?.data_type ?? params?.type ?? "BOOL").toUpperCase();
+  if ((PLC_PRIMITIVE_TYPES as readonly string[]).includes(raw)) {
+    return raw as PlcPrimitiveType;
+  }
+  return "BOOL";
+}
+
+function defaultConstValue(dataType: PlcPrimitiveType): boolean | number {
+  return dataType === "BOOL" ? false : 0;
+}
+
+function parseBoolLike(v: unknown): boolean {
+  if (typeof v === "boolean") {
+    return v;
+  }
+  if (typeof v === "number") {
+    return v !== 0;
+  }
+  if (typeof v === "string") {
+    const s = v.trim().toLowerCase();
+    return s === "true" || s === "1" || s === "on";
+  }
+  return false;
+}
+
+function parseNumericLike(v: unknown): number | undefined {
+  if (typeof v === "number" && Number.isFinite(v)) {
+    return v;
+  }
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    if (Number.isFinite(n)) {
+      return n;
+    }
+  }
+  if (typeof v === "boolean") {
+    return v ? 1 : 0;
+  }
+  return undefined;
+}
+
+function constValueInRange(dataType: PlcPrimitiveType, value: number): boolean {
+  switch (dataType) {
+    case "INT":
+      return Number.isInteger(value) && value >= -32768 && value <= 32767;
+    case "DINT":
+      return Number.isInteger(value) && value >= -2147483648 && value <= 2147483647;
+    case "UINT":
+    case "WORD":
+      return Number.isInteger(value) && value >= 0 && value <= 65535;
+    case "REAL":
+      return Number.isFinite(value);
+    default:
+      return true;
+  }
+}
+
+function parseConstValue(
+  params: FbdBlock["params"],
+  dataType: PlcPrimitiveType
+): { ok: true; value: boolean | number } | { ok: false; message: string } {
+  if (dataType === "BOOL") {
+    if (params?.value === undefined || params.value === null) {
+      return { ok: true, value: false };
+    }
+    return { ok: true, value: parseBoolLike(params.value) };
+  }
+
+  if (
+    params?.value === undefined ||
+    params.value === null ||
+    (typeof params.value === "string" && params.value.trim() === "")
+  ) {
+    return { ok: true, value: defaultConstValue(dataType) as number };
+  }
+
+  const num = parseNumericLike(params.value);
+  if (num === undefined) {
+    return { ok: false, message: `Constant value must be a number for type ${dataType}.` };
+  }
+  if (!constValueInRange(dataType, num)) {
+    return { ok: false, message: `Constant value ${num} is out of range for type ${dataType}.` };
+  }
+  return { ok: true, value: dataType === "REAL" ? num : Math.trunc(num) };
+}
+
+function blockOutputType(block: FbdBlock): PlcPrimitiveType {
+  if (block.type.toUpperCase() === "CONST") {
+    return parseConstDataType(block.params);
+  }
+  return "BOOL";
+}
+
+function blockInputType(_block: FbdBlock, _port: string): PlcPrimitiveType {
+  // Current FBD inputs are all BOOL (logic, timers, digital outs).
+  return "BOOL";
+}
+
 function inputPortsForType(type: string): Set<string> {
   switch (type.toUpperCase()) {
     case "DI":
+    case "CONST":
       return new Set();
     case "DO":
       return new Set(["IN"]);
@@ -95,6 +198,44 @@ function validateWires(
         );
       }
     }
+
+    const fromType = blockOutputType(fromBlock);
+    const toType = blockInputType(toBlock, wire.to.port);
+    if (fromType !== toType) {
+      diagnostics.push(
+        diag(
+          "NP-0305",
+          `Type mismatch: ${fromBlock.type} output is ${fromType}, but ${toBlock.type}.${wire.to.port} expects ${toType}.`,
+          toBlock.id
+        )
+      );
+    }
+  }
+  return diagnostics;
+}
+
+function validateConstBlocks(blocks: FbdBlock[]): CompileDiagnostic[] {
+  const diagnostics: CompileDiagnostic[] = [];
+  for (const block of blocks) {
+    if (block.type.toUpperCase() !== "CONST") {
+      continue;
+    }
+    const rawType = String(block.params?.data_type ?? block.params?.type ?? "BOOL").toUpperCase();
+    if (!(PLC_PRIMITIVE_TYPES as readonly string[]).includes(rawType)) {
+      diagnostics.push(
+        diag(
+          "NP-0215",
+          `Unsupported constant type "${rawType}". Use one of: ${PLC_PRIMITIVE_TYPES.join(", ")}.`,
+          block.id
+        )
+      );
+      continue;
+    }
+    const dataType = rawType as PlcPrimitiveType;
+    const parsed = parseConstValue(block.params, dataType);
+    if (!parsed.ok) {
+      diagnostics.push(diag("NP-0215", parsed.message, block.id));
+    }
   }
   return diagnostics;
 }
@@ -136,6 +277,103 @@ function topoSort(
   return { order };
 }
 
+function parseChannel(params: FbdBlock["params"]): number | undefined {
+  if (params?.channel === undefined || params.channel === null) {
+    return undefined;
+  }
+  const n = typeof params.channel === "number" ? params.channel : Number(params.channel);
+  return Number.isFinite(n) && n >= 1 ? Math.trunc(n) : undefined;
+}
+
+function resolveIoSymbol(block: FbdBlock, kind: "DI" | "DO"): string {
+  if (block.params?.symbol !== undefined && String(block.params.symbol).trim() !== "") {
+    return String(block.params.symbol);
+  }
+  const channel = parseChannel(block.params);
+  if (channel !== undefined) {
+    return `${kind}_${channel}`;
+  }
+  return block.id;
+}
+
+function resolveIoIndex(
+  block: FbdBlock,
+  kind: "DI" | "DO",
+  ioBySymbol: Map<string, IoMapEntry>,
+  autoIndex: number
+): { symbol: string; index: number; nextAuto: number } {
+  const symbol = resolveIoSymbol(block, kind);
+  const mapped = ioBySymbol.get(symbol);
+  if (mapped) {
+    return { symbol, index: mapped.index, nextAuto: autoIndex };
+  }
+  const channel = parseChannel(block.params);
+  if (channel !== undefined) {
+    return { symbol, index: channel - 1, nextAuto: autoIndex };
+  }
+  return { symbol, index: autoIndex, nextAuto: autoIndex + 1 };
+}
+
+function validateIoBindings(blocks: FbdBlock[]): CompileDiagnostic[] {
+  const diagnostics: CompileDiagnostic[] = [];
+  const diChannels = new Map<number, string>();
+  const doChannels = new Map<number, string>();
+  const diSymbols = new Map<string, string>();
+  const doSymbols = new Map<string, string>();
+
+  for (const block of blocks) {
+    const t = block.type.toUpperCase();
+    if (t !== "DI" && t !== "DO") {
+      continue;
+    }
+    const channel = parseChannel(block.params);
+    const label = t === "DI" ? "Digital In" : "Digital Out";
+
+    if (channel === undefined) {
+      diagnostics.push(
+        diag(
+          "NP-0214",
+          `${label} block "${block.id}" has no I/O channel assigned. Select an input/output channel in the block properties.`,
+          block.id
+        )
+      );
+      continue;
+    }
+
+    const symbol = resolveIoSymbol(block, t);
+    const channelMap = t === "DI" ? diChannels : doChannels;
+    const symbolMap = t === "DI" ? diSymbols : doSymbols;
+
+    const prev = channelMap.get(channel);
+    if (prev) {
+      diagnostics.push(
+        diag(
+          "NP-0212",
+          `Duplicate ${t} channel ${channel} on blocks "${prev}" and "${block.id}".`,
+          block.id
+        )
+      );
+    } else {
+      channelMap.set(channel, block.id);
+    }
+
+    const prevSym = symbolMap.get(symbol);
+    if (prevSym) {
+      diagnostics.push(
+        diag(
+          "NP-0213",
+          `Duplicate ${t} symbol "${symbol}" on blocks "${prevSym}" and "${block.id}".`,
+          block.id
+        )
+      );
+    } else {
+      symbolMap.set(symbol, block.id);
+    }
+  }
+
+  return diagnostics;
+}
+
 function collectVariables(
   blocks: FbdBlock[],
   ioMap?: IoMap
@@ -151,17 +389,23 @@ function collectVariables(
   for (const block of blocks) {
     const t = block.type.toUpperCase();
     if (t === "DI" || t === "DO") {
-      const symbol = String(block.params?.symbol ?? block.id);
-      const mapped = ioBySymbol.get(symbol);
       if (t === "DI") {
-        const index = mapped?.index ?? diAuto++;
-        di.push({ symbol, index });
-        variables.push({ name: symbol, type: "BOOL", role: "di" });
+        const resolved = resolveIoIndex(block, "DI", ioBySymbol, diAuto);
+        diAuto = resolved.nextAuto;
+        di.push({ symbol: resolved.symbol, index: resolved.index });
+        variables.push({ name: resolved.symbol, type: "BOOL", role: "di" });
       } else {
-        const index = mapped?.index ?? doAuto++;
-        doList.push({ symbol, index });
-        variables.push({ name: symbol, type: "BOOL", role: "do" });
+        const resolved = resolveIoIndex(block, "DO", ioBySymbol, doAuto);
+        doAuto = resolved.nextAuto;
+        doList.push({ symbol: resolved.symbol, index: resolved.index });
+        variables.push({ name: resolved.symbol, type: "BOOL", role: "do" });
       }
+    } else if (t === "CONST") {
+      variables.push({
+        name: outputVar(block.id),
+        type: parseConstDataType(block.params),
+        role: "internal",
+      });
     } else {
       variables.push({ name: outputVar(block.id), type: "BOOL", role: "internal" });
     }
@@ -181,7 +425,7 @@ function emitScheduleStep(
 
   switch (t) {
     case "DI": {
-      const symbol = String(block.params?.symbol ?? block.id);
+      const symbol = resolveIoSymbol(block, "DI");
       const entry = io_image.di.find((d) => d.symbol === symbol);
       return [
         {
@@ -194,7 +438,7 @@ function emitScheduleStep(
       ];
     }
     case "DO": {
-      const symbol = String(block.params?.symbol ?? block.id);
+      const symbol = resolveIoSymbol(block, "DO");
       const entry = io_image.do.find((d) => d.symbol === symbol);
       const inVar = wireIns.get("IN") ?? wireIns.get("in") ?? "";
       return [
@@ -249,6 +493,19 @@ function emitScheduleStep(
         },
       ];
     }
+    case "CONST": {
+      const dataType = parseConstDataType(block.params);
+      const parsed = parseConstValue(block.params, dataType);
+      return [
+        {
+          step: stepIndex,
+          op: "const",
+          out,
+          value: parsed.ok ? parsed.value : defaultConstValue(dataType),
+          value_type: dataType,
+        },
+      ];
+    }
     default:
       return [];
   }
@@ -261,7 +518,7 @@ function wireValue(blocks: Map<string, FbdBlock>, blockId: string, port: string)
   }
   const t = block.type.toUpperCase();
   if (t === "DI") {
-    return String(block.params?.symbol ?? block.id);
+    return resolveIoSymbol(block, "DI");
   }
   if (port.toUpperCase() === BLOCK_OUTPUT_PORT) {
     return outputVar(blockId);
@@ -304,6 +561,8 @@ export function compileFbdToIr(
     }
   }
 
+  diagnostics.push(...validateIoBindings(fbd.blocks));
+  diagnostics.push(...validateConstBlocks(fbd.blocks));
   diagnostics.push(...validateWires(blocks, fbd.wires));
 
   const edges = new Map<string, Set<string>>();

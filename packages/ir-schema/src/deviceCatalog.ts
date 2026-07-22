@@ -1,14 +1,85 @@
 import { IO_MAP_SCHEMA_VERSION } from "./constants";
 import type { IoMap, IoMapEntry, NanoPlcDriverRef, NanoPlcModuleRef, NanoPlcProject } from "./types";
 
+export interface DeviceIoChannel {
+  /** 1-based channel number shown in the editor (e.g. Digital In 1). */
+  channel: number;
+  /** Symbol written into FBD block params and io-map (e.g. DI_1). */
+  symbol: string;
+  /** 0-based process-image index. */
+  index: number;
+}
+
 export interface DeviceIoProfile {
   di_count: number;
   do_count: number;
   di_symbol_prefix: string;
   do_symbol_prefix: string;
+  /**
+   * Explicit 1-based DI channel numbers for modular devices.
+   * When omitted, channels are `1 .. di_count`.
+   */
+  di_channels?: number[];
+  /**
+   * Explicit 1-based DO channel numbers for modular devices.
+   * When omitted, channels are `1 .. do_count`.
+   */
+  do_channels?: number[];
   /** Direct ESP32 GPIO numbers per process-image index (omit for I/O expander boards). */
   di_gpio?: number[];
   do_gpio?: number[];
+}
+
+/** Resolve DI channel numbers from a device I/O profile. */
+export function deviceDiChannels(io: DeviceIoProfile): number[] {
+  if (io.di_channels && io.di_channels.length > 0) {
+    return [...io.di_channels];
+  }
+  return Array.from({ length: io.di_count }, (_, i) => i + 1);
+}
+
+/** Resolve DO channel numbers from a device I/O profile. */
+export function deviceDoChannels(io: DeviceIoProfile): number[] {
+  if (io.do_channels && io.do_channels.length > 0) {
+    return [...io.do_channels];
+  }
+  return Array.from({ length: io.do_count }, (_, i) => i + 1);
+}
+
+/** Build editor/compiler channel lists from a device I/O profile. */
+export function listDeviceIoChannels(io: DeviceIoProfile): {
+  di: DeviceIoChannel[];
+  do: DeviceIoChannel[];
+} {
+  const di = deviceDiChannels(io).map((channel, index) => ({
+    channel,
+    symbol: `${io.di_symbol_prefix}${channel}`,
+    index,
+  }));
+  const doList = deviceDoChannels(io).map((channel, index) => ({
+    channel,
+    symbol: `${io.do_symbol_prefix}${channel}`,
+    index,
+  }));
+  return { di, do: doList };
+}
+
+/** Build channel lists from an existing io-map (fallback when catalog_id is absent). */
+export function listIoChannelsFromMap(ioMap: IoMap): { di: DeviceIoChannel[]; do: DeviceIoChannel[] } {
+  const di: DeviceIoChannel[] = [];
+  const doList: DeviceIoChannel[] = [];
+  for (const entry of ioMap.entries) {
+    const channel = entry.index + 1;
+    const row: DeviceIoChannel = { channel, symbol: entry.symbol, index: entry.index };
+    if (entry.kind === "DI") {
+      di.push(row);
+    } else if (entry.kind === "DO") {
+      doList.push(row);
+    }
+  }
+  di.sort((a, b) => a.index - b.index);
+  doList.sort((a, b) => a.index - b.index);
+  return { di, do: doList };
 }
 
 export interface DeviceCatalogEntry {
@@ -96,29 +167,30 @@ export function findDeviceCatalogEntry(id: string): DeviceCatalogEntry | undefin
 
 export function buildIoMapFromCatalog(entry: DeviceCatalogEntry): IoMap {
   const entries: IoMapEntry[] = [];
+  const { di, do: doList } = listDeviceIoChannels(entry.io);
 
-  for (let i = 0; i < entry.io.di_count; i++) {
+  for (const ch of di) {
     const row: IoMapEntry = {
-      symbol: `${entry.io.di_symbol_prefix}${i + 1}`,
+      symbol: ch.symbol,
       kind: "DI",
-      index: i,
+      index: ch.index,
       active_high: true,
     };
-    if (entry.io.di_gpio?.[i] !== undefined) {
-      row.gpio = entry.io.di_gpio[i];
+    if (entry.io.di_gpio?.[ch.index] !== undefined) {
+      row.gpio = entry.io.di_gpio[ch.index];
     }
     entries.push(row);
   }
 
-  for (let i = 0; i < entry.io.do_count; i++) {
+  for (const ch of doList) {
     const row: IoMapEntry = {
-      symbol: `${entry.io.do_symbol_prefix}${i + 1}`,
+      symbol: ch.symbol,
       kind: "DO",
-      index: i,
+      index: ch.index,
       active_high: true,
     };
-    if (entry.io.do_gpio?.[i] !== undefined) {
-      row.gpio = entry.io.do_gpio[i];
+    if (entry.io.do_gpio?.[ch.index] !== undefined) {
+      row.gpio = entry.io.do_gpio[ch.index];
     }
     entries.push(row);
   }

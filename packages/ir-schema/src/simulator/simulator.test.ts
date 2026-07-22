@@ -12,10 +12,10 @@ const andFbd: FbdSource = {
   schema_version: FBD_SOURCE_SCHEMA_VERSION,
   name: "Main",
   blocks: [
-    { id: "di_start", type: "DI", params: { symbol: "DI_Start" } },
-    { id: "di_en", type: "DI", params: { symbol: "DI_Enable" } },
+    { id: "di_start", type: "DI", params: { channel: 1, symbol: "DI_Start" } },
+    { id: "di_en", type: "DI", params: { channel: 2, symbol: "DI_Enable" } },
     { id: "and1", type: "AND" },
-    { id: "do_lamp", type: "DO", params: { symbol: "DO_Lamp" } },
+    { id: "do_lamp", type: "DO", params: { channel: 1, symbol: "DO_Lamp" } },
   ],
   wires: [
     { from: { block: "di_start", port: "Q" }, to: { block: "and1", port: "IN1" } },

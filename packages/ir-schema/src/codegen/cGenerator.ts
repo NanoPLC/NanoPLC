@@ -1,4 +1,4 @@
-import type { PlcIr, ScheduleStep } from "../types";
+import type { PlcIr, PlcPrimitiveType, ScheduleStep } from "../types";
 import type { IoMap } from "../types";
 import { IR_VERSION } from "../constants";
 import { codegenIoHalConfig, type CodegenFirmwareOutput } from "./codegenFirmware";
@@ -15,6 +15,45 @@ function cIdent(name: string): string {
     return `v_${safe}`;
   }
   return safe;
+}
+
+function cTypeFor(type: PlcPrimitiveType): string {
+  switch (type) {
+    case "BOOL":
+      return "bool";
+    case "INT":
+      return "int16_t";
+    case "DINT":
+      return "int32_t";
+    case "UINT":
+    case "WORD":
+      return "uint16_t";
+    case "REAL":
+      return "float";
+    default:
+      return "bool";
+  }
+}
+
+function cLiteral(type: PlcPrimitiveType, value: boolean | number | undefined): string {
+  if (type === "BOOL") {
+    return value === true || value === 1 ? "true" : "false";
+  }
+  const n = typeof value === "number" ? value : Number(value);
+  const num = Number.isFinite(n) ? n : 0;
+  switch (type) {
+    case "INT":
+      return `${Math.trunc(num)}`;
+    case "DINT":
+      return `${Math.trunc(num)}L`;
+    case "UINT":
+    case "WORD":
+      return `${Math.trunc(num)}u`;
+    case "REAL":
+      return Number.isInteger(num) ? `${num}.0f` : `${num}f`;
+    default:
+      return "0";
+  }
 }
 
 function varRef(name: string | undefined): string {
@@ -72,33 +111,30 @@ function line(step: ScheduleStep, dtExpr: string): string[] {
     }
     case "move":
       return [`    ${varRef(step.out)} = ${varRef(step.in1)};`];
+    case "const": {
+      const t = step.value_type ?? "BOOL";
+      return [`    ${varRef(step.out)} = ${cLiteral(t, step.value)};`];
+    }
     default:
       return [`    /* unsupported op ${step.op} */`];
   }
 }
 
-function collectBoolVars(ir: PlcIr): string[] {
-  const names = new Set<string>();
+function collectTypedVars(ir: PlcIr): { name: string; type: PlcPrimitiveType }[] {
+  const byName = new Map<string, PlcPrimitiveType>();
   for (const v of ir.variables) {
-    if (v.type === "BOOL") {
-      names.add(v.name);
-    }
+    byName.set(v.name, v.type);
   }
   for (const step of ir.schedule) {
-    if (step.out) {
-      names.add(step.out);
-    }
-    if (step.in1) {
-      names.add(step.in1);
-    }
-    if (step.in2) {
-      names.add(step.in2);
-    }
-    if (step.symbol) {
-      names.add(step.symbol);
+    for (const name of [step.out, step.in1, step.in2, step.symbol]) {
+      if (name && !byName.has(name)) {
+        byName.set(name, step.value_type && name === step.out ? step.value_type : "BOOL");
+      }
     }
   }
-  return [...names].sort();
+  return [...byName.entries()]
+    .map(([name, type]) => ({ name, type }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function tonBlocks(ir: PlcIr): { id: string; pt_ms: number }[] {
@@ -115,12 +151,14 @@ export function computeIrMagic(ir: PlcIr, irSha256Hex: string): number {
 export function codegenC(ir: PlcIr, irSha256Hex: string, _ioMap?: IoMap): CodegenCResult {
   const diCount = Math.max(0, ...ir.io_image.di.map((d) => d.index + 1), 0);
   const doCount = Math.max(0, ...ir.io_image.do.map((d) => d.index + 1), 0);
-  const boolVars = collectBoolVars(ir);
+  const typedVars = collectTypedVars(ir);
   const tons = tonBlocks(ir);
   const magic = computeIrMagic(ir, irSha256Hex);
   const dtExpr = "npgen_scan_dt_ms";
 
-  const varDecls = boolVars.map((n) => `static bool npgen_v_${cIdent(n)};`).join("\n");
+  const varDecls = typedVars
+    .map((v) => `static ${cTypeFor(v.type)} npgen_v_${cIdent(v.name)};`)
+    .join("\n");
   const tonStructs = tons
     .map((t) => `static struct { uint32_t et_ms; bool q; } npgen_ton_${t.id};`)
     .join("\n");
