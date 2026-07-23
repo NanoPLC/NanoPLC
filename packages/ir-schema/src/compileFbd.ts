@@ -17,7 +17,7 @@ import { PLC_PRIMITIVE_TYPES } from "./types";
 import { validateFbdSource } from "./validate";
 
 const BLOCK_OUTPUT_PORT = "Q";
-const SUPPORTED_BLOCKS = new Set(["DI", "DO", "AND", "OR", "NOT", "TON", "CONST"]);
+const SUPPORTED_BLOCKS = new Set(["DI", "AI", "DO", "AND", "OR", "NOT", "TON", "CONST"]);
 
 function diag(
   code: string,
@@ -126,6 +126,9 @@ function blockOutputType(block: FbdBlock): PlcPrimitiveType {
   if (block.type.toUpperCase() === "CONST") {
     return parseConstDataType(block.params);
   }
+  if (block.type.toUpperCase() === "AI") {
+    return "REAL";
+  }
   return "BOOL";
 }
 
@@ -137,6 +140,7 @@ function blockInputType(_block: FbdBlock, _port: string): PlcPrimitiveType {
 function inputPortsForType(type: string): Set<string> {
   switch (type.toUpperCase()) {
     case "DI":
+    case "AI":
     case "CONST":
       return new Set();
     case "DO":
@@ -285,7 +289,7 @@ function parseChannel(params: FbdBlock["params"]): number | undefined {
   return Number.isFinite(n) && n >= 1 ? Math.trunc(n) : undefined;
 }
 
-function resolveIoSymbol(block: FbdBlock, kind: "DI" | "DO"): string {
+function resolveIoSymbol(block: FbdBlock, kind: "DI" | "DO" | "AI"): string {
   if (block.params?.symbol !== undefined && String(block.params.symbol).trim() !== "") {
     return String(block.params.symbol);
   }
@@ -298,7 +302,7 @@ function resolveIoSymbol(block: FbdBlock, kind: "DI" | "DO"): string {
 
 function resolveIoIndex(
   block: FbdBlock,
-  kind: "DI" | "DO",
+  kind: "DI" | "DO" | "AI",
   ioBySymbol: Map<string, IoMapEntry>,
   autoIndex: number
 ): { symbol: string; index: number; nextAuto: number } {
@@ -316,46 +320,33 @@ function resolveIoIndex(
 
 function validateIoBindings(blocks: FbdBlock[]): CompileDiagnostic[] {
   const diagnostics: CompileDiagnostic[] = [];
-  const diChannels = new Map<number, string>();
-  const doChannels = new Map<number, string>();
   const diSymbols = new Map<string, string>();
+  const aiSymbols = new Map<string, string>();
   const doSymbols = new Map<string, string>();
 
   for (const block of blocks) {
     const t = block.type.toUpperCase();
-    if (t !== "DI" && t !== "DO") {
+    if (t !== "DI" && t !== "AI" && t !== "DO") {
       continue;
     }
     const channel = parseChannel(block.params);
-    const label = t === "DI" ? "Digital In" : "Digital Out";
+    const label = t === "DI" ? "Digital In" : t === "AI" ? "Analog In" : "Digital Out";
+    const symbol = resolveIoSymbol(block, t as "DI" | "DO" | "AI");
+    const hasSymbol =
+      block.params?.symbol !== undefined && String(block.params.symbol).trim() !== "";
 
-    if (channel === undefined) {
+    if (!hasSymbol && channel === undefined) {
       diagnostics.push(
         diag(
           "NP-0214",
-          `${label} block "${block.id}" has no I/O channel assigned. Select an input/output channel in the block properties.`,
+          `${label} block "${block.id}" has no I/O channel assigned. Select a module and channel in the block properties.`,
           block.id
         )
       );
       continue;
     }
 
-    const symbol = resolveIoSymbol(block, t);
-    const channelMap = t === "DI" ? diChannels : doChannels;
-    const symbolMap = t === "DI" ? diSymbols : doSymbols;
-
-    const prev = channelMap.get(channel);
-    if (prev) {
-      diagnostics.push(
-        diag(
-          "NP-0212",
-          `Duplicate ${t} channel ${channel} on blocks "${prev}" and "${block.id}".`,
-          block.id
-        )
-      );
-    } else {
-      channelMap.set(channel, block.id);
-    }
+    const symbolMap = t === "DI" ? diSymbols : t === "AI" ? aiSymbols : doSymbols;
 
     const prevSym = symbolMap.get(symbol);
     if (prevSym) {
@@ -381,19 +372,26 @@ function collectVariables(
   const variables: IrVariable[] = [];
   const di: PlcIr["io_image"]["di"] = [];
   const doList: PlcIr["io_image"]["do"] = [];
+  const ai: PlcIr["io_image"]["ai"] = [];
   const ioBySymbol = new Map(ioMap?.entries.map((e) => [e.symbol, e]) ?? []);
 
   let diAuto = 0;
   let doAuto = 0;
+  let aiAuto = 0;
 
   for (const block of blocks) {
     const t = block.type.toUpperCase();
-    if (t === "DI" || t === "DO") {
+    if (t === "DI" || t === "DO" || t === "AI") {
       if (t === "DI") {
         const resolved = resolveIoIndex(block, "DI", ioBySymbol, diAuto);
         diAuto = resolved.nextAuto;
         di.push({ symbol: resolved.symbol, index: resolved.index });
         variables.push({ name: resolved.symbol, type: "BOOL", role: "di" });
+      } else if (t === "AI") {
+        const resolved = resolveIoIndex(block, "AI", ioBySymbol, aiAuto);
+        aiAuto = resolved.nextAuto;
+        ai.push({ symbol: resolved.symbol, index: resolved.index });
+        variables.push({ name: resolved.symbol, type: "REAL", role: "ai" });
       } else {
         const resolved = resolveIoIndex(block, "DO", ioBySymbol, doAuto);
         doAuto = resolved.nextAuto;
@@ -411,7 +409,7 @@ function collectVariables(
     }
   }
 
-  return { variables, io_image: { di, do: doList } };
+  return { variables, io_image: { di, do: doList, ai } };
 }
 
 function emitScheduleStep(
@@ -431,6 +429,19 @@ function emitScheduleStep(
         {
           step: stepIndex,
           op: "read_di",
+          symbol,
+          index: entry?.index ?? 0,
+          out: symbol,
+        },
+      ];
+    }
+    case "AI": {
+      const symbol = resolveIoSymbol(block, "AI");
+      const entry = io_image.ai.find((d) => d.symbol === symbol);
+      return [
+        {
+          step: stepIndex,
+          op: "read_ai",
           symbol,
           index: entry?.index ?? 0,
           out: symbol,
@@ -519,6 +530,9 @@ function wireValue(blocks: Map<string, FbdBlock>, blockId: string, port: string)
   const t = block.type.toUpperCase();
   if (t === "DI") {
     return resolveIoSymbol(block, "DI");
+  }
+  if (t === "AI") {
+    return resolveIoSymbol(block, "AI");
   }
   if (port.toUpperCase() === BLOCK_OUTPUT_PORT) {
     return outputVar(blockId);

@@ -6,12 +6,14 @@ import {
   FBD_SOURCE_SCHEMA_VERSION,
   findDeviceCatalogEntry,
   listDeviceIoChannels,
-  listIoChannelsFromMap,
+  resolveDeviceTree,
   type DeviceIoChannel,
   type FbdSource,
-  type IoMap,
+  type IoModuleChannels,
   type NanoPlcProject,
 } from "@nanoplc/ir-schema";
+
+import { loadProjectIoProfile } from "../project/projectIoLoader";
 
 import { FBD_BLOCK_CATALOG } from "./blockCatalog";
 import { ensureLayout } from "./layout";
@@ -30,7 +32,38 @@ interface WebviewDocumentPayload {
 export interface EditorIoProfilePayload {
   di: DeviceIoChannel[];
   do: DeviceIoChannel[];
+  ai: DeviceIoChannel[];
+  modules: IoModuleChannels[];
   source: "catalog" | "io-map" | "none";
+}
+
+function attachModuleMeta(
+  channels: DeviceIoChannel[],
+  moduleId: string,
+  moduleName: string
+): DeviceIoChannel[] {
+  return channels.map((ch) => ({ ...ch, moduleId, moduleName }));
+}
+
+function catalogModuleProfile(
+  project: NanoPlcProject,
+  entryLabel: string,
+  channels: { di: DeviceIoChannel[]; do: DeviceIoChannel[]; ai: DeviceIoChannel[] }
+): EditorIoProfilePayload {
+  const { modules } = resolveDeviceTree(project);
+  const mod = modules[0];
+  const moduleId = mod?.id ?? "device";
+  const moduleName = mod?.name ?? entryLabel;
+  const di = attachModuleMeta(channels.di, moduleId, moduleName);
+  const doList = attachModuleMeta(channels.do, moduleId, moduleName);
+  const ai = attachModuleMeta(channels.ai, moduleId, moduleName);
+  return {
+    di,
+    do: doList,
+    ai,
+    modules: [{ id: moduleId, name: moduleName, di, do: doList, ai }],
+    source: "catalog",
+  };
 }
 
 interface PendingFbdEdit {
@@ -92,30 +125,31 @@ function findProjectRootForDocument(documentUri: vscode.Uri): string | undefined
 function loadEditorIoProfile(projectRoot: string): EditorIoProfilePayload {
   try {
     const project = readJsonFile<NanoPlcProject>(path.join(projectRoot, PROJECT_FILENAME));
+    const merged = loadProjectIoProfile(projectRoot, project);
+    if (merged.di.length > 0 || merged.do.length > 0 || merged.ai.length > 0) {
+      const hasExpansion = (project.modules?.length ?? 0) > 1;
+      return {
+        di: merged.di,
+        do: merged.do,
+        ai: merged.ai,
+        modules: merged.modules,
+        source: hasExpansion ? "io-map" : project.device?.catalog_id ? "catalog" : "io-map",
+      };
+    }
+
     const catalogId = project.device?.catalog_id;
     if (catalogId) {
       const entry = findDeviceCatalogEntry(catalogId);
       if (entry) {
         const channels = listDeviceIoChannels(entry.io);
-        return { di: channels.di, do: channels.do, source: "catalog" };
+        return catalogModuleProfile(project, entry.label, channels);
       }
-    }
-  } catch {
-    // Fall through to io-map.
-  }
-
-  try {
-    const ioMapPath = path.join(projectRoot, "src", "io-map.json");
-    if (fs.existsSync(ioMapPath)) {
-      const ioMap = readJsonFile<IoMap>(ioMapPath);
-      const channels = listIoChannelsFromMap(ioMap);
-      return { di: channels.di, do: channels.do, source: "io-map" };
     }
   } catch {
     // Ignore.
   }
 
-  return { di: [], do: [], source: "none" };
+  return { di: [], do: [], ai: [], modules: [], source: "none" };
 }
 
 /** Apply any debounced FBD webview edits so compile/build see the latest graph. */
@@ -180,7 +214,7 @@ export class FbdEditorProvider implements vscode.CustomTextEditorProvider {
       const root = findProjectRootForDocument(document.uri);
       const profile = root
         ? loadEditorIoProfile(root)
-        : ({ di: [], do: [], source: "none" } satisfies EditorIoProfilePayload);
+        : ({ di: [], do: [], ai: [], modules: [], source: "none" } satisfies EditorIoProfilePayload);
       webviewPanel.webview.postMessage({ type: "ioProfile", payload: profile });
     };
 
@@ -209,7 +243,7 @@ export class FbdEditorProvider implements vscode.CustomTextEditorProvider {
     const watchers: vscode.Disposable[] = [];
     if (projectRoot) {
       const projectWatcher = vscode.workspace.createFileSystemWatcher(
-        new vscode.RelativePattern(projectRoot, `{${PROJECT_FILENAME},src/io-map.json}`)
+        new vscode.RelativePattern(projectRoot, `{${PROJECT_FILENAME},src/io-map.json,src/modules/*.json}`)
       );
       const refreshProfile = (): void => postIoProfile();
       projectWatcher.onDidChange(refreshProfile);

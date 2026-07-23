@@ -3,16 +3,27 @@ import * as path from "path";
 import * as vscode from "vscode";
 
 import {
+  buildModuleAndDriverRefs,
+  buildModuleConfig,
   defaultProjectDrivers,
   defaultProjectModules,
   FBD_SOURCE_SCHEMA_VERSION,
+  ioMapIndexOffsets,
   IO_MAP_SCHEMA_VERSION,
+  listCompatibleModules,
+  moduleCatalogLabel,
+  M5STACK_STAMPLC_IO,
+  nextStamPlcIoModuleId,
+  parseModuleConfig,
   resolveDeviceTree,
+  type ModuleCatalogEntry,
   type NanoPlcDriverRef,
   type NanoPlcModuleRef,
   type NanoPlcProgramRef,
   type NanoPlcProject,
 } from "@nanoplc/ir-schema";
+
+import { loadProjectIoProfile } from "./projectIoLoader";
 
 import {
   findProjectFileAtRoot,
@@ -67,6 +78,141 @@ function scaffoldIoMap(rootPath: string): void {
   });
 }
 
+function collectExistingIoEntries(rootPath: string, project: NanoPlcProject) {
+  const profile = loadProjectIoProfile(rootPath, project);
+  return profile.ioMap.entries;
+}
+
+function readUsedI2cAddresses(rootPath: string, project: NanoPlcProject): Set<number> {
+  const used = new Set<number>();
+  const { modules } = resolveDeviceTree(project);
+  for (const mod of modules) {
+    if (!mod.config) {
+      continue;
+    }
+    const abs = path.join(rootPath, mod.config);
+    if (!fs.existsSync(abs)) {
+      continue;
+    }
+    try {
+      const raw = JSON.parse(fs.readFileSync(abs, "utf8")) as unknown;
+      const config = parseModuleConfig(raw);
+      if (config?.i2c_address !== undefined) {
+        used.add(config.i2c_address);
+      }
+    } catch {
+      // Ignore invalid module config.
+    }
+  }
+  return used;
+}
+
+async function pickCatalogModule(
+  hostCatalogId?: string
+): Promise<ModuleCatalogEntry | "custom" | undefined> {
+  const compatible = listCompatibleModules(hostCatalogId);
+  const items = [
+    ...compatible.map((entry) => ({
+      label: moduleCatalogLabel(entry),
+      description: entry.model,
+      detail: entry.description,
+      entry,
+    })),
+    {
+      label: "Custom digital I/O module",
+      description: "Manual GPIO module",
+      detail: "Generic module with src/io-map.json and nanoplc_hal driver.",
+      entry: undefined as ModuleCatalogEntry | undefined,
+    },
+  ];
+
+  const picked = await vscode.window.showQuickPick(items, {
+    placeHolder: "Select I/O expansion module",
+    matchOnDescription: true,
+    matchOnDetail: true,
+  });
+  if (!picked) {
+    return undefined;
+  }
+  return picked.entry ?? "custom";
+}
+
+async function promptI2cAddress(used: Set<number>, defaultAddr: number): Promise<number | undefined> {
+  const value = await vscode.window.showInputBox({
+    prompt: "I2C address (hex, StamPLC IO DIP switch: 0x20–0x2F)",
+    value: `0x${defaultAddr.toString(16).toUpperCase().padStart(2, "0")}`,
+    validateInput: (raw) => {
+      const trimmed = raw.trim();
+      const n = trimmed.startsWith("0x") ? Number.parseInt(trimmed.slice(2), 16) : Number.parseInt(trimmed, 10);
+      if (!Number.isFinite(n) || n < 0x20 || n > 0x2f) {
+        return "Enter an address between 0x20 and 0x2F (DIP switch range).";
+      }
+      if (used.has(n)) {
+        return `Address 0x${n.toString(16).toUpperCase()} is already used by another module.`;
+      }
+      return null;
+    },
+  });
+  if (!value) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.startsWith("0x") ? Number.parseInt(trimmed.slice(2), 16) : Number.parseInt(trimmed, 10);
+}
+
+function addCatalogModule(
+  location: ProjectLocation,
+  project: NanoPlcProject,
+  entry: ModuleCatalogEntry,
+  i2cAddress?: number
+): void {
+  const existingEntries = collectExistingIoEntries(location.rootPath, project);
+  const offsets = ioMapIndexOffsets(existingEntries);
+  const moduleId =
+    entry.id === M5STACK_STAMPLC_IO.id
+      ? nextStamPlcIoModuleId(project.modules!.map((m) => m.id))
+      : nextId(
+          "mod",
+          project.modules!.map((m) => m.id)
+        );
+  const instanceNumber =
+    entry.id === M5STACK_STAMPLC_IO.id
+      ? Number(moduleId.replace(/^stamplc_io_exp/, "")) || 1
+      : project.modules!.filter((m) => m.type === entry.module.type).length + 1;
+
+  const moduleConfig = buildModuleConfig(entry, offsets);
+  if (i2cAddress !== undefined) {
+    moduleConfig.i2c_address = i2cAddress;
+  }
+
+  const { module, driver } = buildModuleAndDriverRefs(entry, moduleId, instanceNumber);
+  const configPath = path.join(location.rootPath, module.config!);
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  writeJsonFile(configPath, moduleConfig);
+
+  project.modules!.push(module);
+  project.drivers = project.drivers ?? [...defaultProjectDrivers()];
+  project.drivers.push(driver);
+  saveProject(location, project);
+  refreshTree?.();
+
+  const channelRange =
+    entry.io.do_count > 0
+      ? `${offsets.do + 1}–${offsets.do + entry.io.do_count}`
+      : entry.io.di_count > 0
+        ? `${offsets.di + 1}–${offsets.di + entry.io.di_count}`
+        : "";
+  const ioSummary =
+    entry.io.di_count > 0 && entry.io.do_count > 0
+      ? `${entry.io.di_count} DI / ${entry.io.do_count} DO`
+      : entry.io.do_count > 0
+        ? `${entry.io.do_count} DO`
+        : `${entry.io.di_count} DI`;
+  void vscode.window.showInformationMessage(
+    `NanoPLC: Added ${module.name} — ${ioSummary}${channelRange ? ` (channels ${channelRange})` : ""}.`
+  );
+}
+
 export function registerDeviceTreeCommands(context: vscode.ExtensionContext): vscode.Disposable {
   const disposables = [
     vscode.commands.registerCommand("nanoplc.addModule", async (item?: NanoPlcTreeItem) => {
@@ -76,6 +222,39 @@ export function registerDeviceTreeCommands(context: vscode.ExtensionContext): vs
       }
       const project = loadProject(location);
       project.modules = project.modules ?? [...defaultProjectModules()];
+
+      const hostCatalogId = project.device?.catalog_id;
+      const picked = await pickCatalogModule(hostCatalogId);
+      if (!picked) {
+        return;
+      }
+
+      if (picked !== "custom") {
+        if (!listCompatibleModules(hostCatalogId).some((m) => m.id === picked.id)) {
+          void vscode.window.showWarningMessage(
+            `NanoPLC: ${picked.label} is not compatible with this host device.`
+          );
+          return;
+        }
+
+        let i2cAddress: number | undefined;
+        if (picked.id === M5STACK_STAMPLC_IO.id) {
+          const used = readUsedI2cAddresses(location.rootPath, project);
+          const defaultAddr = (picked.default_config?.i2c_address as number | undefined) ?? 0x20;
+          let candidate = defaultAddr;
+          while (used.has(candidate) && candidate < 0x2f) {
+            candidate++;
+          }
+          const addr = await promptI2cAddress(used, candidate);
+          if (addr === undefined) {
+            return;
+          }
+          i2cAddress = addr;
+        }
+
+        addCatalogModule(location, project, picked, i2cAddress);
+        return;
+      }
 
       const name = await vscode.window.showInputBox({
         prompt: "Module name",
@@ -223,12 +402,18 @@ export function registerDeviceTreeCommands(context: vscode.ExtensionContext): vs
           return;
         }
         const mod = modules.find((m) => m.id === drv.binds);
+        const fwComponent =
+          drv.type === "m5_stamplc_io"
+            ? "firmware/components/m5_stamplc_io/"
+            : drv.type === "m5_aw9523"
+              ? "firmware/components/m5_aw9523/"
+              : "firmware/components/nanoplc_hal/";
         const detail =
           `Driver: ${drv.name}\n` +
           `Type: ${drv.type}\n` +
           (mod ? `Binds to module: ${mod.name} (${mod.id})\n` : "") +
           (mod?.config ? `Module config: ${mod.config}\n` : "") +
-          `\nFirmware component: firmware/components/nanoplc_hal/`;
+          `\nFirmware component: ${fwComponent}`;
 
         await vscode.window.showInformationMessage("NanoPLC Driver", { modal: true, detail });
       }

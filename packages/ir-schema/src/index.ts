@@ -7,7 +7,7 @@ export {
 export { compileFbdToIr } from "./compileFbd";
 export { codegenC, computeIrMagic, codegenFirmware } from "./codegen/cGenerator";
 export type { CodegenCResult } from "./codegen/cGenerator";
-export type { CodegenFirmwareOutput } from "./codegen/codegenFirmware";
+export type { CodegenFirmwareOutput, CodegenIoContext } from "./codegen/codegenFirmware";
 export { PlcSimulator } from "./simulator/PlcSimulator";
 export type { SimulatorSnapshot, TonInstanceState } from "./simulator/types";
 export { createSimState, executeScheduleStep, runScan, snapshot } from "./simulator/executeScan";
@@ -46,6 +46,31 @@ export {
   listIoChannelsFromMap,
 } from "./deviceCatalog";
 export type { DeviceCatalogEntry, DeviceIoChannel, DeviceIoProfile } from "./deviceCatalog";
+export {
+  MODULE_CATALOG,
+  M5STACK_STAMPLC_IO,
+  buildModuleAndDriverRefs,
+  buildModuleConfig,
+  buildModuleIoMapEntries,
+  findModuleCatalogEntry,
+  ioMapIndexOffsets,
+  isModuleCompatibleWithHost,
+  listCompatibleModules,
+  moduleCatalogLabel,
+  moduleConfigRelativePath,
+  nextStamPlcIoModuleId,
+} from "./moduleCatalog";
+export type { ModuleCatalogEntry, ModuleConfig } from "./moduleCatalog";
+export {
+  buildMergedIoMap,
+  mergeProjectIoEntries,
+  moduleConfigEntries,
+  parseModuleConfig,
+  projectIoProfileFromEntries,
+  resolveProjectIoProfileFromConfigs,
+} from "./projectIo";
+export type { ProjectIoProfile, IoModuleChannels } from "./projectIo";
+export { listIoChannelsFromModuleEntries } from "./projectIo";
 export { resolveDeviceTree, defaultProjectModules, defaultProjectDrivers, DEFAULT_GPIO_MODULE, DEFAULT_HAL_DRIVER } from "./projectTreeDefaults";
 export type { ResolvedDeviceTree } from "./projectTreeDefaults";
 export { validateFbdSource, validateProject } from "./validate";

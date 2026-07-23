@@ -22,6 +22,7 @@ import {
 
 import { tryCodegenAfterCompile } from "./codegenFirmware";
 import { pickProjectLocation, readJsonFile, writeJsonFile } from "./projectPaths";
+import { loadProjectIoProfile } from "./projectIoLoader";
 import { ensureProjectFirmwareTree } from "./scaffoldFirmware";
 import { tryBuildFirmwareAfterCompile } from "./projectFirmware";
 import {
@@ -136,13 +137,14 @@ export function gateProjectFbd(rootPath: string, project: NanoPlcProject): Proje
   }
 
   let ioMap: IoMap | undefined;
-  const ioMapPath = path.join(rootPath, "src", "io-map.json");
-  if (fs.existsSync(ioMapPath)) {
-    try {
-      ioMap = readJsonFile<IoMap>(ioMapPath);
-    } catch {
+  try {
+    const projectForIo = readJsonFile<NanoPlcProject>(path.join(rootPath, "nanoplc.project.json"));
+    ioMap = loadProjectIoProfile(rootPath, projectForIo).ioMap;
+    if (ioMap.entries.length === 0) {
       ioMap = undefined;
     }
+  } catch {
+    ioMap = undefined;
   }
 
   const result = compileFbdToIr(project, fbdRaw, program.id, ioMap);
@@ -160,7 +162,7 @@ export function gateProjectFbd(rootPath: string, project: NanoPlcProject): Proje
 export function showFbdGateFailure(gate: ProjectFbdGateResult, action = "compile"): void {
   if (gate.unboundIoBlocks.length > 0) {
     void vscode.window.showErrorMessage(
-      `NanoPLC: Assign an I/O channel to every Digital In / Digital Out before ${action} (${gate.unboundIoBlocks.join(", ")}). See Problems.`
+      `NanoPLC: Assign an I/O channel to every Digital In, Analog In, and Digital Out before ${action} (${gate.unboundIoBlocks.join(", ")}). See Problems.`
     );
     return;
   }
@@ -226,14 +228,13 @@ export async function compileProjectAt(
   }
 
   let ioMap: IoMap | undefined;
-  const ioMapPath = path.join(rootPath, "src", "io-map.json");
-  if (fs.existsSync(ioMapPath)) {
-    ioMap = readJsonFile<IoMap>(ioMapPath);
-    if (ioMap.schema_version !== IO_MAP_SCHEMA_VERSION) {
-      void vscode.window.showWarningMessage(
-        `NanoPLC: io-map.json schema_version ${ioMap.schema_version} may not match tooling.`
-      );
-    }
+  ioMap = loadProjectIoProfile(rootPath, project).ioMap;
+  if (ioMap.entries.length === 0) {
+    ioMap = undefined;
+  } else if (ioMap.schema_version !== IO_MAP_SCHEMA_VERSION) {
+    void vscode.window.showWarningMessage(
+      `NanoPLC: io-map schema_version ${ioMap.schema_version} may not match tooling.`
+    );
   }
 
   const result = compileFbdToIr(project, fbdRaw, program.id, ioMap);

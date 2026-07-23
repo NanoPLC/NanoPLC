@@ -307,6 +307,18 @@ body {
   color: var(--vscode-descriptionForeground);
 }
 
+.prop-row-io .prop-io-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.prop-row-io select {
+  width: 100%;
+}
+
 .prop-row input,
 .prop-row select {
   width: 100%;

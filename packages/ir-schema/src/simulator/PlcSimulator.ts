@@ -39,6 +39,19 @@ export class PlcSimulator {
     }
   }
 
+  setAi(index: number, value: number): void {
+    if (index >= 0 && index < this.state.ai.length) {
+      this.state.ai[index] = value;
+    }
+  }
+
+  setAiBySymbol(symbol: string, value: number): void {
+    const entry = this.ir.io_image.ai.find((d) => d.symbol === symbol);
+    if (entry) {
+      this.setAi(entry.index, value);
+    }
+  }
+
   /** Run exactly one scan (useful in tests). */
   stepOnce(): SimulatorSnapshot {
     return runScan(this.state, this.ir, this.scanPeriodMs);

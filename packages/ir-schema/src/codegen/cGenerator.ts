@@ -1,7 +1,7 @@
 import type { PlcIr, PlcPrimitiveType, ScheduleStep } from "../types";
 import type { IoMap } from "../types";
 import { IR_VERSION } from "../constants";
-import { codegenIoHalConfig, type CodegenFirmwareOutput } from "./codegenFirmware";
+import { codegenIoHalConfig, type CodegenFirmwareOutput, type CodegenIoContext } from "./codegenFirmware";
 
 export interface CodegenCResult {
   plc_program_c: string;
@@ -71,6 +71,14 @@ function line(step: ScheduleStep, dtExpr: string): string[] {
       return [
         `    npgen_di[${idx}] = nanoplc_hal_read_di(${idx});`,
         `    ${out} = npgen_di[${idx}];`,
+      ];
+    }
+    case "read_ai": {
+      const idx = step.index ?? 0;
+      const out = varRef(step.out ?? step.symbol);
+      return [
+        `    npgen_ai[${idx}] = nanoplc_hal_read_ai(${idx});`,
+        `    ${out} = npgen_ai[${idx}];`,
       ];
     }
     case "write_do": {
@@ -150,6 +158,7 @@ export function computeIrMagic(ir: PlcIr, irSha256Hex: string): number {
 
 export function codegenC(ir: PlcIr, irSha256Hex: string, _ioMap?: IoMap): CodegenCResult {
   const diCount = Math.max(0, ...ir.io_image.di.map((d) => d.index + 1), 0);
+  const aiCount = Math.max(0, ...ir.io_image.ai.map((d) => d.index + 1), 0);
   const doCount = Math.max(0, ...ir.io_image.do.map((d) => d.index + 1), 0);
   const typedVars = collectTypedVars(ir);
   const tons = tonBlocks(ir);
@@ -178,6 +187,7 @@ uint32_t nanoplc_runtime_scan_period_ms(void);
 #define NPGEN_SCAN_DT_MS ${ir.project.scan_period_ms}u
 
 static bool npgen_di[${diCount || 1}];
+static float npgen_ai[${aiCount || 1}];
 static bool npgen_do[${doCount || 1}];
 ${varDecls ? `${varDecls}\n` : ""}${tonStructs ? `${tonStructs}\n` : ""}
 uint32_t nanoplc_generated_magic(void)
@@ -200,10 +210,16 @@ ${body}
   };
 }
 
-export function codegenFirmware(ir: PlcIr, irSha256Hex: string, ioMap?: IoMap): CodegenFirmwareOutput {
-  const core = codegenC(ir, irSha256Hex, ioMap);
+export function codegenFirmware(
+  ir: PlcIr,
+  irSha256Hex: string,
+  context?: CodegenIoContext
+): CodegenFirmwareOutput {
+  const core = codegenC(ir, irSha256Hex, context?.ioMap);
   return {
     ...core,
-    io_hal_config_c: codegenIoHalConfig(ir, ioMap),
+    io_hal_config_c: codegenIoHalConfig(ir, context),
   };
 }
+
+export type { CodegenIoContext } from "./codegenFirmware";

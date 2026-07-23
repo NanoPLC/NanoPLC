@@ -13,6 +13,9 @@ static const nanoplc_hal_do_entry_t *s_do_table;
 static size_t s_do_count;
 
 static bool s_do_shadow[16];
+static nanoplc_hal_do_write_fn s_do_writers[NANOPLC_HAL_MAX_DO];
+static nanoplc_hal_di_read_fn s_di_readers[NANOPLC_HAL_MAX_DI];
+static nanoplc_hal_ai_read_fn s_ai_readers[NANOPLC_HAL_MAX_AI];
 
 static const nanoplc_hal_di_entry_t *find_di(size_t index)
 {
@@ -48,6 +51,9 @@ void nanoplc_hal_init(const nanoplc_hal_di_entry_t *di, size_t di_count,
     s_do_table = do_entries;
     s_do_count = do_count;
     memset(s_do_shadow, 0, sizeof(s_do_shadow));
+    memset(s_do_writers, 0, sizeof(s_do_writers));
+    memset(s_di_readers, 0, sizeof(s_di_readers));
+    memset(s_ai_readers, 0, sizeof(s_ai_readers));
 
     for (size_t i = 0; i < di_count; i++) {
         const nanoplc_hal_di_entry_t *e = &di[i];
@@ -90,8 +96,33 @@ void nanoplc_hal_init(const nanoplc_hal_di_entry_t *di, size_t di_count,
     ESP_LOGI(TAG, "HAL init: %u DI, %u DO mapped", (unsigned)di_count, (unsigned)do_count);
 }
 
+void nanoplc_hal_register_do_writer(size_t index, nanoplc_hal_do_write_fn fn)
+{
+    if (index < NANOPLC_HAL_MAX_DO) {
+        s_do_writers[index] = fn;
+    }
+}
+
+void nanoplc_hal_register_di_reader(size_t index, nanoplc_hal_di_read_fn fn)
+{
+    if (index < NANOPLC_HAL_MAX_DI) {
+        s_di_readers[index] = fn;
+    }
+}
+
+void nanoplc_hal_register_ai_reader(size_t index, nanoplc_hal_ai_read_fn fn)
+{
+    if (index < NANOPLC_HAL_MAX_AI) {
+        s_ai_readers[index] = fn;
+    }
+}
+
 bool nanoplc_hal_read_di(size_t index)
 {
+    if (index < NANOPLC_HAL_MAX_DI && s_di_readers[index] != NULL) {
+        return s_di_readers[index](index);
+    }
+
     const nanoplc_hal_di_entry_t *e = find_di(index);
     if (e == NULL || e->gpio < 0) {
         return false;
@@ -107,8 +138,20 @@ void nanoplc_hal_write_do(size_t index, bool value)
     }
 
     const nanoplc_hal_do_entry_t *e = find_do(index);
+    if (e != NULL && e->gpio < 0 && index < NANOPLC_HAL_MAX_DO && s_do_writers[index] != NULL) {
+        s_do_writers[index](index, value);
+        return;
+    }
     if (e == NULL || e->gpio < 0) {
         return;
     }
     gpio_level(e->gpio, e->active_high, value);
+}
+
+float nanoplc_hal_read_ai(size_t index)
+{
+    if (index < NANOPLC_HAL_MAX_AI && s_ai_readers[index] != NULL) {
+        return s_ai_readers[index](index);
+    }
+    return 0.0f;
 }

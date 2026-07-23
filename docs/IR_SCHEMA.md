@@ -64,13 +64,23 @@ Optional **`layout`** map (`block id → { x, y }`) stores canvas positions for 
 
 Open `*.fbd.json` in VS Code with the **FBD Diagram** custom editor (palette, pan/zoom, wiring, properties).
 
-Supported block types (v0): `DI`, `DO`, `AND`, `OR`, `NOT`, `TON`, `CONST`.
+Supported block types (v0): `DI`, `DO`, `AI`, `AND`, `OR`, `NOT`, `TON`, `CONST`.
 
-For `DI` / `DO`, set `params.channel` (1-based hardware channel from the device catalog / `io-map`) and `params.symbol` (usually `DI_n` / `DO_n`). The FBD editor lists free channels from the project device profile and prevents selecting the same channel twice. Compile diagnostics: `NP-0212` (duplicate channel), `NP-0213` (duplicate symbol), `NP-0214` (missing channel assignment).
+For `DI`, `DO`, and `AI`, bind the block to a process-image row via the FBD editor **module → channel** picker. Persisted params:
+
+| Param | Role |
+|-------|------|
+| `params.moduleId` | Hardware module id from `nanoplc.project.json` → `modules[]` (e.g. `stamplc_io`, `stamplc_io_exp1`) |
+| `params.channel` | **Local** 1-based channel within that module (not the global process-image index) |
+| `params.symbol` | Canonical row name in merged `io-map` (e.g. `DO_1`, `DO_5`, `AI_1`) — used by the compiler and HAL |
+
+The editor lists channels **per module** (onboard vs expansion). The same local channel number may exist on different modules; the editor prevents reusing the same **symbol**. Compile diagnostics: `NP-0213` (duplicate symbol), `NP-0214` (missing module/channel or symbol). (`NP-0212` duplicate channel is **retired** — multi-module projects use symbol uniqueness instead.)
+
+Expansion modules use `src/modules/<id>.json` (merged with onboard `src/io-map.json`). See `packages/ir-schema/src/moduleCatalog.ts`.
+
+Device I/O counts live in `DeviceIoProfile` / module catalog (`di_count` / `do_count` / `ai_count`); optional `di_channels` / `do_channels` / `ai_channels` arrays override default `1..N` numbering inside a module template.
 
 `CONST` is a typed literal (`params.data_type` + `params.value`) with output `Q`. Supported types: `BOOL`, `INT`, `DINT`, `UINT`, `WORD`, `REAL`. The type and value are shown on the block. Wiring a non-BOOL constant into a BOOL input (logic / DO / TON) produces `NP-0305`. Invalid values produce `NP-0215`.
-
-Device I/O counts live in `DeviceIoProfile` (`di_count` / `do_count`); optional `di_channels` / `do_channels` arrays override the default `1..N` numbering for modular devices.
 
 ## Compiled IR (`build/ir.json`)
 
@@ -79,8 +89,8 @@ Top-level entities:
 | Entity | Role |
 |--------|------|
 | `project` | Name, board, scan period, active program |
-| `variables` | Symbols with PLC types and roles (`di`, `do`, `internal`, …) |
-| `io_image` | Ordered DI/DO index map for simulator and HAL |
+| `variables` | Symbols with PLC types and roles (`di`, `do`, `ai`, `internal`, …) |
+| `io_image` | Ordered DI / DO / AI index map for simulator and HAL |
 | `network` | Original FBD blocks and wires |
 | `instances` | FB instances (e.g. `TON`) |
 | `schedule` | **Ordered** execution steps (topological compile output) |
@@ -101,13 +111,13 @@ Types, validation, and `compileFbdToIr()` live in **`packages/ir-schema/`**. The
 
 ### Simulator
 
-`PlcSimulator` loads compiled `PlcIr` and runs the ordered `schedule` each scan. Supported ops: `read_di`, `write_do`, `and`, `or`, `not`, `ton`, `move`, `const`.
+`PlcSimulator` loads compiled `PlcIr` and runs the ordered `schedule` each scan. Supported ops: `read_di`, `read_ai`, `write_do`, `and`, `or`, `not`, `ton`, `move`, `const`. The simulation webview exposes manual **DI**, **DO**, and **AI** (REAL) values for bound channels.
 
 ### C codegen
 
 `codegenC(ir, irSha256)` emits `plc_program.c` for `nanoplc_generated`. CLI: `tools/codegen/` (`nanoplc-codegen`).
 
-With `src/io-map.json`, codegen also emits **`io_hal_config.c`** (GPIO tables) and scan logic calls `nanoplc_hal_read_di` / `nanoplc_hal_write_do`.
+With project I/O metadata (`src/io-map.json`, `src/modules/*.json`), codegen emits **`io_hal_config.c`**: GPIO tables plus registered DI/DO/AI hooks (`nanoplc_hal_read_di`, `nanoplc_hal_write_do`, `nanoplc_hal_read_ai`) for onboard AW9523 and StamPLC IO I2C drivers when present in the device tree.
 
 
 JSON Schema files (optional editor validation): `packages/ir-schema/schemas/`.

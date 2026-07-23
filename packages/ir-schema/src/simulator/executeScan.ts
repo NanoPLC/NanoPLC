@@ -51,6 +51,14 @@ export function executeScheduleStep(state: SimState, step: ScheduleStep, dt_ms: 
       writeBool(state, step.out ?? step.symbol, state.di[idx] ?? false);
       break;
     }
+    case "read_ai": {
+      const idx = step.index ?? 0;
+      const value = state.ai[idx] ?? 0;
+      if (step.out ?? step.symbol) {
+        state.vars[step.out ?? step.symbol!] = value;
+      }
+      break;
+    }
     case "write_do": {
       const value = readBool(state, step.in1);
       const idx = step.index ?? 0;
@@ -97,6 +105,7 @@ export function executeScheduleStep(state: SimState, step: ScheduleStep, dt_ms: 
 
 export function createSimState(ir: PlcIr): SimState {
   const diLen = Math.max(0, ...ir.io_image.di.map((d) => d.index + 1), 0);
+  const aiLen = Math.max(0, ...ir.io_image.ai.map((d) => d.index + 1), 0);
   const doLen = Math.max(0, ...ir.io_image.do.map((d) => d.index + 1), 0);
 
   const vars: Record<string, boolean | number> = {};
@@ -111,6 +120,7 @@ export function createSimState(ir: PlcIr): SimState {
   return {
     vars,
     di: Array.from({ length: diLen }, () => false),
+    ai: Array.from({ length: aiLen }, () => 0),
     do: Array.from({ length: doLen }, () => false),
     ton: new Map(),
     scan_index: 0,
@@ -133,6 +143,7 @@ export function snapshot(state: SimState): SimulatorSnapshot {
     elapsed_ms: state.elapsed_ms,
     vars: { ...state.vars },
     di: [...state.di],
+    ai: [...state.ai],
     do: [...state.do],
   };
 }

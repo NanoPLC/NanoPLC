@@ -23,10 +23,10 @@ Each **user project** is a folder with `nanoplc.project.json`, `src/`, `build/`,
 2. **Setup ESP-IDF:** Command Palette → **NanoPLC: Setup ESP-IDF toolchain** — then set `nanoplc-idf.idfSetupScript` to the printed `export.ps1` / `export.sh` path ([`docs/BOOTSTRAP_TOOLCHAIN.md`](docs/BOOTSTRAP_TOOLCHAIN.md)).
 3. **Open an empty folder** as workspace.
 4. **NanoPLC: Add device** — pick a device from the catalog (e.g. **M5Stack StamPLC** — 8 DI / 4 DO, or **Generic ESP32-S3**). Creates `nanoplc.project.json`, FBD starter, `io-map.json`, and `firmware/`.
-5. Edit **Main** in the FBD canvas (Project tree → Application → Programs). Assign a **hardware channel** on every **Digital In** / **Digital Out** (from the device profile — e.g. StamPLC 8 DI / 4 DO). Optional: **Constant** (`BOOL` / `INT` / `WORD` / …).
-6. **Compile** (FBD toolbar or **NanoPLC: Compile PLC program**) — validates the graph (including I/O channels), writes `build/ir.json`, generates `firmware/components/nanoplc_generated/*.c`. When `nanoplc.buildFirmwareOnCompile` is true, also runs **`idf.py build`**.
-7. **Build firmware** (FBD toolbar or **NanoPLC: Build firmware**) — same PLC compile + checks, then always runs **`idf.py build`** for the project device. Refuses to build if a DI/DO has no channel.
-8. **NanoPLC: Run simulation** — virtual DI/DO before hardware.
+5. Edit **Main** in the FBD canvas (Project tree → Application → Programs). On every **Digital In**, **Digital Out**, and **Analog In** block, pick **module → channel** in properties (e.g. onboard **DO 1** vs expansion **StamPLC IO · DO 1**). Optional: **Constant** (`BOOL` / `INT` / `WORD` / …). With StamPLC, use **Add I/O module** in the device tree for **StamPLC IO** expansion (extra DO + AI over I2C).
+6. **Compile** (FBD toolbar or **NanoPLC: Compile PLC program**) — validates the graph (including I/O bindings), writes `build/ir.json`, generates `firmware/components/nanoplc_generated/*.c`. When `nanoplc.buildFirmwareOnCompile` is true, also runs **`idf.py build`**.
+7. **Build firmware** (FBD toolbar or **NanoPLC: Build firmware**) — same PLC compile + checks, then always runs **`idf.py build`** for the project device. Refuses to build if an I/O block has no module/channel (or symbol) assigned.
+8. **NanoPLC: Run simulation** — virtual DI / DO / AI before hardware.
 9. **NanoPLC: Flash firmware** — after a successful build.
 
 **Compile vs Build firmware:** Compile = FBD → IR → C (+ optional idf build via setting). Build firmware = that pipeline (with validation) + explicit ESP-IDF build.
@@ -40,7 +40,8 @@ my-plc/
 ├── nanoplc.project.json    # device, modules, drivers, programs, firmware_root
 ├── src/
 │   ├── main.fbd.json
-│   └── io-map.json
+│   ├── io-map.json         # onboard module I/O map
+│   └── modules/            # expansion module configs (e.g. stamplc_io_exp1.json)
 ├── build/
 │   ├── ir.json
 │   └── generated.manifest.json
@@ -65,7 +66,7 @@ Requires ESP-IDF **v5.3** exported in the shell. `nanoplc_runtime` uses componen
 
 See [`firmware/README.md`](firmware/README.md).
 
-**StamPLC note:** catalog projects use AW9523 I/O (`m5_aw9523` driver). Simulator and compile work; on-device I/O needs the AW9523 HAL driver (planned — §49).
+**StamPLC note:** onboard I/O uses the AW9523 expander (`m5_aw9523`); **StamPLC IO** expansion modules use `m5_stamplc_io` on the shared internal I2C bus (relay/SSR DO + 2 analog inputs). Codegen registers HAL readers/writers from the project device tree.
 
 ## Build the extension
 

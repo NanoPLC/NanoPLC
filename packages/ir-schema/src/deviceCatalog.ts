@@ -2,12 +2,16 @@ import { IO_MAP_SCHEMA_VERSION } from "./constants";
 import type { IoMap, IoMapEntry, NanoPlcDriverRef, NanoPlcModuleRef, NanoPlcProject } from "./types";
 
 export interface DeviceIoChannel {
-  /** 1-based channel number shown in the editor (e.g. Digital In 1). */
+  /** 1-based channel number within the module (shown in the editor). */
   channel: number;
   /** Symbol written into FBD block params and io-map (e.g. DI_1). */
   symbol: string;
   /** 0-based process-image index. */
   index: number;
+  /** Project module id (device tree). */
+  moduleId?: string;
+  /** Human-readable module name from the device tree. */
+  moduleName?: string;
 }
 
 export interface DeviceIoProfile {
@@ -15,6 +19,11 @@ export interface DeviceIoProfile {
   do_count: number;
   di_symbol_prefix: string;
   do_symbol_prefix: string;
+  /** Analog input count (REAL process image). */
+  ai_count?: number;
+  ai_symbol_prefix?: string;
+  /** Explicit 1-based AI channel numbers; defaults to `1 .. ai_count`. */
+  ai_channels?: number[];
   /**
    * Explicit 1-based DI channel numbers for modular devices.
    * When omitted, channels are `1 .. di_count`.
@@ -46,10 +55,23 @@ export function deviceDoChannels(io: DeviceIoProfile): number[] {
   return Array.from({ length: io.do_count }, (_, i) => i + 1);
 }
 
+/** Resolve AI channel numbers from a device I/O profile. */
+export function deviceAiChannels(io: DeviceIoProfile): number[] {
+  const count = io.ai_count ?? 0;
+  if (count <= 0) {
+    return [];
+  }
+  if (io.ai_channels && io.ai_channels.length > 0) {
+    return [...io.ai_channels];
+  }
+  return Array.from({ length: count }, (_, i) => i + 1);
+}
+
 /** Build editor/compiler channel lists from a device I/O profile. */
 export function listDeviceIoChannels(io: DeviceIoProfile): {
   di: DeviceIoChannel[];
   do: DeviceIoChannel[];
+  ai: DeviceIoChannel[];
 } {
   const di = deviceDiChannels(io).map((channel, index) => ({
     channel,
@@ -61,13 +83,24 @@ export function listDeviceIoChannels(io: DeviceIoProfile): {
     symbol: `${io.do_symbol_prefix}${channel}`,
     index,
   }));
-  return { di, do: doList };
+  const prefix = io.ai_symbol_prefix ?? "AI_";
+  const ai = deviceAiChannels(io).map((channel, index) => ({
+    channel,
+    symbol: `${prefix}${channel}`,
+    index,
+  }));
+  return { di, do: doList, ai };
 }
 
 /** Build channel lists from an existing io-map (fallback when catalog_id is absent). */
-export function listIoChannelsFromMap(ioMap: IoMap): { di: DeviceIoChannel[]; do: DeviceIoChannel[] } {
+export function listIoChannelsFromMap(ioMap: IoMap): {
+  di: DeviceIoChannel[];
+  do: DeviceIoChannel[];
+  ai: DeviceIoChannel[];
+} {
   const di: DeviceIoChannel[] = [];
   const doList: DeviceIoChannel[] = [];
+  const ai: DeviceIoChannel[] = [];
   for (const entry of ioMap.entries) {
     const channel = entry.index + 1;
     const row: DeviceIoChannel = { channel, symbol: entry.symbol, index: entry.index };
@@ -75,11 +108,14 @@ export function listIoChannelsFromMap(ioMap: IoMap): { di: DeviceIoChannel[]; do
       di.push(row);
     } else if (entry.kind === "DO") {
       doList.push(row);
+    } else if (entry.kind === "AI") {
+      ai.push(row);
     }
   }
   di.sort((a, b) => a.index - b.index);
   doList.sort((a, b) => a.index - b.index);
-  return { di, do: doList };
+  ai.sort((a, b) => a.index - b.index);
+  return { di, do: doList, ai };
 }
 
 export interface DeviceCatalogEntry {

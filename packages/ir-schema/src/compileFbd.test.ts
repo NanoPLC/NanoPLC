@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { compileFbdToIr } from "./compileFbd";
-import { FBD_SOURCE_SCHEMA_VERSION, PROJECT_SCHEMA_VERSION } from "./constants";
+import { FBD_SOURCE_SCHEMA_VERSION, IO_MAP_SCHEMA_VERSION, PROJECT_SCHEMA_VERSION } from "./constants";
 import type { FbdSource, NanoPlcProject } from "./types";
 
 const baseProject: NanoPlcProject = {
@@ -59,20 +59,20 @@ test("compileFbdToIr detects cycle", () => {
   assert.ok(result.diagnostics.some((d) => d.code === "NP-0400"));
 });
 
-test("compileFbdToIr rejects duplicate DI channels", () => {
+test("compileFbdToIr rejects duplicate DI symbols", () => {
   const fbd: FbdSource = {
     schema_version: FBD_SOURCE_SCHEMA_VERSION,
     name: "Main",
     blocks: [
-      { id: "di1", type: "DI", params: { channel: 1, symbol: "DI_1" } },
-      { id: "di2", type: "DI", params: { channel: 1, symbol: "DI_1b" } },
+      { id: "di1", type: "DI", params: { channel: 1, symbol: "DI_1", moduleId: "onboard" } },
+      { id: "di2", type: "DI", params: { channel: 2, symbol: "DI_1", moduleId: "expansion" } },
       { id: "do1", type: "DO", params: { channel: 1, symbol: "DO_1" } },
     ],
     wires: [{ from: { block: "di1", port: "Q" }, to: { block: "do1", port: "IN" } }],
   };
   const result = compileFbdToIr(baseProject, fbd, "main");
   assert.equal(result.ok, false);
-  assert.ok(result.diagnostics.some((d) => d.code === "NP-0212"));
+  assert.ok(result.diagnostics.some((d) => d.code === "NP-0213"));
 });
 
 test("compileFbdToIr maps channel to process-image index", () => {
@@ -91,12 +91,12 @@ test("compileFbdToIr maps channel to process-image index", () => {
   assert.equal(result.ir?.io_image.do[0]?.index, 1);
 });
 
-test("compileFbdToIr rejects DI/DO without channel", () => {
+test("compileFbdToIr rejects DI/DO without symbol or channel", () => {
   const fbd: FbdSource = {
     schema_version: FBD_SOURCE_SCHEMA_VERSION,
     name: "Main",
     blocks: [
-      { id: "di1", type: "DI", params: { symbol: "DI_1" } },
+      { id: "di1", type: "DI", params: {} },
       { id: "do1", type: "DO", params: { channel: 1, symbol: "DO_1" } },
     ],
     wires: [{ from: { block: "di1", port: "Q" }, to: { block: "do1", port: "IN" } }],
@@ -104,6 +104,20 @@ test("compileFbdToIr rejects DI/DO without channel", () => {
   const result = compileFbdToIr(baseProject, fbd, "main");
   assert.equal(result.ok, false);
   assert.ok(result.diagnostics.some((d) => d.code === "NP-0214" && d.block_id === "di1"));
+});
+
+test("compileFbdToIr accepts DI with symbol only (module-local channel)", () => {
+  const fbd: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [
+      { id: "di1", type: "DI", params: { symbol: "DI_1", moduleId: "stamplc_io_exp1" } },
+      { id: "do1", type: "DO", params: { channel: 1, symbol: "DO_5", moduleId: "stamplc_io_exp1" } },
+    ],
+    wires: [{ from: { block: "di1", port: "Q" }, to: { block: "do1", port: "IN" } }],
+  };
+  const result = compileFbdToIr(baseProject, fbd, "main");
+  assert.equal(result.ok, true);
 });
 
 test("compileFbdToIr CONST feeds BOOL literal to DO", () => {
@@ -164,4 +178,22 @@ test("compileFbdToIr rejects WORD constant out of range", () => {
   const result = compileFbdToIr(baseProject, fbd, "main");
   assert.equal(result.ok, false);
   assert.ok(result.diagnostics.some((d) => d.code === "NP-0215"));
+});
+
+test("compileFbdToIr maps Analog In to read_ai schedule step", () => {
+  const fbd: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [{ id: "ai1", type: "AI", params: { channel: 1, symbol: "AI_1" } }],
+    wires: [],
+  };
+  const ioMap = {
+    schema_version: IO_MAP_SCHEMA_VERSION,
+    entries: [{ symbol: "AI_1", kind: "AI" as const, index: 0 }],
+  };
+  const result = compileFbdToIr(baseProject, fbd, "main", ioMap);
+  assert.equal(result.ok, true);
+  assert.equal(result.ir?.io_image.ai.length, 1);
+  assert.equal(result.ir?.schedule[0]?.op, "read_ai");
+  assert.equal(result.ir?.variables.find((v) => v.name === "AI_1")?.type, "REAL");
 });

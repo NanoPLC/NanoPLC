@@ -42,6 +42,17 @@ function renderHtml(ir: PlcIr, snap: SimulatorSnapshot): string {
     })
     .join("");
 
+  const aiRows = ir.io_image.ai
+    .map((d) => {
+      const val = snap.ai[d.index] ?? 0;
+      return `<tr>
+        <td>${escapeHtml(d.symbol)}</td>
+        <td>${d.index}</td>
+        <td><input class="ai-value" type="number" step="any" data-index="${d.index}" value="${val}" /></td>
+      </tr>`;
+    })
+    .join("");
+
   const doRows = ir.io_image.do
     .map((d) => {
       const val = snap.do[d.index] ?? false;
@@ -67,6 +78,7 @@ function renderHtml(ir: PlcIr, snap: SimulatorSnapshot): string {
     button.di-toggle { min-width: 72px; cursor: pointer; }
     td.on { color: var(--vscode-testing-iconPassed); font-weight: 600; }
     td.off { color: var(--vscode-descriptionForeground); }
+    input.ai-value { width: 100%; box-sizing: border-box; }
     .meta { font-size: 0.9em; color: var(--vscode-descriptionForeground); margin-bottom: 12px; }
   </style>
 </head>
@@ -76,6 +88,11 @@ function renderHtml(ir: PlcIr, snap: SimulatorSnapshot): string {
   <table>
     <thead><tr><th>Symbol</th><th>Index</th><th>Value</th></tr></thead>
     <tbody>${diRows || "<tr><td colspan='3'>No DI mapped</td></tr>"}</tbody>
+  </table>
+  <h2>Analog inputs</h2>
+  <table>
+    <thead><tr><th>Symbol</th><th>Index</th><th>Value (REAL)</th></tr></thead>
+    <tbody>${aiRows || "<tr><td colspan='3'>No AI mapped</td></tr>"}</tbody>
   </table>
   <h2>Digital outputs</h2>
   <table>
@@ -87,6 +104,11 @@ function renderHtml(ir: PlcIr, snap: SimulatorSnapshot): string {
     document.querySelectorAll(".di-toggle").forEach((btn) => {
       btn.addEventListener("click", () => {
         vscode.postMessage({ type: "toggleDi", index: Number(btn.dataset.index) });
+      });
+    });
+    document.querySelectorAll(".ai-value").forEach((input) => {
+      input.addEventListener("change", () => {
+        vscode.postMessage({ type: "setAi", index: Number(input.dataset.index), value: Number(input.value) });
       });
     });
   </script>
@@ -119,7 +141,7 @@ function ensurePanel(context: vscode.ExtensionContext, ir: PlcIr): vscode.Webvie
     activePanel = undefined;
     void stopSimulation();
   });
-  activePanel.webview.onDidReceiveMessage((msg: { type: string; index?: number }) => {
+  activePanel.webview.onDidReceiveMessage((msg: { type: string; index?: number; value?: number }) => {
     if (msg.type === "toggleDi" && activeSimulator && typeof msg.index === "number") {
       const snap = activeSimulator.currentSnapshot();
       const current = snap.di[msg.index] ?? false;
@@ -129,9 +151,17 @@ function ensurePanel(context: vscode.ExtensionContext, ir: PlcIr): vscode.Webvie
         updatePanel(ir, activeSimulator.currentSnapshot());
       }
     }
+    if (msg.type === "setAi" && activeSimulator && typeof msg.index === "number") {
+      const value = typeof msg.value === "number" && Number.isFinite(msg.value) ? msg.value : 0;
+      activeSimulator.setAi(msg.index, value);
+      lastSnapJson = "";
+      if (activeSimulator) {
+        updatePanel(ir, activeSimulator.currentSnapshot());
+      }
+    }
   });
   context.subscriptions.push(activePanel);
-  updatePanel(ir, activeSimulator?.currentSnapshot() ?? { scan_index: 0, elapsed_ms: 0, vars: {}, di: [], do: [] });
+  updatePanel(ir, activeSimulator?.currentSnapshot() ?? { scan_index: 0, elapsed_ms: 0, vars: {}, di: [], ai: [], do: [] });
   return activePanel;
 }
 

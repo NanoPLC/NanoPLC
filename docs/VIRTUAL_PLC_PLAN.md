@@ -103,7 +103,7 @@ Device (and_gate · esp32-s3)
 
 **Workflow (v0):** **Add device** → pick from **device catalog** (I/O counts pre-filled) → optional **Add module** / **Add driver** → **Add program** → click program to edit. Context **+** on group rows; toolbar **+** for new device.
 
-- **Device catalog (v0):** [M5Stack StamPLC K141](https://shop.m5stack.com/products/m5stamp-plc-controller-with-m5stamps3) (8 DI / 4 relay via AW9523), generic ESP32-S3 GPIO template. Stored in `device.catalog_id`; `io-map.json` generated from template. Implementation: `packages/ir-schema/src/deviceCatalog.ts`, `DEVICE_CATALOG`.
+- **Device catalog (v0):** [M5Stack StamPLC K141](https://shop.m5stack.com/products/m5stamp-plc-controller-with-m5stamps3) (8 DI / 4 relay via AW9523), generic ESP32-S3 GPIO template. **Module catalog (v0):** M5Stack **StamPLC IO** expansion (3 DO, 2 AI, I2C). Stored in `device.catalog_id` / module `catalog_id`; `io-map.json` and `src/modules/*.json` generated from templates. Implementation: `packages/ir-schema/src/deviceCatalog.ts`, `moduleCatalog.ts`.
 - **Per-project firmware tree (v0):** **Add device** scaffolds `firmware/` under the project from `nanoplc-vscode/firmware-template/` (synced from repo `firmware/` at extension compile). **Compile PLC program** auto-creates or **patches** an existing tree (e.g. IDF 5.3 `esp_task_wdt` → `esp_system`). Command **NanoPLC: Init firmware tree** for manual init.
 
 - The tree **serializes into** `nanoplc.project.json` (`modules[]`, `drivers[]`, `programs[]`) and **mirrors** `src/` / `build/`—users work from the logical device root, not loose files.
@@ -142,9 +142,9 @@ Define timer behaviour (TON/TOF, etc.) up front: **`esp_timer` / RTOS tick** vs 
 
 ## 6. What to simulate (order)
 
-1. Digital I/O (buttons, coils, lamps).
-2. Standard timers (TON, TOF, pulse—per your block library).
-3. Analog stubs (temperature, pressure, ADC).
+1. Digital I/O (buttons, coils, lamps). **Done (v0)** — `DI` / `DO` blocks, simulator panel, GPIO / AW9523 / StamPLC IO DO paths.
+2. Standard timers (TON, TOF, pulse—per your block library). **Partial (v0)** — TON in IR + simulator; TOF/pulse todo.
+3. Analog I/O vs analog **device stubs**. **Partial (v0)** — **`AI` block**, `read_ai` in schedule, simulator **AI** sliders/fields, StamPLC IO voltage read on device; **todo:** themed virtual transmitters (temperature, pressure, generic ADC profiles) as simulator widgets above raw REAL values.
 4. Virtual devices (tank, motor, conveyor, valve)—layer above I/O («mini Factory I/O»).
 5. Virtual fieldbuses (Modbus, MQTT, OPC UA—as needed to test SCADA without hardware).
 
@@ -461,7 +461,7 @@ Enough for drills + golden regressions:
 
 | Block | Purpose |
 |-------|---------|
-| I/O coupling (BOOL) | map to process image via `params.channel` + device catalog / `io-map` |
+| I/O coupling (BOOL / REAL) | map to process image via **module + channel** picker (`params.moduleId`, `params.channel`, `params.symbol`) and merged `io-map` |
 | AND, OR, NOT | Boolean logic |
 | CONST | Typed literal (`BOOL`, `INT`, `DINT`, `UINT`, `WORD`, `REAL`) |
 | RS / SR latch (optional v0.1) | persistent state |
@@ -478,7 +478,7 @@ Document semantics in **`docs/BLOCK_SEMANTICS.md`**: evaluation order, PT=0 edge
 Surface Problems entries:
 
 - **Structural:** dangling wire, incompatible types (`NP-0305`), unresolved variable refs.
-- **I/O binding:** DI/DO missing channel (`NP-0214`), duplicate channel (`NP-0212`) or symbol (`NP-0213`); invalid CONST (`NP-0215`).
+- **I/O binding:** DI/DO/AI missing binding (`NP-0214`), duplicate symbol (`NP-0213`); invalid CONST (`NP-0215`). Local channel numbers may repeat across modules; uniqueness is by **symbol** (process-image row).
 - **Ordering:** combinational-feedback cycles without deliberate trigger semantics—either forbid or insert implicit delay with warning (product rule).
 - **Resource:** FB instance/IR size caps on low-end targets.
 
@@ -812,16 +812,16 @@ _Last reviewed: 2026-05-21._
 | Command: **Setup ESP-IDF toolchain** (bundled `bootstrap-idf.ps1` / `.sh`) | **Done** |
 | Command: **Check idf.py in PATH** | **Done** |
 | Command: **Add ESP-IDF export to PowerShell profile(s)** (Windows) | **Done** |
-| FBD graph editor / `customEditor` canvas | **Partial (v0)** — palette, pan/zoom, wiring, properties; **DI/DO channel** picker from device profile (unique channels); **CONST** typed literals; toolbar **Compile** / **Build firmware**; green trace todo |
-| Device / project tree (§3.2) | **Partial (v0)** — TIA-style hierarchy; **device catalog** picker (`di_count` / `do_count`, optional `di_channels` / `do_channels`); Add device/module/driver/program |
+| FBD graph editor / `customEditor` canvas | **Partial (v0)** — palette, pan/zoom, wiring, properties; **DI/DO/AI** **module → channel** picker (per hardware module); **CONST** typed literals; toolbar **Compile** / **Build firmware**; green trace todo |
+| Device / project tree (§3.2) | **Partial (v0)** — TIA-style hierarchy; **device catalog** + **module catalog** (StamPLC IO); Add device/module/driver/program |
 | `packages/ir-schema` + `docs/IR_SCHEMA.md` | **Done** |
 | Example `examples/and_gate` | **Done** |
-| TS **Virtual PLC** simulator (`PlcSimulator`, Run/Stop + I/O panel) | **Done** (v0; no green-trace yet) |
+| TS **Virtual PLC** simulator (`PlcSimulator`, Run/Stop + I/O panel) | **Done** (v0 — DI/DO/AI panel; no green-trace yet) |
 | **C codegen** → `nanoplc_generated/plc_program.c` | **Done** (v0 schedule ops; auto on compile via `nanoplc.codegenOnCompile`) |
-| **`nanoplc_hal`** GPIO from `io-map.json` | **Done** (v0 digital I/O) |
+| **`nanoplc_hal`** GPIO + registered I2C readers/writers from codegen | **Done** (v0 digital I/O; AW9523 DI/DO, StamPLC IO DO/AI) |
 | **Device catalog** + scaffold on **Add device** | **Done** (v0 — StamPLC K141, generic ESP32-S3 GPIO) |
 | **Per-project `firmware/` scaffold** + template in VSIX | **Done** (`firmware-template/`, `scripts/sync-firmware-template.js`) |
-| **Compile → codegen → `idf.py build`** (project-aware) | **Done** (v0 — compile validates I/O channels; **Build firmware** compiles then always runs idf; setting `nanoplc.buildFirmwareOnCompile` for Compile-only path) |
+| **Compile → codegen → `idf.py build`** (project-aware) | **Done** (v0 — compile validates I/O bindings; **Build firmware** compiles then always runs idf; setting `nanoplc.buildFirmwareOnCompile` for Compile-only path) |
 | Command **Init firmware tree** | **Done** |
 | Tasks: `idf.py build` / `flash` / `monitor` (project `firmware_root`) | **Done** |
 
@@ -834,7 +834,8 @@ _Last reviewed: 2026-05-21._
 | `nanoplc_runtime` CMake: `esp_system` (IDF 5.3; replaces removed `esp_task_wdt` component) | **Done** |
 | PLC scan FreeRTOS task, WDT, overrun logging, stub `nanoplc_generated_program_scan` | **Done** |
 | Maintainer workflow `idf.py set-target esp32s3` + `idf.py build` | **Done** (see `firmware/README.md`) |
-| **StamPLC AW9523 driver** (`m5_aw9523` in catalog; process-image I/O without direct GPIO) | **Todo** |
+| **StamPLC AW9523 driver** (`m5_aw9523` — onboard 8 DI / 4 relay DO @ I2C 0x59) | **Done** |
+| **StamPLC IO I2C driver** (`m5_stamplc_io` — expansion DO + analog voltage read) | **Done** |
 | CI `idf.py build` (§7.5) | **Todo** |
 
 ### Phase 0 / later phases
@@ -857,12 +858,15 @@ Unchanged: IR format lock, ordered graph compile, TS simulator, C codegen, onlin
 - **§49 implementation snapshot** plus §11 / §14 checkmarks aligned to current repo (`firmware/` bootstrap shipped, extension grammars + toolchain commands; IDE build/flash and FBD canvas still open).
 - Extension: **Build / Flash / Monitor / Set target / Diagnose** commands invoking `idf.py` under `nanoplc.firmwareRoot` with ESP-IDF export activation (§7.4, §49).
 - **Phase 0:** JSON IR (`docs/IR_SCHEMA.md`), `packages/ir-schema` compiler, project scaffold + **Compile PLC program**, Device tree, `examples/and_gate`.
-- **Phase 1 (partial):** `PlcSimulator` scan runtime + **Run simulation** webview for virtual DI/DO.
+- **Phase 1 (partial):** `PlcSimulator` scan runtime + **Run simulation** webview for virtual DI/DO/AI (§6).
 - **FBD editor v0:** `customEditor` for `*.fbd.json` — Node-RED–style canvas (palette, wires, layout); opens from Device tree program nodes.
 - **FBD wiring UX pass:** drag-to-connect (mousedown port → drag → release on compatible port) alongside click output→input; inputs accept a single wire (new connection replaces old), outputs fan out freely; wire selection/deletion fixed (click + Delete/Backspace, double-click, or **Delete connection** in properties).
 - **Project tree v0 (TIA/CODESYS-style):** device → configuration → modules → drivers → communication → application/programs; `modules[]` / `drivers[]` in `nanoplc.project.json`.
 - **Device catalog (v0):** QuickPick on **Add device**; StamPLC K141 (8 DI / 4 DO) + generic ESP32-S3; `deviceCatalog.ts`, auto `io-map.json`.
 - **Firmware per project (v0):** `firmware-template/` packaged in VSIX; scaffold on **Add device** / **Compile** / **Init firmware tree**; auto-patch legacy trees for IDF 5.3.
 - **Compile pipeline (v0):** `build/ir.json` + expanded `generated.manifest.json` (`device`, `codegen`, `firmware`); optional `idf.py build` for `device.idf_target`.
-- **FBD I/O + CONST + build gate:** DI/DO `params.channel` from device profile (unique); typed **CONST**; compile/`Build firmware` require channels (`NP-0214`); editor toolbar Compile / Build firmware.
+- **FBD I/O + CONST + build gate:** DI/DO/AI module/channel binding; typed **CONST**; compile/`Build firmware` require I/O binding (`NP-0214`); editor toolbar Compile / Build firmware.
+- **StamPLC firmware drivers:** `m5_aw9523` (onboard AW9523), `m5_stamplc_io` (expansion module I2C); codegen emits HAL init + DI/DO/AI hooks in `io_hal_config.c`.
+- **FBD multi-module I/O picker:** module dropdown + local channel per block (avoids DO/AI collisions when expansion modules are added).
+- **Analog I/O (v0 partial):** FBD **Analog In**, IR `read_ai`, simulator AI panel; themed temperature/pressure/ADC stubs remain future work (§6.3).
 - **IDF 5.3 fix:** `nanoplc_runtime` requires `esp_system` instead of removed `esp_task_wdt` component; default target in `sdkconfig.defaults`.

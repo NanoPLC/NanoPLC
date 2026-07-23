@@ -90,7 +90,7 @@ export interface FbdSource {
 
 export interface IoMapEntry {
   symbol: string;
-  kind: "DI" | "DO";
+  kind: "DI" | "DO" | "AI";
   index: number;
   gpio?: number;
   active_high?: boolean;
@@ -104,16 +104,18 @@ export interface IoMap {
 export interface IrVariable {
   name: string;
   type: PlcPrimitiveType;
-  role: "internal" | "di" | "do" | "fb_state";
+  role: "internal" | "di" | "do" | "ai" | "fb_state";
 }
 
 export interface IrIoImage {
   di: { symbol: string; index: number }[];
   do: { symbol: string; index: number }[];
+  ai: { symbol: string; index: number }[];
 }
 
 export type ScheduleOp =
   | "read_di"
+  | "read_ai"
   | "write_do"
   | "and"
   | "or"

@@ -9,12 +9,14 @@ export interface SimulatorSnapshot {
   /** Named variables (DI symbols, internal wires, DO symbols). */
   vars: Record<string, boolean | number>;
   di: boolean[];
+  ai: number[];
   do: boolean[];
 }
 
 export interface SimState {
   vars: Record<string, boolean | number>;
   di: boolean[];
+  ai: number[];
   do: boolean[];
   ton: Map<string, TonInstanceState>;
   scan_index: number;

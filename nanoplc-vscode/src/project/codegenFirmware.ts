@@ -6,6 +6,7 @@ import * as vscode from "vscode";
 import { codegenFirmware, type IoMap, type NanoPlcProject, type PlcIr } from "@nanoplc/ir-schema";
 
 import { readJsonFile } from "./projectPaths";
+import { buildCodegenIoContext, loadProjectIoProfile } from "./projectIoLoader";
 import { ensureProjectFirmwareTree } from "./scaffoldFirmware";
 import { resolveProjectFirmwareRoot } from "./projectFirmware";
 
@@ -26,7 +27,11 @@ export function resolveCodegenOutputDir(projectRoot: string, project: NanoPlcPro
   return undefined;
 }
 
-export function loadIoMap(projectRoot: string): IoMap | undefined {
+export function loadIoMap(projectRoot: string, project?: NanoPlcProject): IoMap | undefined {
+  if (project) {
+    const merged = loadProjectIoProfile(projectRoot, project).ioMap;
+    return merged.entries.length > 0 ? merged : undefined;
+  }
   const ioMapPath = path.join(projectRoot, "src", "io-map.json");
   if (!fs.existsSync(ioMapPath)) {
     return undefined;
@@ -38,9 +43,11 @@ export function writeGeneratedFirmware(
   outputDir: string,
   ir: PlcIr,
   irSha256: string,
-  ioMap?: IoMap
+  projectRoot: string,
+  project: NanoPlcProject
 ): { plcPath: string; halPath: string; magic: number } {
-  const result = codegenFirmware(ir, irSha256, ioMap);
+  const context = buildCodegenIoContext(projectRoot, project);
+  const result = codegenFirmware(ir, irSha256, context);
   const plcPath = path.join(outputDir, "plc_program.c");
   const halPath = path.join(outputDir, "io_hal_config.c");
   fs.writeFileSync(plcPath, result.plc_program_c, "utf8");
@@ -72,7 +79,13 @@ export function tryCodegenAfterCompile(
     };
   }
 
-  const { plcPath, halPath, magic } = writeGeneratedFirmware(outDir, ir, irSha256, loadIoMap(projectRoot));
+  const { plcPath, halPath, magic } = writeGeneratedFirmware(
+    outDir,
+    ir,
+    irSha256,
+    projectRoot,
+    project
+  );
   return {
     ok: true,
     message: `Generated ${path.basename(plcPath)} + ${path.basename(halPath)} (magic 0x${magic.toString(16)}) → ${outDir}`,

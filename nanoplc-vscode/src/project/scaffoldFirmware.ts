@@ -70,6 +70,40 @@ export function patchExistingFirmwareTree(firmwareRoot: string): string[] {
     }
   }
 
+  const template = resolveFirmwareTemplateRoot();
+  if (template) {
+    const stamplcSrc = path.join(template, "components", "m5_stamplc_io");
+    const stamplcDest = path.join(firmwareRoot, "components", "m5_stamplc_io");
+    if (fs.existsSync(stamplcSrc) && !fs.existsSync(stamplcDest)) {
+      copyDirRecursive(stamplcSrc, stamplcDest);
+      patches.push("added m5_stamplc_io component");
+    }
+
+    const aw9523Src = path.join(template, "components", "m5_aw9523");
+    const aw9523Dest = path.join(firmwareRoot, "components", "m5_aw9523");
+    if (fs.existsSync(aw9523Src) && !fs.existsSync(aw9523Dest)) {
+      copyDirRecursive(aw9523Src, aw9523Dest);
+      patches.push("added m5_aw9523 component");
+    }
+
+    for (const rel of [
+      path.join("components", "nanoplc_hal", "nanoplc_hal.c"),
+      path.join("components", "nanoplc_hal", "include", "nanoplc_hal.h"),
+      path.join("components", "nanoplc_generated", "CMakeLists.txt"),
+    ]) {
+      const from = path.join(template, rel);
+      const to = path.join(firmwareRoot, rel);
+      if (fs.existsSync(from) && fs.existsSync(to)) {
+        const srcText = fs.readFileSync(from, "utf8");
+        const dstText = fs.readFileSync(to, "utf8");
+        if (srcText !== dstText) {
+          fs.copyFileSync(from, to);
+          patches.push(`updated ${rel.replace(/\\/g, "/")}`);
+        }
+      }
+    }
+  }
+
   return patches;
 }
 

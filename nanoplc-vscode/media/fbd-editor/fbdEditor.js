@@ -8,8 +8,8 @@
 
   /** @type {import('@nanoplc/ir-schema').FbdSource & { layout: Record<string, {x:number,y:number}> } | null} */
   let doc = null;
-  /** @type {{ di: Array<{channel:number,symbol:string,index:number}>, do: Array<{channel:number,symbol:string,index:number}>, source: string }} */
-  let ioProfile = { di: [], do: [], source: "none" };
+  /** @type {{ di: Array<{channel:number,symbol:string,index:number,moduleId?:string,moduleName?:string}>, do: Array<{channel:number,symbol:string,index:number,moduleId?:string,moduleName?:string}>, ai: Array<{channel:number,symbol:string,index:number,moduleId?:string,moduleName?:string}>, modules: Array<{id:string,name:string,di:any[],do:any[],ai:any[]}>, source: string }} */
+  let ioProfile = { di: [], do: [], ai: [], modules: [], source: "none" };
   let selectedBlockId = null;
   let selectedWireIndex = null;
   /** @type {{ block: string, port: string } | null} */
@@ -63,10 +63,44 @@
     return params;
   }
 
+  function ioKindKey(type) {
+    const t = String(type).toUpperCase();
+    if (t === "DI") {
+      return "di";
+    }
+    if (t === "AI") {
+      return "ai";
+    }
+    if (t === "DO") {
+      return "do";
+    }
+    return null;
+  }
+
+  function ioModulesForType(type) {
+    const key = ioKindKey(type);
+    if (!key) {
+      return [];
+    }
+    if (ioProfile.modules?.length) {
+      return ioProfile.modules
+        .map((mod) => ({ id: mod.id, name: mod.name, channels: mod[key] || [] }))
+        .filter((mod) => mod.channels.length > 0);
+    }
+    const channels = ioChannelsForType(type);
+    if (channels.length === 0) {
+      return [];
+    }
+    return [{ id: "", name: "Device", channels }];
+  }
+
   function ioChannelsForType(type) {
     const t = String(type).toUpperCase();
     if (t === "DI") {
       return ioProfile.di || [];
+    }
+    if (t === "AI") {
+      return ioProfile.ai || [];
     }
     if (t === "DO") {
       return ioProfile.do || [];
@@ -74,51 +108,102 @@
     return [];
   }
 
-  function usedChannels(type, exceptBlockId) {
+  function usedSymbols(type, exceptBlockId) {
     const t = String(type).toUpperCase();
-    const channels = ioChannelsForType(t);
     const used = new Set();
     for (const block of doc?.blocks || []) {
       if (block.type.toUpperCase() !== t || block.id === exceptBlockId) {
         continue;
       }
-      const ch = Number(block.params?.channel);
-      if (Number.isFinite(ch) && ch >= 1) {
-        used.add(ch);
-        continue;
-      }
-      const symbol = String(block.params?.symbol || "");
-      const bySymbol = channels.find((c) => c.symbol === symbol);
-      if (bySymbol) {
-        used.add(bySymbol.channel);
+      const symbol = String(block.params?.symbol || "").trim();
+      if (symbol) {
+        used.add(symbol);
       }
     }
     return used;
   }
 
-  function firstFreeChannel(type) {
-    const channels = ioChannelsForType(type);
-    const used = usedChannels(type, null);
-    for (const entry of channels) {
-      if (!used.has(entry.channel)) {
-        return entry;
+  function resolveBlockIoBinding(block, type) {
+    const symbol = String(block.params?.symbol || "").trim();
+    const moduleId = String(block.params?.moduleId || "");
+    const localChannel = Number(block.params?.channel);
+
+    for (const mod of ioModulesForType(type)) {
+      if (moduleId && mod.id !== moduleId) {
+        continue;
+      }
+      for (const entry of mod.channels) {
+        if (symbol && entry.symbol === symbol) {
+          return { module: mod, entry };
+        }
+      }
+    }
+
+    if (moduleId && Number.isFinite(localChannel) && localChannel >= 1) {
+      const mod = ioModulesForType(type).find((m) => m.id === moduleId);
+      const entry = mod?.channels.find((c) => c.channel === localChannel);
+      if (mod && entry) {
+        return { module: mod, entry };
+      }
+    }
+
+    if (symbol) {
+      for (const mod of ioModulesForType(type)) {
+        const entry = mod.channels.find((c) => c.symbol === symbol);
+        if (entry) {
+          return { module: mod, entry };
+        }
+      }
+    }
+
+    return null;
+  }
+
+  function firstFreeIoBinding(type) {
+    const used = usedSymbols(type, null);
+    for (const mod of ioModulesForType(type)) {
+      for (const entry of mod.channels) {
+        if (!used.has(entry.symbol)) {
+          return { module: mod, entry };
+        }
       }
     }
     return null;
   }
 
+  function applyIoBinding(block, binding) {
+    block.params = block.params || {};
+    block.params.moduleId = binding.module.id;
+    block.params.channel = binding.entry.channel;
+    block.params.symbol = binding.entry.symbol;
+  }
+
   function paramsForNewIoBlock(type) {
     const params = defaultParams(type);
-    const free = firstFreeChannel(type);
+    const free = firstFreeIoBinding(type);
     if (free) {
-      params.channel = free.channel;
-      params.symbol = free.symbol;
+      params.moduleId = free.module.id;
+      params.channel = free.entry.channel;
+      params.symbol = free.entry.symbol;
     }
     return params;
   }
 
   function channelLabel(entry) {
     return `${entry.channel} — ${entry.symbol}`;
+  }
+
+  function blockModuleChannelLabel(block, type) {
+    const binding = resolveBlockIoBinding(block, type);
+    if (binding) {
+      return `${binding.module.name} · ${binding.entry.channel} · ${binding.entry.symbol}`;
+    }
+    const ch = Number(block.params?.channel);
+    const symbol = block.params?.symbol ? String(block.params.symbol) : "";
+    if (Number.isFinite(ch) && ch >= 1) {
+      return symbol ? `${ch} · ${symbol}` : String(ch);
+    }
+    return symbol || null;
   }
 
   function applyTransform() {
@@ -199,10 +284,11 @@
   function blockSubtitle(block) {
     const def = findDef(block.type);
     const t = String(block.type).toUpperCase();
-    if ((t === "DI" || t === "DO") && block.params?.channel !== undefined && block.params?.channel !== "") {
-      const ch = Number(block.params.channel);
-      const symbol = block.params?.symbol ? String(block.params.symbol) : `${t}_${ch}`;
-      return Number.isFinite(ch) ? `${ch} · ${symbol}` : symbol;
+    if ((t === "DI" || t === "DO" || t === "AI") && (block.params?.symbol || block.params?.channel !== undefined)) {
+      const label = blockModuleChannelLabel(block, t);
+      if (label) {
+        return label;
+      }
     }
     if (t === "CONST") {
       return formatConstSubtitle(block.params);
@@ -529,79 +615,143 @@
 
   function renderChannelParam(block, paramDef) {
     const row = document.createElement("div");
-    row.className = "prop-row";
+    row.className = "prop-row prop-row-io";
     const label = document.createElement("label");
     label.textContent = paramDef.label;
-    const select = document.createElement("select");
-    const channels = ioChannelsForType(block.type);
-    const used = usedChannels(block.type, block.id);
-    let current = Number(block.params?.channel);
-    if (!Number.isFinite(current) || current < 1) {
-      const bySymbol = channels.find((c) => c.symbol === String(block.params?.symbol || ""));
-      if (bySymbol) {
-        current = bySymbol.channel;
-      }
+    row.appendChild(label);
+
+    const group = document.createElement("div");
+    group.className = "prop-io-group";
+
+    const moduleSelect = document.createElement("select");
+    moduleSelect.className = "prop-io-module";
+    const channelSelect = document.createElement("select");
+    channelSelect.className = "prop-io-channel";
+
+    const modules = ioModulesForType(block.type);
+    const used = usedSymbols(block.type, block.id);
+    const binding = resolveBlockIoBinding(block, block.type);
+    let currentModuleId = binding?.module.id ?? String(block.params?.moduleId || "");
+    let currentChannel = binding?.entry.channel ?? Number(block.params?.channel);
+
+    const moduleEmpty = document.createElement("option");
+    moduleEmpty.value = "";
+    moduleEmpty.textContent = modules.length ? "Select module…" : "No modules";
+    moduleSelect.appendChild(moduleEmpty);
+
+    if (modules.length === 0) {
+      moduleSelect.disabled = true;
+      channelSelect.disabled = true;
     }
 
-    const empty = document.createElement("option");
-    empty.value = "";
-    empty.textContent = channels.length ? "Select channel…" : "No device channels";
-    select.appendChild(empty);
-
-    if (channels.length === 0) {
-      select.disabled = true;
-    }
-
-    for (const entry of channels) {
+    for (const mod of modules) {
       const opt = document.createElement("option");
-      opt.value = String(entry.channel);
-      opt.textContent = channelLabel(entry);
-      const taken = used.has(entry.channel);
-      if (taken && entry.channel !== current) {
-        opt.disabled = true;
-        opt.textContent += " (in use)";
-      }
-      if (entry.channel === current) {
+      opt.value = mod.id;
+      opt.textContent = mod.name;
+      if (mod.id === currentModuleId) {
         opt.selected = true;
       }
-      select.appendChild(opt);
+      moduleSelect.appendChild(opt);
     }
 
-    if (Number.isFinite(current) && current >= 1 && !channels.some((c) => c.channel === current)) {
-      const orphan = document.createElement("option");
-      orphan.value = String(current);
-      orphan.textContent = `${current} — ${block.params?.symbol || "unmapped"} (not on device)`;
-      orphan.selected = true;
-      select.appendChild(orphan);
+    function fillChannelSelect() {
+      channelSelect.innerHTML = "";
+      const channelEmpty = document.createElement("option");
+      channelEmpty.value = "";
+      channelEmpty.textContent = "Select channel…";
+      channelSelect.appendChild(channelEmpty);
+
+      const mod = modules.find((m) => m.id === moduleSelect.value);
+      if (!mod) {
+        channelSelect.disabled = true;
+        return;
+      }
+
+      channelSelect.disabled = false;
+      for (const entry of mod.channels) {
+        const opt = document.createElement("option");
+        opt.value = String(entry.channel);
+        opt.textContent = channelLabel(entry);
+        const taken = used.has(entry.symbol);
+        if (taken && entry.symbol !== binding?.entry.symbol) {
+          opt.disabled = true;
+          opt.textContent += " (in use)";
+        }
+        if (entry.channel === currentChannel && mod.id === currentModuleId) {
+          opt.selected = true;
+        }
+        channelSelect.appendChild(opt);
+      }
+
+      if (
+        Number.isFinite(currentChannel) &&
+        currentChannel >= 1 &&
+        mod.id === currentModuleId &&
+        !mod.channels.some((c) => c.channel === currentChannel)
+      ) {
+        const orphan = document.createElement("option");
+        orphan.value = String(currentChannel);
+        orphan.textContent = `${currentChannel} — ${block.params?.symbol || "unmapped"} (not on module)`;
+        orphan.selected = true;
+        channelSelect.appendChild(orphan);
+      }
     }
 
-    select.addEventListener("change", () => {
+    fillChannelSelect();
+
+    function onIoSelectionChange() {
       block.params = block.params || {};
-      if (!select.value) {
+      const mod = modules.find((m) => m.id === moduleSelect.value);
+      if (!mod || !channelSelect.value) {
+        delete block.params.moduleId;
         delete block.params.channel;
         delete block.params.symbol;
-      } else {
-        const channel = Number(select.value);
-        const entry = channels.find((c) => c.channel === channel);
-        block.params.channel = channel;
-        block.params.symbol = entry?.symbol || `${String(block.type).toUpperCase()}_${channel}`;
+        commit();
+        return;
       }
+      const localChannel = Number(channelSelect.value);
+      const entry = mod.channels.find((c) => c.channel === localChannel);
+      block.params.moduleId = mod.id;
+      block.params.channel = localChannel;
+      block.params.symbol = entry?.symbol || `${String(block.type).toUpperCase()}_${localChannel}`;
+      currentModuleId = mod.id;
+      currentChannel = localChannel;
+      commit();
+    }
+
+    moduleSelect.addEventListener("change", () => {
+      block.params = block.params || {};
+      currentModuleId = moduleSelect.value;
+      currentChannel = NaN;
+      if (moduleSelect.value) {
+        block.params.moduleId = moduleSelect.value;
+      } else {
+        delete block.params.moduleId;
+      }
+      delete block.params.channel;
+      delete block.params.symbol;
+      fillChannelSelect();
       commit();
     });
+    channelSelect.addEventListener("change", onIoSelectionChange);
 
-    row.appendChild(label);
-    row.appendChild(select);
+    group.appendChild(moduleSelect);
+    group.appendChild(channelSelect);
+    row.appendChild(group);
 
     if (ioProfile.source === "none") {
       const hint = document.createElement("p");
       hint.className = "prop-hint";
       hint.textContent = "Open a NanoPLC project with a device catalog or io-map.json to list channels.";
       row.appendChild(hint);
-    } else if (channels.length > 0 && used.size >= channels.length && !(Number.isFinite(current) && current >= 1)) {
-      const hint = document.createElement("p");
-      hint.className = "prop-hint";
-      hint.textContent = "All channels of this type are already assigned.";
-      row.appendChild(hint);
+    } else {
+      const totalChannels = modules.reduce((sum, mod) => sum + mod.channels.length, 0);
+      if (totalChannels > 0 && used.size >= totalChannels && !binding) {
+        const hint = document.createElement("p");
+        hint.className = "prop-hint";
+        hint.textContent = "All channels of this type are already assigned.";
+        row.appendChild(hint);
+      }
     }
 
     el.properties.appendChild(row);
@@ -776,7 +926,7 @@
     }
 
     const t = String(block.type).toUpperCase();
-    if ((t === "DI" || t === "DO") && block.params?.symbol) {
+    if ((t === "DI" || t === "DO" || t === "AI") && block.params?.symbol) {
       const symRow = document.createElement("div");
       symRow.className = "prop-row";
       symRow.innerHTML = `<label>Symbol</label><input readonly value="${String(block.params.symbol)}" />`;
@@ -838,7 +988,7 @@
       y: (-panY + el.viewport.clientHeight / 2) / zoom - BLOCK_H / 2,
     };
     const upper = String(type).toUpperCase();
-    const params = upper === "DI" || upper === "DO" ? paramsForNewIoBlock(type) : defaultParams(type);
+    const params = upper === "DI" || upper === "DO" || upper === "AI" ? paramsForNewIoBlock(type) : defaultParams(type);
     doc.blocks.push({ id, type: upper, params });
     doc.layout[id] = { x: Math.round(center.x), y: Math.round(center.y) };
     selectedBlockId = id;
@@ -1027,7 +1177,7 @@
       el.parseError.classList.add("hidden");
       renderAll();
     } else if (msg.type === "ioProfile") {
-      ioProfile = msg.payload || { di: [], do: [], source: "none" };
+      ioProfile = msg.payload || { di: [], do: [], ai: [], modules: [], source: "none" };
       if (doc) {
         renderProperties();
         renderBlocks();
