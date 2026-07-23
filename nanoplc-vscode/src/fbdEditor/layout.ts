@@ -1,9 +1,9 @@
 import type { FbdBlock, FbdSource } from "@nanoplc/ir-schema";
 
-const BLOCK_W = 128;
+const BLOCK_W = 168;
 const BLOCK_H = 56;
 const COL_GAP = 180;
-const ROW_GAP = 80;
+const ROW_GAP = 88;
 const ORIGIN_X = 48;
 const ORIGIN_Y = 48;
 

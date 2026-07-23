@@ -5,6 +5,8 @@ export {
   PROJECT_SCHEMA_VERSION,
 } from "./constants";
 export { compileFbdToIr } from "./compileFbd";
+export { inferFbdPortTypes } from "./fbdPortTypes";
+export type { FbdPortTypes } from "./fbdPortTypes";
 export { codegenC, computeIrMagic, codegenFirmware } from "./codegen/cGenerator";
 export type { CodegenCResult } from "./codegen/cGenerator";
 export type { CodegenFirmwareOutput, CodegenIoContext } from "./codegen/codegenFirmware";

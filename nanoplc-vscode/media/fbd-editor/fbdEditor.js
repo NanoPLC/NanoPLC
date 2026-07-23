@@ -3,8 +3,11 @@
   const vscode = acquireVsCodeApi();
   const catalog = window.__NANOPLC_BLOCK_CATALOG__ || [];
 
-  const BLOCK_W = 128;
+  const BLOCK_W = 168;
   const BLOCK_H = 56;
+
+  /** @type {{ outputs: Record<string, string>, inputs: Record<string, Record<string, string>> }} */
+  let portTypes = { outputs: {}, inputs: {} };
 
   /** @type {import('@nanoplc/ir-schema').FbdSource & { layout: Record<string, {x:number,y:number}> } | null} */
   let doc = null;
@@ -37,6 +40,196 @@
 
   function findDef(type) {
     return catalog.find((b) => b.type === String(type).toUpperCase());
+  }
+
+  // Keep in sync with packages/ir-schema/src/fbdPortTypes.ts
+  const MATH_BLOCKS = new Set(["ADD", "SUB", "MUL", "DIV"]);
+  const REAL_MATH_BLOCKS = new Set(["POW", "SQRT"]);
+  const BIT_BLOCKS = new Set(["SETBIT", "RESETBIT", "SHL", "SHR", "ROL", "ROR"]);
+  const BOOL_BLOCKS = new Set(["AND", "OR", "NOT", "TON", "RS"]);
+  const NUMERIC_RANK = { BOOL: 0, WORD: 1, UINT: 2, INT: 3, DINT: 4, REAL: 5 };
+
+  function parseConstDataType(params) {
+    const raw = String(params?.data_type ?? params?.type ?? "BOOL").toUpperCase();
+    const allowed = ["BOOL", "INT", "DINT", "UINT", "WORD", "REAL"];
+    return allowed.includes(raw) ? raw : "BOOL";
+  }
+
+  function unifyNumericTypes(a, b) {
+    return NUMERIC_RANK[a] >= NUMERIC_RANK[b] ? a : b;
+  }
+
+  function findWireTo(blockId, port, wires) {
+    const p = port.toUpperCase();
+    return wires.find((w) => w.to.block === blockId && w.to.port.toUpperCase() === p);
+  }
+
+  function inferOutputTypeForBlock(blockId, blocks, wires, memo, visiting) {
+    if (memo.has(blockId)) {
+      return memo.get(blockId);
+    }
+    if (visiting.has(blockId)) {
+      return "REAL";
+    }
+    visiting.add(blockId);
+    const block = blocks.get(blockId);
+    if (!block) {
+      visiting.delete(blockId);
+      return "BOOL";
+    }
+    const t = block.type.toUpperCase();
+    let result;
+    if (t === "CONST") {
+      result = parseConstDataType(block.params);
+    } else if (t === "AI") {
+      result = "REAL";
+    } else if (REAL_MATH_BLOCKS.has(t)) {
+      result = "REAL";
+    } else if (MATH_BLOCKS.has(t)) {
+      const in1 = inferWiredSourceType(blockId, "IN1", blocks, wires, memo, visiting);
+      const in2 = inferWiredSourceType(blockId, "IN2", blocks, wires, memo, visiting);
+      result = unifyNumericTypes(in1, in2);
+    } else if (BIT_BLOCKS.has(t)) {
+      result = inferWiredSourceType(blockId, "IN", blocks, wires, memo, visiting);
+      if (result === "BOOL" || result === "REAL") {
+        result = "WORD";
+      }
+    } else {
+      result = "BOOL";
+    }
+    visiting.delete(blockId);
+    memo.set(blockId, result);
+    return result;
+  }
+
+  function inferWiredSourceType(blockId, port, blocks, wires, memo, visiting) {
+    const block = blocks.get(blockId);
+    const t = block?.type.toUpperCase() ?? "";
+    const wire = findWireTo(blockId, port, wires);
+    if (!wire) {
+      if (MATH_BLOCKS.has(t) || REAL_MATH_BLOCKS.has(t)) {
+        return "REAL";
+      }
+      if (BIT_BLOCKS.has(t)) {
+        return "WORD";
+      }
+      if (port.toUpperCase() === "BIT" || port.toUpperCase() === "N") {
+        return "INT";
+      }
+      return "BOOL";
+    }
+    return inferOutputTypeForBlock(wire.from.block, blocks, wires, memo, visiting);
+  }
+
+  function buildBlockOutputTypes(blocks, wires) {
+    const memo = new Map();
+    const visiting = new Set();
+    for (const id of blocks.keys()) {
+      inferOutputTypeForBlock(id, blocks, wires, memo, visiting);
+    }
+    return memo;
+  }
+
+  function inferInputPortType(block, port, outputTypes) {
+    const t = block.type.toUpperCase();
+    const p = port.toUpperCase();
+    if (t === "DO" || BOOL_BLOCKS.has(t)) {
+      return "BOOL";
+    }
+    if (REAL_MATH_BLOCKS.has(t)) {
+      return "REAL";
+    }
+    if (MATH_BLOCKS.has(t) && (p === "IN1" || p === "IN2")) {
+      return outputTypes.get(block.id) ?? "REAL";
+    }
+    if (BIT_BLOCKS.has(t)) {
+      if (p === "BIT" || p === "N") {
+        return "INT";
+      }
+      if (p === "IN") {
+        return outputTypes.get(block.id) ?? "WORD";
+      }
+    }
+    return "BOOL";
+  }
+
+  function inputPortsForType(type) {
+    switch (type.toUpperCase()) {
+      case "DI":
+      case "AI":
+      case "CONST":
+        return [];
+      case "DO":
+        return ["IN"];
+      case "AND":
+      case "OR":
+        return ["IN1", "IN2"];
+      case "NOT":
+      case "TON":
+        return ["IN"];
+      case "RS":
+        return ["SET", "RESET1"];
+      case "ADD":
+      case "SUB":
+      case "MUL":
+      case "DIV":
+      case "POW":
+        return ["IN1", "IN2"];
+      case "SQRT":
+        return ["IN"];
+      case "SETBIT":
+      case "RESETBIT":
+        return ["IN", "BIT"];
+      case "SHL":
+      case "SHR":
+      case "ROL":
+      case "ROR":
+        return ["IN", "N"];
+      default:
+        return [];
+    }
+  }
+
+  function computePortTypes(source) {
+    const blocks = new Map((source?.blocks || []).map((b) => [b.id, b]));
+    const wires = source?.wires || [];
+    const outputTypesMap = buildBlockOutputTypes(blocks, wires);
+    const outputs = {};
+    for (const [id, type] of outputTypesMap) {
+      outputs[id] = type;
+    }
+    const inputs = {};
+    for (const block of source?.blocks || []) {
+      const ports = inputPortsForType(block.type);
+      if (ports.length === 0) {
+        continue;
+      }
+      const portMap = {};
+      for (const port of ports) {
+        portMap[port] = inferInputPortType(block, port, outputTypesMap);
+      }
+      inputs[block.id] = portMap;
+    }
+    return { outputs, inputs };
+  }
+
+  function typeClassName(type) {
+    return `type-${String(type || "BOOL").toLowerCase()}`;
+  }
+
+  function outputPortType(blockId) {
+    return portTypes.outputs[blockId] ?? "BOOL";
+  }
+
+  function inputPortType(blockId, port) {
+    return portTypes.inputs[blockId]?.[port] ?? "BOOL";
+  }
+
+  function wireSourceType(fromBlockId, fromPort, fromKind) {
+    if (fromKind === "out") {
+      return outputPortType(fromBlockId);
+    }
+    return inputPortType(fromBlockId, fromPort);
   }
 
   function nextBlockId(type) {
@@ -243,14 +436,15 @@
       const from = portCenter(wire.from.block, wire.from.port, "out");
       const to = portCenter(wire.to.block, wire.to.port, "in");
       const d = wirePath(from, to);
+      const wireType = outputPortType(wire.from.block);
+      const typeClass = typeClassName(wireType);
+      const selected = selectedWireIndex === index;
 
       const hit = document.createElementNS("http://www.w3.org/2000/svg", "path");
       hit.setAttribute("d", d);
       hit.setAttribute("class", "wire-hit");
       hit.dataset.index = String(index);
       hit.style.pointerEvents = "stroke";
-      // Use mousedown + stopPropagation so the canvas pan handler doesn't
-      // re-render (and destroy) this element before click/dblclick fire.
       hit.addEventListener("mousedown", (ev) => {
         ev.stopPropagation();
         selectWire(index);
@@ -262,7 +456,7 @@
 
       const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
       path.setAttribute("d", d);
-      path.setAttribute("class", "wire-path" + (selectedWireIndex === index ? " selected" : ""));
+      path.setAttribute("class", `wire-path ${typeClass}${selected ? " selected" : ""}`);
       path.dataset.index = String(index);
       path.style.pointerEvents = "none";
 
@@ -273,9 +467,10 @@
     if (wireDrag && wireDrag.moved) {
       const a = wireDrag.from.kind === "out" ? wireDrag.start : wireDrag.cursor;
       const b = wireDrag.from.kind === "out" ? wireDrag.cursor : wireDrag.start;
+      const previewType = wireSourceType(wireDrag.from.block, wireDrag.from.port, wireDrag.from.kind);
       const preview = document.createElementNS("http://www.w3.org/2000/svg", "path");
       preview.setAttribute("d", wirePath(a, b));
-      preview.setAttribute("class", "wire-path wire-preview");
+      preview.setAttribute("class", `wire-path wire-preview ${typeClassName(previewType)}`);
       preview.style.pointerEvents = "none";
       el.wires.appendChild(preview);
     }
@@ -299,7 +494,7 @@
     if (block.params?.pt_ms !== undefined) {
       return `PT ${block.params.pt_ms} ms`;
     }
-    return def?.label || block.type;
+    return "";
   }
 
   function constDataType(params) {
@@ -350,14 +545,45 @@
     return dataType === "BOOL" ? false : 0;
   }
 
-  /** Vertical position (%) for input pins: one centered, two spaced on the left edge. */
-  function inputPortTopPercent(index, total) {
+  /** Vertical position (%) for pins: one centered, multiple spaced vertically. */
+  function portTopPercent(index, total) {
     if (total <= 1) {
       return 50;
     }
     const top = 32;
     const bottom = 72;
     return top + (index * (bottom - top)) / (total - 1);
+  }
+
+  function blockBodyHeight(inputCount, outputCount) {
+    const portCount = Math.max(inputCount, outputCount, 1);
+    return Math.max(28, portCount * 22 + 6);
+  }
+
+  function createPortRow(block, portName, kind, index, total, type) {
+    const row = document.createElement("div");
+    row.className = `port-row port-${kind}-row`;
+    row.style.top = `${portTopPercent(index, total)}%`;
+
+    const label = document.createElement("span");
+    label.className = "port-label";
+    label.textContent = portName;
+
+    const pin = document.createElement("div");
+    pin.className = `port port-${kind} ${typeClassName(type)}`;
+    pin.dataset.port = portName;
+    pin.title = `${portName} (${type})`;
+    pin.addEventListener("mousedown", (ev) => startWireDrag(ev, block.id, portName, kind));
+    pin.addEventListener("click", (ev) => onPortClick(ev, block.id, portName, kind));
+
+    if (kind === "in") {
+      row.appendChild(pin);
+      row.appendChild(label);
+    } else {
+      row.appendChild(label);
+      row.appendChild(pin);
+    }
+    return row;
   }
 
   function renderBlocks() {
@@ -368,6 +594,10 @@
     for (const block of doc.blocks) {
       const def = findDef(block.type);
       const pos = doc.layout[block.id] || { x: 48, y: 48 };
+      const inputs = def?.inputs || [];
+      const outputs = def?.outputs || [];
+      const subtitle = blockSubtitle(block);
+
       const div = document.createElement("div");
       div.className =
         "fbd-block cat-" +
@@ -382,35 +612,33 @@
       head.textContent = def?.label || block.type;
       div.appendChild(head);
 
-      const sub = document.createElement("div");
-      sub.className = "block-sub";
-      sub.textContent = blockSubtitle(block);
-      div.appendChild(sub);
+      const body = document.createElement("div");
+      body.className = "block-body";
+      body.style.minHeight = `${blockBodyHeight(inputs.length, outputs.length)}px`;
 
       const ports = document.createElement("div");
       ports.className = "ports";
-      const inputs = def?.inputs || [];
       for (let i = 0; i < inputs.length; i++) {
         const p = inputs[i];
-        const pin = document.createElement("div");
-        pin.className = "port port-in";
-        pin.dataset.port = p;
-        pin.title = p;
-        pin.style.top = `${inputPortTopPercent(i, inputs.length)}%`;
-        pin.addEventListener("mousedown", (ev) => startWireDrag(ev, block.id, p, "in"));
-        pin.addEventListener("click", (ev) => onPortClick(ev, block.id, p, "in"));
-        ports.appendChild(pin);
+        ports.appendChild(
+          createPortRow(block, p, "in", i, inputs.length, inputPortType(block.id, p))
+        );
       }
-      for (const p of def?.outputs || []) {
-        const pin = document.createElement("div");
-        pin.className = "port port-out";
-        pin.dataset.port = p;
-        pin.title = p;
-        pin.addEventListener("mousedown", (ev) => startWireDrag(ev, block.id, p, "out"));
-        pin.addEventListener("click", (ev) => onPortClick(ev, block.id, p, "out"));
-        ports.appendChild(pin);
+      for (let i = 0; i < outputs.length; i++) {
+        const p = outputs[i];
+        ports.appendChild(
+          createPortRow(block, p, "out", i, outputs.length, outputPortType(block.id))
+        );
       }
-      div.appendChild(ports);
+      body.appendChild(ports);
+      div.appendChild(body);
+
+      if (subtitle) {
+        const sub = document.createElement("div");
+        sub.className = "block-sub";
+        sub.textContent = subtitle;
+        div.appendChild(sub);
+      }
 
       div.addEventListener("mousedown", (ev) => {
         if (ev.button !== 0 || ev.target.classList.contains("port")) {
@@ -879,6 +1107,14 @@
       return;
     }
     const def = findDef(block.type);
+
+    if (def?.description) {
+      const desc = document.createElement("p");
+      desc.className = "block-description";
+      desc.textContent = def.description;
+      el.properties.appendChild(desc);
+    }
+
     const idRow = document.createElement("div");
     idRow.className = "prop-row";
     idRow.innerHTML = `<label>ID</label><input readonly value="${block.id}" />`;
@@ -1159,6 +1395,7 @@
     if (!doc) {
       return;
     }
+    portTypes = computePortTypes(doc);
     el.title.textContent = doc.name || "FBD";
     renderBlocks();
     renderWires();

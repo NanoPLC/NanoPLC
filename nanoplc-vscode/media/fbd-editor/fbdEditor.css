@@ -11,6 +11,12 @@ body {
   color: var(--vscode-foreground);
   font-family: var(--vscode-font-family);
   font-size: 13px;
+  --fbd-type-bool: var(--vscode-charts-green);
+  --fbd-type-int: var(--vscode-charts-blue);
+  --fbd-type-dint: var(--vscode-charts-blue);
+  --fbd-type-uint: color-mix(in srgb, var(--vscode-charts-blue) 70%, var(--vscode-editor-background));
+  --fbd-type-word: var(--vscode-charts-red);
+  --fbd-type-real: var(--vscode-charts-orange);
 }
 
 #toolbar {
@@ -168,7 +174,7 @@ body {
 .fbd-block {
   position: absolute;
   pointer-events: auto;
-  width: 128px;
+  width: 168px;
   min-height: 56px;
   border: 1px solid var(--vscode-focusBorder);
   border-radius: 6px;
@@ -176,6 +182,8 @@ body {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   user-select: none;
   cursor: move;
+  display: flex;
+  flex-direction: column;
 }
 
 .fbd-block.selected {
@@ -203,19 +211,29 @@ body {
 }
 
 .block-head {
-  padding: 6px 8px 4px;
+  padding: 6px 10px 4px;
   font-weight: 600;
   font-size: 12px;
   border-bottom: 1px solid var(--vscode-panel-border);
+  flex-shrink: 0;
+}
+
+.block-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 28px;
 }
 
 .block-sub {
-  padding: 2px 8px 6px;
-  font-size: 11px;
+  padding: 4px 10px 6px;
+  font-size: 10px;
+  line-height: 1.3;
   color: var(--vscode-descriptionForeground);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  border-top: 1px solid var(--vscode-panel-border);
+  flex-shrink: 0;
 }
 
 .ports {
@@ -224,8 +242,44 @@ body {
   pointer-events: none;
 }
 
+.port-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.port-label {
+  position: absolute;
+  top: 0;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--vscode-descriptionForeground);
+  pointer-events: none;
+  white-space: nowrap;
+  transform: translateY(-50%);
+}
+
+.port-in-row .port-label {
+  left: 12px;
+  max-width: calc(50% - 16px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.port-out-row .port-label {
+  right: 12px;
+  max-width: calc(50% - 16px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+}
+
 .port {
   position: absolute;
+  top: 0;
   width: 12px;
   height: 12px;
   border-radius: 50%;
@@ -234,21 +288,43 @@ body {
   cursor: crosshair;
   z-index: 2;
   pointer-events: auto;
-  transform: translateY(-50%);
+  margin: 0;
 }
 
-.port-out {
-  right: -6px;
-  top: 50%;
-}
-
-.port-in {
+.port-in-row .port {
   left: -6px;
+  transform: translate(-50%, -50%);
 }
 
-/* Single primary output: vertically centered on the block. */
-.port-out[data-port="Q"] {
-  top: 50%;
+.port-out-row .port {
+  right: -6px;
+  transform: translate(50%, -50%);
+}
+
+.port.type-bool {
+  border-color: var(--fbd-type-bool);
+  background: color-mix(in srgb, var(--fbd-type-bool) 18%, var(--vscode-editor-background));
+}
+
+.port.type-int,
+.port.type-dint {
+  border-color: var(--fbd-type-int);
+  background: color-mix(in srgb, var(--fbd-type-int) 18%, var(--vscode-editor-background));
+}
+
+.port.type-uint {
+  border-color: var(--fbd-type-uint);
+  background: color-mix(in srgb, var(--fbd-type-uint) 18%, var(--vscode-editor-background));
+}
+
+.port.type-word {
+  border-color: var(--fbd-type-word);
+  background: color-mix(in srgb, var(--fbd-type-word) 18%, var(--vscode-editor-background));
+}
+
+.port.type-real {
+  border-color: var(--fbd-type-real);
+  background: color-mix(in srgb, var(--fbd-type-real) 18%, var(--vscode-editor-background));
 }
 
 .port.wire-source {
@@ -275,13 +351,33 @@ body {
   stroke-width: 2;
 }
 
+.wire-path.type-bool {
+  stroke: var(--fbd-type-bool);
+}
+
+.wire-path.type-int,
+.wire-path.type-dint {
+  stroke: var(--fbd-type-int);
+}
+
+.wire-path.type-uint {
+  stroke: var(--fbd-type-uint);
+}
+
+.wire-path.type-word {
+  stroke: var(--fbd-type-word);
+}
+
+.wire-path.type-real {
+  stroke: var(--fbd-type-real);
+}
+
 .wire-path.selected {
   stroke: var(--vscode-charts-yellow);
   stroke-width: 3;
 }
 
 .wire-path.wire-preview {
-  stroke: var(--vscode-charts-green);
   stroke-width: 2;
   stroke-dasharray: 5 4;
   opacity: 0.85;
@@ -296,6 +392,13 @@ body {
 
 .prop-row {
   margin-bottom: 10px;
+}
+
+.block-description {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--vscode-descriptionForeground);
 }
 
 .prop-row label {
