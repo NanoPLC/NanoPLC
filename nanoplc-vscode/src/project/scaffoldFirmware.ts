@@ -86,6 +86,13 @@ export function patchExistingFirmwareTree(firmwareRoot: string): string[] {
       patches.push("added m5_aw9523 component");
     }
 
+    const stamplcAcSrc = path.join(template, "components", "m5_stamplc_ac");
+    const stamplcAcDest = path.join(firmwareRoot, "components", "m5_stamplc_ac");
+    if (fs.existsSync(stamplcAcSrc) && !fs.existsSync(stamplcAcDest)) {
+      copyDirRecursive(stamplcAcSrc, stamplcAcDest);
+      patches.push("added m5_stamplc_ac component");
+    }
+
     for (const rel of [
       path.join("components", "nanoplc_hal", "nanoplc_hal.c"),
       path.join("components", "nanoplc_hal", "include", "nanoplc_hal.h"),

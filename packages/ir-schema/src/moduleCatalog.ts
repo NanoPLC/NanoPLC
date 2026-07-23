@@ -77,7 +77,37 @@ export const M5STACK_STAMPLC_IO: ModuleCatalogEntry = {
   },
 };
 
-export const MODULE_CATALOG: ModuleCatalogEntry[] = [M5STACK_STAMPLC_IO];
+export const M5STACK_STAMPLC_AC: ModuleCatalogEntry = {
+  id: "m5stack.stamplc_ac",
+  vendor: "M5Stack",
+  model: "StamPLC AC",
+  label: "M5Stack StamPLC AC",
+  description:
+    "AC relay expansion: 1× AC 240V@10A contact relay, optional system power (AC 100–240V → DC 12V), RGB status LED. PI4IOE5V6408 I2C @ 0x44.",
+  docs_url: "https://docs.m5stack.com/en/stamplc/StamPLC_AC",
+  compatible_hosts: ["m5stack.stamplc_k141"],
+  io: {
+    di_count: 0,
+    do_count: 1,
+    di_symbol_prefix: "DI_",
+    do_symbol_prefix: "DO_",
+    do_channels: [1],
+  },
+  module: {
+    type: "m5_stamplc_ac_expansion",
+    nameTemplate: "StamPLC AC",
+  },
+  driver: {
+    type: "m5_stamplc_ac",
+    name: "StamPLC AC I2C driver",
+  },
+  default_config: {
+    i2c_address: 0x44,
+    outputs: [{ id: "relay", role: "rel_en" }],
+  },
+};
+
+export const MODULE_CATALOG: ModuleCatalogEntry[] = [M5STACK_STAMPLC_IO, M5STACK_STAMPLC_AC];
 
 export function findModuleCatalogEntry(id: string): ModuleCatalogEntry | undefined {
   return MODULE_CATALOG.find((m) => m.id === id);
@@ -230,4 +260,19 @@ export function nextStamPlcIoInstanceNumber(existingModuleIds: string[]): number
 
 export function nextStamPlcIoModuleId(existingModuleIds: string[]): string {
   return `stamplc_io_exp${nextStamPlcIoInstanceNumber(existingModuleIds)}`;
+}
+
+export function nextStamPlcAcInstanceNumber(existingModuleIds: string[]): number {
+  let max = 0;
+  for (const id of existingModuleIds) {
+    const match = /^stamplc_ac_exp(\d+)$/.exec(id);
+    if (match) {
+      max = Math.max(max, Number(match[1]));
+    }
+  }
+  return max + 1;
+}
+
+export function nextStamPlcAcModuleId(existingModuleIds: string[]): string {
+  return `stamplc_ac_exp${nextStamPlcAcInstanceNumber(existingModuleIds)}`;
 }

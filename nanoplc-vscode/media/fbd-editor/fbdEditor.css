@@ -194,6 +194,14 @@ body {
   border-color: var(--vscode-charts-green);
 }
 
+.fbd-block.cat-math {
+  border-color: var(--vscode-charts-purple);
+}
+
+.fbd-block.cat-bit {
+  border-color: var(--vscode-charts-red);
+}
+
 .block-head {
   padding: 6px 8px 4px;
   font-weight: 600;
@@ -238,19 +246,9 @@ body {
   left: -6px;
 }
 
-/* Single input / primary output: vertically centered on the block. */
-.port-in[data-port="IN"],
+/* Single primary output: vertically centered on the block. */
 .port-out[data-port="Q"] {
   top: 50%;
-}
-
-/* Two inputs (AND / OR): spaced along the left edge. */
-.port-in[data-port="IN1"] {
-  top: 32%;
-}
-
-.port-in[data-port="IN2"] {
-  top: 72%;
 }
 
 .port.wire-source {

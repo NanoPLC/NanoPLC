@@ -103,7 +103,7 @@ Device (and_gate · esp32-s3)
 
 **Workflow (v0):** **Add device** → pick from **device catalog** (I/O counts pre-filled) → optional **Add module** / **Add driver** → **Add program** → click program to edit. Context **+** on group rows; toolbar **+** for new device.
 
-- **Device catalog (v0):** [M5Stack StamPLC K141](https://shop.m5stack.com/products/m5stamp-plc-controller-with-m5stamps3) (8 DI / 4 relay via AW9523), generic ESP32-S3 GPIO template. **Module catalog (v0):** M5Stack **StamPLC IO** expansion (3 DO, 2 AI, I2C). Stored in `device.catalog_id` / module `catalog_id`; `io-map.json` and `src/modules/*.json` generated from templates. Implementation: `packages/ir-schema/src/deviceCatalog.ts`, `moduleCatalog.ts`.
+- **Device catalog (v0):** [M5Stack StamPLC K141](https://shop.m5stack.com/products/m5stamp-plc-controller-with-m5stamps3) (8 DI / 4 relay via AW9523), generic ESP32-S3 GPIO template. **Module catalog (v0):** M5Stack **StamPLC IO** (3 DO, 2 AI, I2C 0x20–0x2F), **StamPLC AC** (1 AC relay, I2C 0x44). Stored in `device.catalog_id` / module `catalog_id`; `io-map.json` and `src/modules/*.json` generated from templates. Implementation: `packages/ir-schema/src/deviceCatalog.ts`, `moduleCatalog.ts`.
 - **Per-project firmware tree (v0):** **Add device** scaffolds `firmware/` under the project from `nanoplc-vscode/firmware-template/` (synced from repo `firmware/` at extension compile). **Compile PLC program** auto-creates or **patches** an existing tree (e.g. IDF 5.3 `esp_task_wdt` → `esp_system`). Command **NanoPLC: Init firmware tree** for manual init.
 
 - The tree **serializes into** `nanoplc.project.json` (`modules[]`, `drivers[]`, `programs[]`) and **mirrors** `src/` / `build/`—users work from the logical device root, not loose files.
@@ -836,6 +836,7 @@ _Last reviewed: 2026-05-21._
 | Maintainer workflow `idf.py set-target esp32s3` + `idf.py build` | **Done** (see `firmware/README.md`) |
 | **StamPLC AW9523 driver** (`m5_aw9523` — onboard 8 DI / 4 relay DO @ I2C 0x59) | **Done** |
 | **StamPLC IO I2C driver** (`m5_stamplc_io` — expansion DO + analog voltage read) | **Done** |
+| **StamPLC AC I2C driver** (`m5_stamplc_ac` — PI4IOE5V6408 @ 0x44, AC relay) | **Done** |
 | CI `idf.py build` (§7.5) | **Todo** |
 
 ### Phase 0 / later phases
@@ -866,7 +867,7 @@ Unchanged: IR format lock, ordered graph compile, TS simulator, C codegen, onlin
 - **Firmware per project (v0):** `firmware-template/` packaged in VSIX; scaffold on **Add device** / **Compile** / **Init firmware tree**; auto-patch legacy trees for IDF 5.3.
 - **Compile pipeline (v0):** `build/ir.json` + expanded `generated.manifest.json` (`device`, `codegen`, `firmware`); optional `idf.py build` for `device.idf_target`.
 - **FBD I/O + CONST + build gate:** DI/DO/AI module/channel binding; typed **CONST**; compile/`Build firmware` require I/O binding (`NP-0214`); editor toolbar Compile / Build firmware.
-- **StamPLC firmware drivers:** `m5_aw9523` (onboard AW9523), `m5_stamplc_io` (expansion module I2C); codegen emits HAL init + DI/DO/AI hooks in `io_hal_config.c`.
+- **StamPLC firmware drivers:** `m5_aw9523` (onboard AW9523), `m5_stamplc_io` (expansion module I2C), `m5_stamplc_ac` (AC relay @ 0x44); codegen emits HAL init + DI/DO/AI hooks in `io_hal_config.c`.
 - **FBD multi-module I/O picker:** module dropdown + local channel per block (avoids DO/AI collisions when expansion modules are added).
 - **Analog I/O (v0 partial):** FBD **Analog In**, IR `read_ai`, simulator AI panel; themed temperature/pressure/ADC stubs remain future work (§6.3).
 - **IDF 5.3 fix:** `nanoplc_runtime` requires `esp_system` instead of removed `esp_task_wdt` component; default target in `sdkconfig.defaults`.

@@ -63,6 +63,101 @@ function varRef(name: string | undefined): string {
   return `npgen_v_${cIdent(name)}`;
 }
 
+function bitMask(type: PlcPrimitiveType): number {
+  return type === "DINT" ? 31 : 15;
+}
+
+function numericBinOp(
+  step: ScheduleStep,
+  op: string,
+  floatOp?: string
+): string[] {
+  const t = step.value_type ?? "REAL";
+  const a = varRef(step.in1);
+  const b = varRef(step.in2);
+  const out = varRef(step.out);
+  if (t === "REAL") {
+    const oper = floatOp ?? op;
+    if (oper === "/") {
+      return [`    ${out} = (${b} != 0.0f) ? (${a} ${oper} ${b}) : 0.0f;`];
+    }
+    return [`    ${out} = ${a} ${oper} ${b};`];
+  }
+  if (operIsDiv(op)) {
+    const cast = t === "DINT" ? "int32_t" : t === "INT" ? "int16_t" : "uint16_t";
+    return [`    ${out} = (${b} != 0) ? ((${cast})(${a} / ${b})) : 0;`];
+  }
+  if (t === "DINT" || t === "INT") {
+    return [`    ${out} = ${a} ${op} ${b};`];
+  }
+  return [`    ${out} = (uint16_t)(${a} ${op} ${b});`];
+}
+
+function operIsDiv(op: string): boolean {
+  return op === "/";
+}
+
+function numericShiftOp(step: ScheduleStep, op: "shl" | "shr"): string[] {
+  const t = step.value_type ?? "WORD";
+  const a = varRef(step.in1);
+  const n = varRef(step.in2);
+  const out = varRef(step.out);
+  const mask = bitMask(t);
+  if (t === "DINT") {
+    const shift = op === "shl" ? "<<" : ">>";
+    return [`    ${out} = (int32_t)((uint32_t)${a} ${shift} (${n} & ${mask}u));`];
+  }
+  const shift = op === "shl" ? "<<" : ">>";
+  return [`    ${out} = (uint16_t)((uint16_t)${a} ${shift} (${n} & ${mask}u));`];
+}
+
+function numericRotateOp(step: ScheduleStep, op: "rol" | "ror"): string[] {
+  const t = step.value_type ?? "WORD";
+  const a = varRef(step.in1);
+  const n = varRef(step.in2);
+  const out = varRef(step.out);
+  if (t === "DINT") {
+    const width = 32;
+    const mask = 31;
+    if (op === "rol") {
+      return [
+        `    { uint32_t _v = (uint32_t)${a}; uint32_t _n = (uint32_t)(${n} & ${mask}u); ${out} = (int32_t)((_v << _n) | (_v >> (${width}u - _n))); }`,
+      ];
+    }
+    return [
+      `    { uint32_t _v = (uint32_t)${a}; uint32_t _n = (uint32_t)(${n} & ${mask}u); ${out} = (int32_t)((_v >> _n) | (_v << (${width}u - _n))); }`,
+    ];
+  }
+  const width = 16;
+  const mask = 15;
+  if (op === "rol") {
+    return [
+      `    { uint16_t _v = (uint16_t)${a}; uint16_t _n = (uint16_t)(${n} & ${mask}u); ${out} = (uint16_t)((_v << _n) | (_v >> (${width}u - _n))); }`,
+    ];
+  }
+  return [
+    `    { uint16_t _v = (uint16_t)${a}; uint16_t _n = (uint16_t)(${n} & ${mask}u); ${out} = (uint16_t)((_v >> _n) | (_v << (${width}u - _n))); }`,
+  ];
+}
+
+function bitSetOp(step: ScheduleStep, set: boolean): string[] {
+  const t = step.value_type ?? "WORD";
+  const a = varRef(step.in1);
+  const bit = varRef(step.in2);
+  const out = varRef(step.out);
+  const mask = bitMask(t);
+  if (t === "DINT") {
+    const expr = set
+      ? `${a} | (1L << (${bit} & ${mask}u))`
+      : `${a} & ~(1L << (${bit} & ${mask}u))`;
+    return [`    ${out} = ${expr};`];
+  }
+  const expr = set
+    ? `(uint16_t)(${a} | (1u << (${bit} & ${mask}u)))`
+    : `(uint16_t)(${a} & ~(1u << (${bit} & ${mask}u)))`;
+  return [`    ${out} = ${expr};`];
+}
+
 function line(step: ScheduleStep, dtExpr: string): string[] {
   switch (step.op) {
     case "read_di": {
@@ -99,6 +194,20 @@ function line(step: ScheduleStep, dtExpr: string): string[] {
       return [`    ${varRef(step.out)} = (${varRef(step.in1)} || ${varRef(step.in2)});`];
     case "not":
       return [`    ${varRef(step.out)} = !${varRef(step.in1)};`];
+    case "rs": {
+      const id = cIdent(step.block_id ?? "rs");
+      const out = varRef(step.out);
+      const set = varRef(step.in1);
+      const reset1 = varRef(step.in2);
+      return [
+        `    if (${reset1}) {`,
+        `        npgen_rs_${id}.q = false;`,
+        `    } else if (${set}) {`,
+        `        npgen_rs_${id}.q = true;`,
+        `    }`,
+        `    ${out} = npgen_rs_${id}.q;`,
+      ];
+    }
     case "ton": {
       const id = cIdent(step.block_id ?? "ton");
       const pt = step.pt_ms ?? 1000;
@@ -123,6 +232,32 @@ function line(step: ScheduleStep, dtExpr: string): string[] {
       const t = step.value_type ?? "BOOL";
       return [`    ${varRef(step.out)} = ${cLiteral(t, step.value)};`];
     }
+    case "add":
+      return numericBinOp(step, "+");
+    case "sub":
+      return numericBinOp(step, "-");
+    case "mul":
+      return numericBinOp(step, "*");
+    case "div":
+      return numericBinOp(step, "/");
+    case "pow":
+      return [
+        `    ${varRef(step.out)} = powf((float)${varRef(step.in1)}, (float)${varRef(step.in2)});`,
+      ];
+    case "sqrt":
+      return [`    ${varRef(step.out)} = sqrtf((float)${varRef(step.in1)});`];
+    case "setbit":
+      return bitSetOp(step, true);
+    case "resetbit":
+      return bitSetOp(step, false);
+    case "shl":
+      return numericShiftOp(step, "shl");
+    case "shr":
+      return numericShiftOp(step, "shr");
+    case "rol":
+      return numericRotateOp(step, "rol");
+    case "ror":
+      return numericRotateOp(step, "ror");
     default:
       return [`    /* unsupported op ${step.op} */`];
   }
@@ -151,6 +286,16 @@ function tonBlocks(ir: PlcIr): { id: string; pt_ms: number }[] {
     .map((s) => ({ id: cIdent(s.block_id ?? "ton"), pt_ms: s.pt_ms ?? 1000 }));
 }
 
+function rsBlocks(ir: PlcIr): { id: string }[] {
+  return ir.schedule
+    .filter((s) => s.op === "rs")
+    .map((s) => ({ id: cIdent(s.block_id ?? "rs") }));
+}
+
+function usesMathLib(ir: PlcIr): boolean {
+  return ir.schedule.some((s) => s.op === "pow" || s.op === "sqrt");
+}
+
 export function computeIrMagic(ir: PlcIr, irSha256Hex: string): number {
   const crc16 = parseInt(irSha256Hex.slice(0, 4), 16) & 0xffff;
   return ((IR_VERSION & 0xff) << 24) | (crc16 << 8) | (IR_VERSION & 0xff);
@@ -162,8 +307,10 @@ export function codegenC(ir: PlcIr, irSha256Hex: string, _ioMap?: IoMap): Codege
   const doCount = Math.max(0, ...ir.io_image.do.map((d) => d.index + 1), 0);
   const typedVars = collectTypedVars(ir);
   const tons = tonBlocks(ir);
+  const rss = rsBlocks(ir);
   const magic = computeIrMagic(ir, irSha256Hex);
   const dtExpr = "npgen_scan_dt_ms";
+  const needMath = usesMathLib(ir);
 
   const varDecls = typedVars
     .map((v) => `static ${cTypeFor(v.type)} npgen_v_${cIdent(v.name)};`)
@@ -171,6 +318,7 @@ export function codegenC(ir: PlcIr, irSha256Hex: string, _ioMap?: IoMap): Codege
   const tonStructs = tons
     .map((t) => `static struct { uint32_t et_ms; bool q; } npgen_ton_${t.id};`)
     .join("\n");
+  const rsStructs = rss.map((r) => `static struct { bool q; } npgen_rs_${r.id};`).join("\n");
 
   const body = ir.schedule.flatMap((step) => line(step, dtExpr)).join("\n");
 
@@ -180,7 +328,7 @@ export function codegenC(ir: PlcIr, irSha256Hex: string, _ioMap?: IoMap): Codege
 
 #include <stdbool.h>
 #include <stdint.h>
-
+${needMath ? "#include <math.h>\n" : ""}
 /* Provided by nanoplc_runtime — forward declare to avoid CMake cycle (generated ↔ runtime). */
 uint32_t nanoplc_runtime_scan_period_ms(void);
 
@@ -189,7 +337,7 @@ uint32_t nanoplc_runtime_scan_period_ms(void);
 static bool npgen_di[${diCount || 1}];
 static float npgen_ai[${aiCount || 1}];
 static bool npgen_do[${doCount || 1}];
-${varDecls ? `${varDecls}\n` : ""}${tonStructs ? `${tonStructs}\n` : ""}
+${varDecls ? `${varDecls}\n` : ""}${tonStructs ? `${tonStructs}\n` : ""}${rsStructs ? `${rsStructs}\n` : ""}
 uint32_t nanoplc_generated_magic(void)
 {
     return 0x${magic.toString(16).padStart(8, "0")}u;

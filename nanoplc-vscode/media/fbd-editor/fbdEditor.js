@@ -350,6 +350,16 @@
     return dataType === "BOOL" ? false : 0;
   }
 
+  /** Vertical position (%) for input pins: one centered, two spaced on the left edge. */
+  function inputPortTopPercent(index, total) {
+    if (total <= 1) {
+      return 50;
+    }
+    const top = 32;
+    const bottom = 72;
+    return top + (index * (bottom - top)) / (total - 1);
+  }
+
   function renderBlocks() {
     el.blocks.innerHTML = "";
     if (!doc) {
@@ -379,11 +389,14 @@
 
       const ports = document.createElement("div");
       ports.className = "ports";
-      for (const p of def?.inputs || []) {
+      const inputs = def?.inputs || [];
+      for (let i = 0; i < inputs.length; i++) {
+        const p = inputs[i];
         const pin = document.createElement("div");
         pin.className = "port port-in";
         pin.dataset.port = p;
         pin.title = p;
+        pin.style.top = `${inputPortTopPercent(i, inputs.length)}%`;
         pin.addEventListener("mousedown", (ev) => startWireDrag(ev, block.id, p, "in"));
         pin.addEventListener("click", (ev) => onPortClick(ev, block.id, p, "in"));
         ports.appendChild(pin);
@@ -949,7 +962,7 @@
   }
 
   function renderPalette() {
-    const groups = { io: [], logic: [], timer: [] };
+    const groups = { io: [], logic: [], timer: [], math: [], bit: [] };
     for (const item of catalog) {
       (groups[item.category] || groups.logic).push(item);
     }
@@ -958,6 +971,8 @@
       ["io", "I/O"],
       ["logic", "Logic"],
       ["timer", "Timers"],
+      ["math", "Math"],
+      ["bit", "Bits"],
     ]) {
       const wrap = document.createElement("div");
       wrap.className = "palette-group";

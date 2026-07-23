@@ -64,7 +64,7 @@ Optional **`layout`** map (`block id → { x, y }`) stores canvas positions for 
 
 Open `*.fbd.json` in VS Code with the **FBD Diagram** custom editor (palette, pan/zoom, wiring, properties).
 
-Supported block types (v0): `DI`, `DO`, `AI`, `AND`, `OR`, `NOT`, `TON`, `CONST`.
+Supported block types (v0): `DI`, `DO`, `AI`, `AND`, `OR`, `NOT`, `RS`, `TON`, `CONST`, `ADD`, `SUB`, `MUL`, `DIV`, `POW`, `SQRT`, `SETBIT`, `RESETBIT`, `SHL`, `SHR`, `ROL`, `ROR`.
 
 For `DI`, `DO`, and `AI`, bind the block to a process-image row via the FBD editor **module → channel** picker. Persisted params:
 
@@ -80,7 +80,13 @@ Expansion modules use `src/modules/<id>.json` (merged with onboard `src/io-map.j
 
 Device I/O counts live in `DeviceIoProfile` / module catalog (`di_count` / `do_count` / `ai_count`); optional `di_channels` / `do_channels` / `ai_channels` arrays override default `1..N` numbering inside a module template.
 
-`CONST` is a typed literal (`params.data_type` + `params.value`) with output `Q`. Supported types: `BOOL`, `INT`, `DINT`, `UINT`, `WORD`, `REAL`. The type and value are shown on the block. Wiring a non-BOOL constant into a BOOL input (logic / DO / TON) produces `NP-0305`. Invalid values produce `NP-0215`.
+`CONST` is a typed literal (`params.data_type` + `params.value`) with output `Q`. Supported types: `BOOL`, `INT`, `DINT`, `UINT`, `WORD`, `REAL`. The type and value are shown on the block. Wiring a non-BOOL constant into a BOOL input (logic / DO / TON / RS) produces `NP-0305`. Invalid values produce `NP-0215`.
+
+**Math blocks** (`ADD`, `SUB`, `MUL`, `DIV`, `POW`, `SQRT`) infer their output type from wired inputs: `REAL > DINT > INT > UINT/WORD`. `POW` and `SQRT` always produce `REAL`. Unconnected numeric inputs default to `REAL`.
+
+**Bit blocks** (`SETBIT`, `RESETBIT`, `SHL`, `SHR`, `ROL`, `ROR`) inherit the integer width from the `IN` wire (`WORD`, `UINT`, `DINT`, `INT`). Port `BIT` / `N` expects `INT`.
+
+**RS** is a reset-dominant set/reset latch (IEC 61131): ports `SET`, `RESET1`, output `Q`. When both inputs are active, `Q` is `FALSE`. Cold start: `Q = false`.
 
 ## Compiled IR (`build/ir.json`)
 
@@ -92,7 +98,7 @@ Top-level entities:
 | `variables` | Symbols with PLC types and roles (`di`, `do`, `ai`, `internal`, …) |
 | `io_image` | Ordered DI / DO / AI index map for simulator and HAL |
 | `network` | Original FBD blocks and wires |
-| `instances` | FB instances (e.g. `TON`) |
+| `instances` | FB instances (e.g. `TON`, `RS`) |
 | `schedule` | **Ordered** execution steps (topological compile output) |
 
 Example schedule fragment:

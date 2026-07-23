@@ -211,3 +211,68 @@ export function resolveAw9523Bindings(
 
   return { diBindings, doBindings };
 }
+
+export interface StamPlcAcDoBinding {
+  processIndex: number;
+  channel: number;
+  activeHigh: boolean;
+}
+
+export interface StamPlcAcDriverBinding {
+  moduleId: string;
+  doBindings: StamPlcAcDoBinding[];
+}
+
+/** Resolve m5_stamplc_ac driver bindings (PI4IOE5V6408 @ 0x44, relay on P2). */
+export function resolveStamPlcAcBindings(
+  project: NanoPlcProject,
+  ir: PlcIr,
+  mergedIoMap: IoMap | undefined,
+  moduleConfigs: Map<string, ModuleConfig>
+): StamPlcAcDriverBinding[] {
+  const { modules, drivers } = resolveDeviceTree(project);
+  const bindings: StamPlcAcDriverBinding[] = [];
+
+  for (const drv of drivers) {
+    if (drv.type !== "m5_stamplc_ac") {
+      continue;
+    }
+    const mod = modules.find((m) => m.id === drv.binds);
+    if (!mod?.config) {
+      continue;
+    }
+    const config = moduleConfigs.get(mod.config);
+    if (!config) {
+      continue;
+    }
+
+    const doEntries = config.io_map.entries
+      .filter((e) => e.kind === "DO")
+      .sort((a, b) => a.index - b.index);
+    const doBase = moduleChannelOffset(doEntries);
+    const doBindings: StamPlcAcDoBinding[] = [];
+
+    for (const entry of doEntries) {
+      if (!ir.io_image.do.some((d) => d.index === entry.index)) {
+        continue;
+      }
+      const mapped = mergedIoMap?.entries.find((e) => e.kind === "DO" && e.symbol === entry.symbol);
+      doBindings.push({
+        processIndex: entry.index,
+        channel: entry.index - doBase,
+        activeHigh: mapped?.active_high ?? entry.active_high ?? true,
+      });
+    }
+
+    if (doBindings.length === 0) {
+      continue;
+    }
+
+    bindings.push({
+      moduleId: mod.id,
+      doBindings,
+    });
+  }
+
+  return bindings;
+}

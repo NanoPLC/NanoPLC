@@ -122,7 +122,20 @@ export type ScheduleOp =
   | "not"
   | "move"
   | "ton"
-  | "const";
+  | "const"
+  | "add"
+  | "sub"
+  | "mul"
+  | "div"
+  | "pow"
+  | "sqrt"
+  | "setbit"
+  | "resetbit"
+  | "shl"
+  | "shr"
+  | "rol"
+  | "ror"
+  | "rs";
 
 export interface ScheduleStep {
   step: number;

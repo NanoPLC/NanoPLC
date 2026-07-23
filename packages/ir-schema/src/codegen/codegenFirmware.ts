@@ -1,6 +1,6 @@
 import type { ModuleConfig } from "../moduleCatalog";
 import type { IoMap, NanoPlcProject, PlcIr } from "../types";
-import { resolveAw9523Bindings, resolveStamPlcIoBindings, type Aw9523DiBinding, type Aw9523DoBinding, type Aw9523DriverBinding, type StamPlcIoDriverBinding } from "./driverBindings";
+import { resolveAw9523Bindings, resolveStamPlcAcBindings, resolveStamPlcIoBindings, type Aw9523DiBinding, type Aw9523DoBinding, type Aw9523DriverBinding, type StamPlcAcDoBinding, type StamPlcAcDriverBinding, type StamPlcIoDriverBinding } from "./driverBindings";
 
 export interface CodegenIoContext {
   ioMap?: IoMap;
@@ -190,11 +190,55 @@ ${registrations.join("\n")}
 `;
 }
 
+function emitStamPlcAcDoWriter(doBinding: StamPlcAcDoBinding, suffix: string): string {
+  const fn = `npgen_stamplc_ac_do_${suffix}`;
+  const level = doBinding.activeHigh ? "value" : "!value";
+  return `static void ${fn}(size_t index, bool value)
+{
+    (void)index;
+    m5_stamplc_ac_write_do(${doBinding.channel}, ${level});
+}`;
+}
+
+function emitStamPlcAcSection(bindings: StamPlcAcDriverBinding[]): string {
+  if (bindings.length === 0) {
+    return "";
+  }
+
+  const helpers: string[] = [];
+  const registrations: string[] = [];
+
+  for (const binding of bindings) {
+    binding.doBindings.forEach((doBinding, idx) => {
+      const suffix = `${binding.moduleId.replace(/[^A-Za-z0-9_]/g, "_")}_${doBinding.processIndex}_${idx}`;
+      helpers.push(emitStamPlcAcDoWriter(doBinding, suffix));
+      registrations.push(
+        `    nanoplc_hal_register_do_writer(${doBinding.processIndex}, npgen_stamplc_ac_do_${suffix});`
+      );
+    });
+  }
+
+  return `#include "m5_stamplc_ac.h"
+
+${helpers.join("\n\n")}
+
+static void npgen_bind_stamplc_ac_modules(void)
+{
+    (void)m5_stamplc_ac_init();
+${registrations.join("\n")}
+}
+`;
+}
+
 export function codegenIoHalConfig(ir: PlcIr, context?: CodegenIoContext): string {
   const ioMap = context?.ioMap;
   const stamplcBindings =
     context?.project && context.moduleConfigs
       ? resolveStamPlcIoBindings(context.project, ir, ioMap, context.moduleConfigs)
+      : [];
+  const stamplcAcBindings =
+    context?.project && context.moduleConfigs
+      ? resolveStamPlcAcBindings(context.project, ir, ioMap, context.moduleConfigs)
       : [];
   const aw9523Binding =
     context?.project && context.moduleConfigs
@@ -202,8 +246,10 @@ export function codegenIoHalConfig(ir: PlcIr, context?: CodegenIoContext): strin
       : undefined;
 
   const stamplcSection = emitStamPlcIoSection(stamplcBindings);
+  const stamplcAcSection = emitStamPlcAcSection(stamplcAcBindings);
   const aw9523Section = emitAw9523Section(aw9523Binding);
   const bindAw9523Call = aw9523Binding ? "    npgen_bind_aw9523();" : "";
+  const bindStamplcAcCall = stamplcAcBindings.length > 0 ? "    npgen_bind_stamplc_ac_modules();" : "";
   const bindStamplcCall = stamplcBindings.length > 0 ? "    npgen_bind_stamplc_io_modules();" : "";
 
   return `/* Auto-generated I/O HAL tables — do not edit. */
@@ -216,11 +262,12 @@ ${emitTable("di", diRows(ir, ioMap))}
 
 ${emitTable("do", doRows(ir, ioMap))}
 
-${aw9523Section}${stamplcSection}
+${aw9523Section}${stamplcAcSection}${stamplcSection}
 void nanoplc_generated_io_bind(void)
 {
     nanoplc_hal_init(npgen_di_table, npgen_di_table_count, npgen_do_table, npgen_do_table_count);
 ${bindAw9523Call}
+${bindStamplcAcCall}
 ${bindStamplcCall}
 }
 `;

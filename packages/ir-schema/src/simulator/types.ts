@@ -3,6 +3,10 @@ export interface TonInstanceState {
   q: boolean;
 }
 
+export interface RsInstanceState {
+  q: boolean;
+}
+
 export interface SimulatorSnapshot {
   scan_index: number;
   elapsed_ms: number;
@@ -19,6 +23,7 @@ export interface SimState {
   ai: number[];
   do: boolean[];
   ton: Map<string, TonInstanceState>;
+  rs: Map<string, RsInstanceState>;
   scan_index: number;
   elapsed_ms: number;
 }

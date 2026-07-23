@@ -43,3 +43,50 @@ test("codegenC emits scan function for and_gate", () => {
   assert.match(out.plc_program_c, /&&/);
   assert.match(out.plc_program_c, /npgen_do\[0\]/);
 });
+
+test("codegenC emits math and RS for numeric network", () => {
+  const fbd: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [
+      { id: "c1", type: "CONST", params: { data_type: "INT", value: 5 } },
+      { id: "c2", type: "CONST", params: { data_type: "INT", value: 3 } },
+      { id: "add1", type: "ADD" },
+      { id: "di_set", type: "DI", params: { channel: 1, symbol: "DI_Set" } },
+      { id: "rs1", type: "RS" },
+    ],
+    wires: [
+      { from: { block: "c1", port: "Q" }, to: { block: "add1", port: "IN1" } },
+      { from: { block: "c2", port: "Q" }, to: { block: "add1", port: "IN2" } },
+      { from: { block: "di_set", port: "Q" }, to: { block: "rs1", port: "SET" } },
+    ],
+  };
+  const compiled = compileFbdToIr(project, fbd, "main");
+  assert.ok(compiled.ir);
+  const hash = createHash("sha256").update(JSON.stringify(compiled.ir)).digest("hex");
+  const out = codegenC(compiled.ir, hash);
+  assert.match(out.plc_program_c, /npgen_v___add1_Q = .* \+ .*/);
+  assert.match(out.plc_program_c, /npgen_rs_rs1/);
+});
+
+test("codegenC emits powf when POW block present", () => {
+  const fbd: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [
+      { id: "c1", type: "CONST", params: { data_type: "REAL", value: 2 } },
+      { id: "c2", type: "CONST", params: { data_type: "REAL", value: 3 } },
+      { id: "p1", type: "POW" },
+    ],
+    wires: [
+      { from: { block: "c1", port: "Q" }, to: { block: "p1", port: "IN1" } },
+      { from: { block: "c2", port: "Q" }, to: { block: "p1", port: "IN2" } },
+    ],
+  };
+  const compiled = compileFbdToIr(project, fbd, "main");
+  assert.ok(compiled.ir);
+  const hash = createHash("sha256").update(JSON.stringify(compiled.ir)).digest("hex");
+  const out = codegenC(compiled.ir, hash);
+  assert.match(out.plc_program_c, /#include <math.h>/);
+  assert.match(out.plc_program_c, /powf/);
+});

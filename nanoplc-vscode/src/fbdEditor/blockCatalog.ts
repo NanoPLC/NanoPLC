@@ -14,7 +14,7 @@ export interface FbdBlockParamDef {
 export interface FbdBlockDef {
   type: string;
   label: string;
-  category: "io" | "logic" | "timer";
+  category: "io" | "logic" | "timer" | "math" | "bit";
   inputs: string[];
   outputs: string[];
   params?: FbdBlockParamDef[];
@@ -48,6 +48,7 @@ export const FBD_BLOCK_CATALOG: FbdBlockDef[] = [
   { type: "AND", label: "AND", category: "logic", inputs: ["IN1", "IN2"], outputs: ["Q"] },
   { type: "OR", label: "OR", category: "logic", inputs: ["IN1", "IN2"], outputs: ["Q"] },
   { type: "NOT", label: "NOT", category: "logic", inputs: ["IN"], outputs: ["Q"] },
+  { type: "RS", label: "RS", category: "logic", inputs: ["SET", "RESET1"], outputs: ["Q"] },
   {
     type: "CONST",
     label: "Constant",
@@ -67,6 +68,18 @@ export const FBD_BLOCK_CATALOG: FbdBlockDef[] = [
     outputs: ["Q"],
     params: [{ key: "pt_ms", label: "PT (ms)", type: "number", default: 1000 }],
   },
+  { type: "ADD", label: "ADD", category: "math", inputs: ["IN1", "IN2"], outputs: ["Q"] },
+  { type: "SUB", label: "SUB", category: "math", inputs: ["IN1", "IN2"], outputs: ["Q"] },
+  { type: "MUL", label: "MUL", category: "math", inputs: ["IN1", "IN2"], outputs: ["Q"] },
+  { type: "DIV", label: "DIV", category: "math", inputs: ["IN1", "IN2"], outputs: ["Q"] },
+  { type: "POW", label: "POW", category: "math", inputs: ["IN1", "IN2"], outputs: ["Q"] },
+  { type: "SQRT", label: "SQRT", category: "math", inputs: ["IN"], outputs: ["Q"] },
+  { type: "SETBIT", label: "SETBIT", category: "bit", inputs: ["IN", "BIT"], outputs: ["Q"] },
+  { type: "RESETBIT", label: "RESETBIT", category: "bit", inputs: ["IN", "BIT"], outputs: ["Q"] },
+  { type: "SHL", label: "SHL", category: "bit", inputs: ["IN", "N"], outputs: ["Q"] },
+  { type: "SHR", label: "SHR", category: "bit", inputs: ["IN", "N"], outputs: ["Q"] },
+  { type: "ROL", label: "ROL", category: "bit", inputs: ["IN", "N"], outputs: ["Q"] },
+  { type: "ROR", label: "ROR", category: "bit", inputs: ["IN", "N"], outputs: ["Q"] },
 ];
 
 export function findBlockDef(type: string): FbdBlockDef | undefined {

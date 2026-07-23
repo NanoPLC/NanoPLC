@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 
-import { buildModuleConfig, M5STACK_STAMPLC_IO, type ModuleConfig } from "../moduleCatalog";
+import { buildModuleConfig, M5STACK_STAMPLC_IO, M5STACK_STAMPLC_AC, type ModuleConfig } from "../moduleCatalog";
 import { buildIoMapFromCatalog, M5STACK_STAMPLC_K141 } from "../deviceCatalog";
 import { PROJECT_SCHEMA_VERSION } from "../constants";
 import { compileFbdToIr } from "../compileFbd";
 import { codegenFirmware } from "./cGenerator";
-import { resolveAw9523Bindings, resolveStamPlcIoBindings } from "./driverBindings";
+import { resolveAw9523Bindings, resolveStamPlcAcBindings, resolveStamPlcIoBindings } from "./driverBindings";
 import type { FbdSource, NanoPlcProject } from "../types";
 
 const stamplcProject: NanoPlcProject = {
@@ -102,6 +102,45 @@ test("resolveStamPlcIoBindings maps AI indices to analog channels", () => {
   assert.deepEqual(bindings[0].aiBindings, [{ processIndex: 0, channel: 1 }]);
 });
 
+test("resolveStamPlcAcBindings maps AC relay DO to channel 0", () => {
+  const acOnlyConfig = buildModuleConfig(M5STACK_STAMPLC_AC, { di: 0, do: 0, ai: 0 });
+  const fbd: FbdSource = {
+    schema_version: 1,
+    name: "Main",
+    blocks: [{ id: "do1", type: "DO", params: { channel: 1, symbol: "DO_1", moduleId: "stamplc_ac_exp1" } }],
+    wires: [],
+  };
+  const project: NanoPlcProject = {
+    ...stamplcProject,
+    modules: [
+      ...(stamplcProject.modules ?? []),
+      {
+        id: "stamplc_ac_exp1",
+        name: "StamPLC AC",
+        type: "m5_stamplc_ac_expansion",
+        config: "src/modules/stamplc_ac_exp1.json",
+      },
+    ],
+    drivers: [
+      ...(stamplcProject.drivers ?? []),
+      {
+        id: "stamplc_ac_exp1_drv",
+        name: "StamPLC AC I2C",
+        type: "m5_stamplc_ac",
+        binds: "stamplc_ac_exp1",
+      },
+    ],
+  };
+  const compiled = compileFbdToIr(project, fbd, "main");
+  assert.ok(compiled.ir);
+
+  const bindings = resolveStamPlcAcBindings(project, compiled.ir, undefined, new Map([
+    ["src/modules/stamplc_ac_exp1.json", acOnlyConfig],
+  ]));
+  assert.equal(bindings.length, 1);
+  assert.deepEqual(bindings[0].doBindings, [{ processIndex: 0, channel: 0, activeHigh: true }]);
+});
+
 test("codegenFirmware emits StamPLC IO init and DO writer registration", () => {
   const fbd: FbdSource = {
     schema_version: 1,
@@ -135,4 +174,48 @@ test("codegenFirmware emits StamPLC IO init and DO writer registration", () => {
   assert.match(out.io_hal_config_c, /M5_STAMPLC_IO_BIT_RELAY_TRIG/);
   assert.match(out.io_hal_config_c, /nanoplc_hal_register_do_writer\(4,/);
   assert.match(out.io_hal_config_c, /npgen_bind_stamplc_io_modules/);
+});
+
+test("codegenFirmware emits StamPLC AC relay init and DO writer", () => {
+  const acOnlyConfig = buildModuleConfig(M5STACK_STAMPLC_AC, { di: 0, do: 0, ai: 0 });
+  const fbd: FbdSource = {
+    schema_version: 1,
+    name: "Main",
+    blocks: [{ id: "do1", type: "DO", params: { channel: 1, symbol: "DO_1", moduleId: "stamplc_ac_exp1" } }],
+    wires: [],
+  };
+  const project: NanoPlcProject = {
+    ...stamplcProject,
+    modules: [
+      ...(stamplcProject.modules ?? []),
+      {
+        id: "stamplc_ac_exp1",
+        name: "StamPLC AC",
+        type: "m5_stamplc_ac_expansion",
+        config: "src/modules/stamplc_ac_exp1.json",
+      },
+    ],
+    drivers: [
+      ...(stamplcProject.drivers ?? []),
+      {
+        id: "stamplc_ac_exp1_drv",
+        name: "StamPLC AC I2C",
+        type: "m5_stamplc_ac",
+        binds: "stamplc_ac_exp1",
+      },
+    ],
+  };
+  const compiled = compileFbdToIr(project, fbd, "main");
+  assert.ok(compiled.ir);
+  const hash = createHash("sha256").update(JSON.stringify(compiled.ir)).digest("hex");
+
+  const out = codegenFirmware(compiled.ir, hash, {
+    project,
+    moduleConfigs: new Map([["src/modules/stamplc_ac_exp1.json", acOnlyConfig]]),
+  });
+
+  assert.match(out.io_hal_config_c, /m5_stamplc_ac_init/);
+  assert.match(out.io_hal_config_c, /m5_stamplc_ac_write_do\(0,/);
+  assert.match(out.io_hal_config_c, /nanoplc_hal_register_do_writer\(0,/);
+  assert.match(out.io_hal_config_c, /npgen_bind_stamplc_ac_modules/);
 });

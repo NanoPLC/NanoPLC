@@ -16,6 +16,19 @@ function columnForType(type: string): number {
     case "AND":
     case "OR":
     case "NOT":
+    case "RS":
+    case "ADD":
+    case "SUB":
+    case "MUL":
+    case "DIV":
+    case "POW":
+    case "SQRT":
+    case "SETBIT":
+    case "RESETBIT":
+    case "SHL":
+    case "SHR":
+    case "ROL":
+    case "ROR":
       return 2;
     case "TON":
       return 1;

@@ -49,6 +49,7 @@ export type { DeviceCatalogEntry, DeviceIoChannel, DeviceIoProfile } from "./dev
 export {
   MODULE_CATALOG,
   M5STACK_STAMPLC_IO,
+  M5STACK_STAMPLC_AC,
   buildModuleAndDriverRefs,
   buildModuleConfig,
   buildModuleIoMapEntries,
@@ -59,6 +60,7 @@ export {
   moduleCatalogLabel,
   moduleConfigRelativePath,
   nextStamPlcIoModuleId,
+  nextStamPlcAcModuleId,
 } from "./moduleCatalog";
 export type { ModuleCatalogEntry, ModuleConfig } from "./moduleCatalog";
 export {

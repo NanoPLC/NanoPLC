@@ -13,7 +13,9 @@ import {
   listCompatibleModules,
   moduleCatalogLabel,
   M5STACK_STAMPLC_IO,
+  M5STACK_STAMPLC_AC,
   nextStamPlcIoModuleId,
+  nextStamPlcAcModuleId,
   parseModuleConfig,
   resolveDeviceTree,
   type ModuleCatalogEntry,
@@ -171,14 +173,18 @@ function addCatalogModule(
   const moduleId =
     entry.id === M5STACK_STAMPLC_IO.id
       ? nextStamPlcIoModuleId(project.modules!.map((m) => m.id))
-      : nextId(
-          "mod",
-          project.modules!.map((m) => m.id)
-        );
+      : entry.id === M5STACK_STAMPLC_AC.id
+        ? nextStamPlcAcModuleId(project.modules!.map((m) => m.id))
+        : nextId(
+            "mod",
+            project.modules!.map((m) => m.id)
+          );
   const instanceNumber =
     entry.id === M5STACK_STAMPLC_IO.id
       ? Number(moduleId.replace(/^stamplc_io_exp/, "")) || 1
-      : project.modules!.filter((m) => m.type === entry.module.type).length + 1;
+      : entry.id === M5STACK_STAMPLC_AC.id
+        ? Number(moduleId.replace(/^stamplc_ac_exp/, "")) || 1
+        : project.modules!.filter((m) => m.type === entry.module.type).length + 1;
 
   const moduleConfig = buildModuleConfig(entry, offsets);
   if (i2cAddress !== undefined) {
@@ -247,6 +253,16 @@ export function registerDeviceTreeCommands(context: vscode.ExtensionContext): vs
           }
           const addr = await promptI2cAddress(used, candidate);
           if (addr === undefined) {
+            return;
+          }
+          i2cAddress = addr;
+        } else if (picked.id === M5STACK_STAMPLC_AC.id) {
+          const used = readUsedI2cAddresses(location.rootPath, project);
+          const addr = (picked.default_config?.i2c_address as number | undefined) ?? 0x44;
+          if (used.has(addr)) {
+            void vscode.window.showWarningMessage(
+              `NanoPLC: I2C address 0x${addr.toString(16).toUpperCase()} is already used. StamPLC AC is fixed at 0x44 (one module per host).`
+            );
             return;
           }
           i2cAddress = addr;
@@ -405,9 +421,11 @@ export function registerDeviceTreeCommands(context: vscode.ExtensionContext): vs
         const fwComponent =
           drv.type === "m5_stamplc_io"
             ? "firmware/components/m5_stamplc_io/"
-            : drv.type === "m5_aw9523"
-              ? "firmware/components/m5_aw9523/"
-              : "firmware/components/nanoplc_hal/";
+            : drv.type === "m5_stamplc_ac"
+              ? "firmware/components/m5_stamplc_ac/"
+              : drv.type === "m5_aw9523"
+                ? "firmware/components/m5_aw9523/"
+                : "firmware/components/nanoplc_hal/";
         const detail =
           `Driver: ${drv.name}\n` +
           `Type: ${drv.type}\n` +

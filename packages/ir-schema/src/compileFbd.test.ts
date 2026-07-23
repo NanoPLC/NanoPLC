@@ -197,3 +197,115 @@ test("compileFbdToIr maps Analog In to read_ai schedule step", () => {
   assert.equal(result.ir?.schedule[0]?.op, "read_ai");
   assert.equal(result.ir?.variables.find((v) => v.name === "AI_1")?.type, "REAL");
 });
+
+test("compileFbdToIr ADD with INT constants produces INT output", () => {
+  const fbd: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [
+      { id: "c1", type: "CONST", params: { data_type: "INT", value: 5 } },
+      { id: "c2", type: "CONST", params: { data_type: "INT", value: 3 } },
+      { id: "add1", type: "ADD" },
+    ],
+    wires: [
+      { from: { block: "c1", port: "Q" }, to: { block: "add1", port: "IN1" } },
+      { from: { block: "c2", port: "Q" }, to: { block: "add1", port: "IN2" } },
+    ],
+  };
+  const result = compileFbdToIr(baseProject, fbd, "main");
+  assert.equal(result.ok, true);
+  assert.equal(result.ir?.schedule.find((s) => s.op === "add")?.value_type, "INT");
+  assert.equal(result.ir?.variables.find((v) => v.name === "__add1_Q")?.type, "INT");
+});
+
+test("compileFbdToIr ADD promotes AI REAL over INT", () => {
+  const fbd: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [
+      { id: "ai1", type: "AI", params: { channel: 1, symbol: "AI_1" } },
+      { id: "c1", type: "CONST", params: { data_type: "INT", value: 2 } },
+      { id: "add1", type: "ADD" },
+    ],
+    wires: [
+      { from: { block: "ai1", port: "Q" }, to: { block: "add1", port: "IN1" } },
+      { from: { block: "c1", port: "Q" }, to: { block: "add1", port: "IN2" } },
+    ],
+  };
+  const result = compileFbdToIr(baseProject, fbd, "main");
+  assert.equal(result.ok, true);
+  assert.equal(result.ir?.schedule.find((s) => s.op === "add")?.value_type, "REAL");
+});
+
+test("compileFbdToIr SETBIT WORD produces WORD output", () => {
+  const fbd: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [
+      { id: "c1", type: "CONST", params: { data_type: "WORD", value: 0 } },
+      { id: "c2", type: "CONST", params: { data_type: "INT", value: 3 } },
+      { id: "sb1", type: "SETBIT" },
+    ],
+    wires: [
+      { from: { block: "c1", port: "Q" }, to: { block: "sb1", port: "IN" } },
+      { from: { block: "c2", port: "Q" }, to: { block: "sb1", port: "BIT" } },
+    ],
+  };
+  const result = compileFbdToIr(baseProject, fbd, "main");
+  assert.equal(result.ok, true);
+  assert.equal(result.ir?.schedule.find((s) => s.op === "setbit")?.value_type, "WORD");
+});
+
+test("compileFbdToIr rejects BOOL wired to ADD", () => {
+  const fbd: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [
+      { id: "c1", type: "CONST", params: { data_type: "BOOL", value: true } },
+      { id: "add1", type: "ADD" },
+    ],
+    wires: [{ from: { block: "c1", port: "Q" }, to: { block: "add1", port: "IN1" } }],
+  };
+  const result = compileFbdToIr(baseProject, fbd, "main");
+  assert.equal(result.ok, false);
+  assert.ok(result.diagnostics.some((d) => d.code === "NP-0305"));
+});
+
+test("compileFbdToIr RS produces rs schedule step and instance", () => {
+  const fbd: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [
+      { id: "di_set", type: "DI", params: { channel: 1, symbol: "DI_Set" } },
+      { id: "di_rst", type: "DI", params: { channel: 2, symbol: "DI_Rst" } },
+      { id: "rs1", type: "RS" },
+    ],
+    wires: [
+      { from: { block: "di_set", port: "Q" }, to: { block: "rs1", port: "SET" } },
+      { from: { block: "di_rst", port: "Q" }, to: { block: "rs1", port: "RESET1" } },
+    ],
+  };
+  const result = compileFbdToIr(baseProject, fbd, "main");
+  assert.equal(result.ok, true);
+  assert.equal(result.ir?.schedule.find((s) => s.op === "rs")?.block_id, "rs1");
+  assert.equal(result.ir?.instances.find((i) => i.id === "rs1")?.type, "RS");
+});
+
+test("compileFbdToIr SHL compiles", () => {
+  const fbd: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [
+      { id: "c1", type: "CONST", params: { data_type: "WORD", value: 1 } },
+      { id: "c2", type: "CONST", params: { data_type: "INT", value: 2 } },
+      { id: "sh1", type: "SHL" },
+    ],
+    wires: [
+      { from: { block: "c1", port: "Q" }, to: { block: "sh1", port: "IN" } },
+      { from: { block: "c2", port: "Q" }, to: { block: "sh1", port: "N" } },
+    ],
+  };
+  const result = compileFbdToIr(baseProject, fbd, "main");
+  assert.equal(result.ok, true);
+  assert.equal(result.ir?.schedule.find((s) => s.op === "shl")?.value_type, "WORD");
+});

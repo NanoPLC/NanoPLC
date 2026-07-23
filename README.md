@@ -66,7 +66,7 @@ Requires ESP-IDF **v5.3** exported in the shell. `nanoplc_runtime` uses componen
 
 See [`firmware/README.md`](firmware/README.md).
 
-**StamPLC note:** onboard I/O uses the AW9523 expander (`m5_aw9523`); **StamPLC IO** expansion modules use `m5_stamplc_io` on the shared internal I2C bus (relay/SSR DO + 2 analog inputs). Codegen registers HAL readers/writers from the project device tree.
+**StamPLC note:** onboard I/O uses the AW9523 expander (`m5_aw9523`); **StamPLC IO** expansion (`m5_stamplc_io`, I2C 0x20–0x2F) adds DO + AI; **StamPLC AC** (`m5_stamplc_ac`, I2C 0x44) adds one AC relay DO. Codegen registers HAL readers/writers from the project device tree.
 
 ## Build the extension
 

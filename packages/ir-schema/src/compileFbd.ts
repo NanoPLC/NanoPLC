@@ -17,7 +17,43 @@ import { PLC_PRIMITIVE_TYPES } from "./types";
 import { validateFbdSource } from "./validate";
 
 const BLOCK_OUTPUT_PORT = "Q";
-const SUPPORTED_BLOCKS = new Set(["DI", "AI", "DO", "AND", "OR", "NOT", "TON", "CONST"]);
+const SUPPORTED_BLOCKS = new Set([
+  "DI",
+  "AI",
+  "DO",
+  "AND",
+  "OR",
+  "NOT",
+  "TON",
+  "CONST",
+  "RS",
+  "ADD",
+  "SUB",
+  "MUL",
+  "DIV",
+  "POW",
+  "SQRT",
+  "SETBIT",
+  "RESETBIT",
+  "SHL",
+  "SHR",
+  "ROL",
+  "ROR",
+]);
+
+const MATH_BLOCKS = new Set(["ADD", "SUB", "MUL", "DIV"]);
+const REAL_MATH_BLOCKS = new Set(["POW", "SQRT"]);
+const BIT_BLOCKS = new Set(["SETBIT", "RESETBIT", "SHL", "SHR", "ROL", "ROR"]);
+const BOOL_BLOCKS = new Set(["AND", "OR", "NOT", "TON", "RS"]);
+
+const NUMERIC_RANK: Record<PlcPrimitiveType, number> = {
+  BOOL: 0,
+  WORD: 1,
+  UINT: 2,
+  INT: 3,
+  DINT: 4,
+  REAL: 5,
+};
 
 function diag(
   code: string,
@@ -122,19 +158,145 @@ function parseConstValue(
   return { ok: true, value: dataType === "REAL" ? num : Math.trunc(num) };
 }
 
-function blockOutputType(block: FbdBlock): PlcPrimitiveType {
-  if (block.type.toUpperCase() === "CONST") {
-    return parseConstDataType(block.params);
+function isNumericType(type: PlcPrimitiveType): boolean {
+  return type !== "BOOL";
+}
+
+function unifyNumericTypes(a: PlcPrimitiveType, b: PlcPrimitiveType): PlcPrimitiveType {
+  return NUMERIC_RANK[a] >= NUMERIC_RANK[b] ? a : b;
+}
+
+function findWireTo(
+  blockId: string,
+  port: string,
+  wires: FbdWire[]
+): FbdWire | undefined {
+  const p = port.toUpperCase();
+  return wires.find((w) => w.to.block === blockId && w.to.port.toUpperCase() === p);
+}
+
+function inferOutputTypeForBlock(
+  blockId: string,
+  blocks: Map<string, FbdBlock>,
+  wires: FbdWire[],
+  memo: Map<string, PlcPrimitiveType>,
+  visiting: Set<string>
+): PlcPrimitiveType {
+  if (memo.has(blockId)) {
+    return memo.get(blockId)!;
   }
-  if (block.type.toUpperCase() === "AI") {
+  if (visiting.has(blockId)) {
     return "REAL";
+  }
+  visiting.add(blockId);
+
+  const block = blocks.get(blockId);
+  if (!block) {
+    visiting.delete(blockId);
+    return "BOOL";
+  }
+
+  const t = block.type.toUpperCase();
+  let result: PlcPrimitiveType;
+
+  if (t === "CONST") {
+    result = parseConstDataType(block.params);
+  } else if (t === "AI") {
+    result = "REAL";
+  } else if (REAL_MATH_BLOCKS.has(t)) {
+    result = "REAL";
+  } else if (MATH_BLOCKS.has(t)) {
+    const in1 = inferWiredSourceType(blockId, "IN1", blocks, wires, memo, visiting);
+    const in2 = inferWiredSourceType(blockId, "IN2", blocks, wires, memo, visiting);
+    result = unifyNumericTypes(in1, in2);
+  } else if (BIT_BLOCKS.has(t)) {
+    result = inferWiredSourceType(blockId, "IN", blocks, wires, memo, visiting);
+    if (result === "BOOL" || result === "REAL") {
+      result = "WORD";
+    }
+  } else {
+    result = "BOOL";
+  }
+
+  visiting.delete(blockId);
+  memo.set(blockId, result);
+  return result;
+}
+
+function inferWiredSourceType(
+  blockId: string,
+  port: string,
+  blocks: Map<string, FbdBlock>,
+  wires: FbdWire[],
+  memo: Map<string, PlcPrimitiveType>,
+  visiting: Set<string>
+): PlcPrimitiveType {
+  const block = blocks.get(blockId);
+  const t = block?.type.toUpperCase() ?? "";
+  const wire = findWireTo(blockId, port, wires);
+  if (!wire) {
+    if (MATH_BLOCKS.has(t) || REAL_MATH_BLOCKS.has(t)) {
+      return "REAL";
+    }
+    if (BIT_BLOCKS.has(t)) {
+      return "WORD";
+    }
+    if (port.toUpperCase() === "BIT" || port.toUpperCase() === "N") {
+      return "INT";
+    }
+    return "BOOL";
+  }
+  return inferOutputTypeForBlock(wire.from.block, blocks, wires, memo, visiting);
+}
+
+function buildBlockOutputTypes(
+  blocks: Map<string, FbdBlock>,
+  wires: FbdWire[]
+): Map<string, PlcPrimitiveType> {
+  const memo = new Map<string, PlcPrimitiveType>();
+  const visiting = new Set<string>();
+  for (const id of blocks.keys()) {
+    inferOutputTypeForBlock(id, blocks, wires, memo, visiting);
+  }
+  return memo;
+}
+
+function inferInputPortType(
+  block: FbdBlock,
+  port: string,
+  outputTypes: Map<string, PlcPrimitiveType>
+): PlcPrimitiveType {
+  const t = block.type.toUpperCase();
+  const p = port.toUpperCase();
+
+  if (t === "DO" || BOOL_BLOCKS.has(t)) {
+    return "BOOL";
+  }
+  if (REAL_MATH_BLOCKS.has(t)) {
+    return "REAL";
+  }
+  if (MATH_BLOCKS.has(t) && (p === "IN1" || p === "IN2")) {
+    return outputTypes.get(block.id) ?? "REAL";
+  }
+  if (BIT_BLOCKS.has(t)) {
+    if (p === "BIT" || p === "N") {
+      return "INT";
+    }
+    if (p === "IN") {
+      return outputTypes.get(block.id) ?? "WORD";
+    }
   }
   return "BOOL";
 }
 
-function blockInputType(_block: FbdBlock, _port: string): PlcPrimitiveType {
-  // Current FBD inputs are all BOOL (logic, timers, digital outs).
-  return "BOOL";
+function typesCompatible(fromType: PlcPrimitiveType, toType: PlcPrimitiveType): boolean {
+  if (fromType === toType) {
+    return true;
+  }
+  if (isNumericType(fromType) && isNumericType(toType)) {
+    return unifyNumericTypes(fromType, toType) === toType;
+  }
+  return false;
 }
 
 function inputPortsForType(type: string): Set<string> {
@@ -152,6 +314,24 @@ function inputPortsForType(type: string): Set<string> {
       return new Set(["IN"]);
     case "TON":
       return new Set(["IN"]);
+    case "RS":
+      return new Set(["SET", "RESET1"]);
+    case "ADD":
+    case "SUB":
+    case "MUL":
+    case "DIV":
+    case "POW":
+      return new Set(["IN1", "IN2"]);
+    case "SQRT":
+      return new Set(["IN"]);
+    case "SETBIT":
+    case "RESETBIT":
+      return new Set(["IN", "BIT"]);
+    case "SHL":
+    case "SHR":
+    case "ROL":
+    case "ROR":
+      return new Set(["IN", "N"]);
     default:
       return new Set();
   }
@@ -167,7 +347,8 @@ function isOutputPort(type: string, port: string): boolean {
 
 function validateWires(
   blocks: Map<string, FbdBlock>,
-  wires: FbdWire[]
+  wires: FbdWire[],
+  outputTypes: Map<string, PlcPrimitiveType>
 ): CompileDiagnostic[] {
   const diagnostics: CompileDiagnostic[] = [];
   for (const wire of wires) {
@@ -203,9 +384,9 @@ function validateWires(
       }
     }
 
-    const fromType = blockOutputType(fromBlock);
-    const toType = blockInputType(toBlock, wire.to.port);
-    if (fromType !== toType) {
+    const fromType = outputTypes.get(fromBlock.id) ?? "BOOL";
+    const toType = inferInputPortType(toBlock, wire.to.port, outputTypes);
+    if (!typesCompatible(fromType, toType)) {
       diagnostics.push(
         diag(
           "NP-0305",
@@ -367,6 +548,7 @@ function validateIoBindings(blocks: FbdBlock[]): CompileDiagnostic[] {
 
 function collectVariables(
   blocks: FbdBlock[],
+  outputTypes: Map<string, PlcPrimitiveType>,
   ioMap?: IoMap
 ): { variables: IrVariable[]; io_image: PlcIr["io_image"] } {
   const variables: IrVariable[] = [];
@@ -405,7 +587,11 @@ function collectVariables(
         role: "internal",
       });
     } else {
-      variables.push({ name: outputVar(block.id), type: "BOOL", role: "internal" });
+      variables.push({
+        name: outputVar(block.id),
+        type: outputTypes.get(block.id) ?? "BOOL",
+        role: "internal",
+      });
     }
   }
 
@@ -416,10 +602,27 @@ function emitScheduleStep(
   block: FbdBlock,
   wireIns: Map<string, string>,
   io_image: PlcIr["io_image"],
-  stepIndex: number
+  stepIndex: number,
+  outputTypes: Map<string, PlcPrimitiveType>
 ): ScheduleStep[] {
   const t = block.type.toUpperCase();
   const out = outputVar(block.id);
+  const valueType = outputTypes.get(block.id);
+
+  const numericStep = (
+    op: ScheduleStep["op"],
+    in1Key: string,
+    in2Key?: string
+  ): ScheduleStep[] => [
+    {
+      step: stepIndex,
+      op,
+      in1: wireIns.get(in1Key) ?? "",
+      in2: in2Key ? wireIns.get(in2Key) ?? "" : undefined,
+      out,
+      value_type: valueType,
+    },
+  ];
 
   switch (t) {
     case "DI": {
@@ -491,6 +694,17 @@ function emitScheduleStep(
           out,
         },
       ];
+    case "RS":
+      return [
+        {
+          step: stepIndex,
+          op: "rs",
+          block_id: block.id,
+          in1: wireIns.get("SET") ?? "",
+          in2: wireIns.get("RESET1") ?? "",
+          out,
+        },
+      ];
     case "TON": {
       const pt = block.params?.pt_ms ?? block.params?.PT ?? 1000;
       return [
@@ -517,6 +731,30 @@ function emitScheduleStep(
         },
       ];
     }
+    case "ADD":
+      return numericStep("add", "IN1", "IN2");
+    case "SUB":
+      return numericStep("sub", "IN1", "IN2");
+    case "MUL":
+      return numericStep("mul", "IN1", "IN2");
+    case "DIV":
+      return numericStep("div", "IN1", "IN2");
+    case "POW":
+      return numericStep("pow", "IN1", "IN2");
+    case "SQRT":
+      return numericStep("sqrt", "IN");
+    case "SETBIT":
+      return numericStep("setbit", "IN", "BIT");
+    case "RESETBIT":
+      return numericStep("resetbit", "IN", "BIT");
+    case "SHL":
+      return numericStep("shl", "IN", "N");
+    case "SHR":
+      return numericStep("shr", "IN", "N");
+    case "ROL":
+      return numericStep("rol", "IN", "N");
+    case "ROR":
+      return numericStep("ror", "IN", "N");
     default:
       return [];
   }
@@ -577,7 +815,9 @@ export function compileFbdToIr(
 
   diagnostics.push(...validateIoBindings(fbd.blocks));
   diagnostics.push(...validateConstBlocks(fbd.blocks));
-  diagnostics.push(...validateWires(blocks, fbd.wires));
+
+  const outputTypes = buildBlockOutputTypes(blocks, fbd.wires);
+  diagnostics.push(...validateWires(blocks, fbd.wires, outputTypes));
 
   const edges = new Map<string, Set<string>>();
   for (const id of blockIds) {
@@ -606,7 +846,7 @@ export function compileFbdToIr(
   }
 
   const program = project.programs.find((p) => p.id === programId);
-  const { variables, io_image } = collectVariables(fbd.blocks, ioMap);
+  const { variables, io_image } = collectVariables(fbd.blocks, outputTypes, ioMap);
 
   const wireInsByBlock = new Map<string, Map<string, string>>();
   for (const wire of fbd.wires) {
@@ -622,19 +862,28 @@ export function compileFbdToIr(
   for (const blockId of order ?? []) {
     const block = blocks.get(blockId)!;
     const ins = wireInsByBlock.get(blockId) ?? new Map();
-    const steps = emitScheduleStep(block, ins, io_image, stepNum);
+    const steps = emitScheduleStep(block, ins, io_image, stepNum, outputTypes);
     for (const s of steps) {
       schedule.push({ ...s, step: stepNum++ });
     }
   }
 
   const instances = fbd.blocks
-    .filter((b) => b.type.toUpperCase() === "TON")
-    .map((b) => ({
-      id: b.id,
-      type: "TON",
-      params: { pt_ms: b.params?.pt_ms ?? b.params?.PT ?? 1000 },
-    }));
+    .filter((b) => {
+      const t = b.type.toUpperCase();
+      return t === "TON" || t === "RS";
+    })
+    .map((b) => {
+      const t = b.type.toUpperCase();
+      if (t === "TON") {
+        return {
+          id: b.id,
+          type: "TON",
+          params: { pt_ms: b.params?.pt_ms ?? b.params?.PT ?? 1000 },
+        };
+      }
+      return { id: b.id, type: "RS", params: {} };
+    });
 
   const ir: PlcIr = {
     ir_version: IR_VERSION,

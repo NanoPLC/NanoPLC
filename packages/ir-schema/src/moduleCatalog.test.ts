@@ -7,7 +7,9 @@ import {
   buildModuleIoMapEntries,
   isModuleCompatibleWithHost,
   M5STACK_STAMPLC_IO,
+  M5STACK_STAMPLC_AC,
   nextStamPlcIoModuleId,
+  nextStamPlcAcModuleId,
 } from "./moduleCatalog";
 import { resolveProjectIoProfileFromConfigs } from "./projectIo";
 import type { NanoPlcProject } from "./types";
@@ -32,6 +34,29 @@ test("StamPLC IO module builds 2 AI and 3 DO entries with global indices", () =>
       ["DO_7", 6],
     ]
   );
+});
+
+test("StamPLC AC module builds 1 DO at global offset", () => {
+  const entries = buildModuleIoMapEntries(M5STACK_STAMPLC_AC, { di: 0, do: 4, ai: 0 });
+  assert.equal(entries.length, 1);
+  assert.deepEqual(entries[0], {
+    symbol: "DO_5",
+    kind: "DO",
+    index: 4,
+    active_high: true,
+  });
+});
+
+test("buildModuleConfig for StamPLC AC includes fixed I2C 0x44", () => {
+  const config = buildModuleConfig(M5STACK_STAMPLC_AC, { di: 0, do: 0, ai: 0 });
+  assert.equal(config.catalog_id, "m5stack.stamplc_ac");
+  assert.equal(config.i2c_address, 0x44);
+  assert.equal(config.outputs?.[0]?.role, "rel_en");
+});
+
+test("StamPLC AC is compatible only with StamPLC host", () => {
+  assert.equal(isModuleCompatibleWithHost(M5STACK_STAMPLC_AC, "m5stack.stamplc_k141"), true);
+  assert.equal(isModuleCompatibleWithHost(M5STACK_STAMPLC_AC, "generic.esp32_s3_gpio"), false);
 });
 
 test("buildModuleConfig includes I2C address and output roles", () => {
@@ -60,6 +85,11 @@ test("ioMapIndexOffsets counts highest DI/DO/AI index", () => {
     ]),
     { di: 8, do: 4, ai: 2 }
   );
+});
+
+test("nextStamPlcAcModuleId increments instance suffix", () => {
+  assert.equal(nextStamPlcAcModuleId(["stamplc_ac_exp1"]), "stamplc_ac_exp2");
+  assert.equal(nextStamPlcAcModuleId([]), "stamplc_ac_exp1");
 });
 
 test("nextStamPlcIoModuleId increments instance suffix", () => {

@@ -1,5 +1,5 @@
-import type { PlcIr, ScheduleStep } from "../types";
-import type { SimState, SimulatorSnapshot, TonInstanceState } from "./types";
+import type { PlcIr, PlcPrimitiveType, ScheduleStep } from "../types";
+import type { RsInstanceState, SimState, SimulatorSnapshot, TonInstanceState } from "./types";
 
 function readBool(state: SimState, name: string | undefined): boolean {
   if (!name) {
@@ -16,6 +16,46 @@ function writeBool(state: SimState, name: string | undefined, value: boolean): v
   state.vars[name] = value;
 }
 
+function readNumeric(state: SimState, name: string | undefined): number {
+  if (!name) {
+    return 0;
+  }
+  const v = state.vars[name];
+  if (typeof v === "number") {
+    return v;
+  }
+  if (typeof v === "boolean") {
+    return v ? 1 : 0;
+  }
+  return 0;
+}
+
+function writeNumeric(
+  state: SimState,
+  name: string | undefined,
+  value: number,
+  _type?: PlcPrimitiveType
+): void {
+  if (!name) {
+    return;
+  }
+  state.vars[name] = value;
+}
+
+function bitMask(type: PlcPrimitiveType | undefined): number {
+  return type === "DINT" ? 31 : 15;
+}
+
+function toInt(v: number, type: PlcPrimitiveType | undefined): number {
+  if (type === "REAL") {
+    return v;
+  }
+  if (type === "DINT" || type === "INT") {
+    return Math.trunc(v);
+  }
+  return Math.trunc(v) & 0xffff;
+}
+
 function tonState(state: SimState, blockId: string): TonInstanceState {
   let t = state.ton.get(blockId);
   if (!t) {
@@ -23,6 +63,15 @@ function tonState(state: SimState, blockId: string): TonInstanceState {
     state.ton.set(blockId, t);
   }
   return t;
+}
+
+function rsState(state: SimState, blockId: string): RsInstanceState {
+  let r = state.rs.get(blockId);
+  if (!r) {
+    r = { q: false };
+    state.rs.set(blockId, r);
+  }
+  return r;
 }
 
 function executeTon(state: SimState, step: ScheduleStep, dt_ms: number): void {
@@ -42,6 +91,81 @@ function executeTon(state: SimState, step: ScheduleStep, dt_ms: number): void {
   writeBool(state, step.out, t.q);
   state.vars[`${blockId}.ET`] = t.et_ms;
   state.vars[`${blockId}.Q`] = t.q;
+}
+
+function executeRs(state: SimState, step: ScheduleStep): void {
+  const blockId = step.block_id ?? "rs";
+  const r = rsState(state, blockId);
+  const set = readBool(state, step.in1);
+  const reset1 = readBool(state, step.in2);
+
+  if (reset1) {
+    r.q = false;
+  } else if (set) {
+    r.q = true;
+  }
+
+  writeBool(state, step.out, r.q);
+  state.vars[`${blockId}.Q`] = r.q;
+}
+
+function executeNumericBinOp(
+  state: SimState,
+  step: ScheduleStep,
+  op: (a: number, b: number) => number
+): void {
+  const t = step.value_type ?? "REAL";
+  const a = readNumeric(state, step.in1);
+  const b = readNumeric(state, step.in2);
+  let result: number;
+  if (t === "REAL") {
+    result = op(a, b);
+  } else {
+    result = toInt(op(a, b), t);
+  }
+  writeNumeric(state, step.out, result, t);
+}
+
+function executeShift(
+  state: SimState,
+  step: ScheduleStep,
+  op: "shl" | "shr"
+): void {
+  const t = step.value_type ?? "WORD";
+  const v = toInt(readNumeric(state, step.in1), t);
+  const n = readNumeric(state, step.in2) & bitMask(t);
+  const mask = t === "DINT" ? 0xffffffff : 0xffff;
+  const result =
+    op === "shl" ? (v << n) & mask : (v >>> n) & mask;
+  writeNumeric(state, step.out, result, t);
+}
+
+function executeRotate(
+  state: SimState,
+  step: ScheduleStep,
+  op: "rol" | "ror"
+): void {
+  const t = step.value_type ?? "WORD";
+  const width = t === "DINT" ? 32 : 16;
+  const mask = bitMask(t);
+  let v = toInt(readNumeric(state, step.in1), t) >>> 0;
+  if (width === 16) {
+    v &= 0xffff;
+  }
+  const n = readNumeric(state, step.in2) & mask;
+  const result =
+    op === "rol"
+      ? ((v << n) | (v >>> (width - n))) & (width === 16 ? 0xffff : 0xffffffff)
+      : ((v >>> n) | (v << (width - n))) & (width === 16 ? 0xffff : 0xffffffff);
+  writeNumeric(state, step.out, result, t);
+}
+
+function executeBitSet(state: SimState, step: ScheduleStep, set: boolean): void {
+  const t = step.value_type ?? "WORD";
+  const v = toInt(readNumeric(state, step.in1), t);
+  const bit = readNumeric(state, step.in2) & bitMask(t);
+  const result = set ? v | (1 << bit) : v & ~(1 << bit);
+  writeNumeric(state, step.out, toInt(result, t), t);
 }
 
 export function executeScheduleStep(state: SimState, step: ScheduleStep, dt_ms: number): void {
@@ -77,6 +201,9 @@ export function executeScheduleStep(state: SimState, step: ScheduleStep, dt_ms: 
     case "not":
       writeBool(state, step.out, !readBool(state, step.in1));
       break;
+    case "rs":
+      executeRs(state, step);
+      break;
     case "ton":
       executeTon(state, step, dt_ms);
       break;
@@ -97,6 +224,42 @@ export function executeScheduleStep(state: SimState, step: ScheduleStep, dt_ms: 
       if (step.out && step.in1) {
         state.vars[step.out] = state.vars[step.in1] ?? false;
       }
+      break;
+    case "add":
+      executeNumericBinOp(state, step, (a, b) => a + b);
+      break;
+    case "sub":
+      executeNumericBinOp(state, step, (a, b) => a - b);
+      break;
+    case "mul":
+      executeNumericBinOp(state, step, (a, b) => a * b);
+      break;
+    case "div":
+      executeNumericBinOp(state, step, (a, b) => (b !== 0 ? a / b : 0));
+      break;
+    case "pow":
+      writeNumeric(state, step.out, Math.pow(readNumeric(state, step.in1), readNumeric(state, step.in2)), "REAL");
+      break;
+    case "sqrt":
+      writeNumeric(state, step.out, Math.sqrt(readNumeric(state, step.in1)), "REAL");
+      break;
+    case "setbit":
+      executeBitSet(state, step, true);
+      break;
+    case "resetbit":
+      executeBitSet(state, step, false);
+      break;
+    case "shl":
+      executeShift(state, step, "shl");
+      break;
+    case "shr":
+      executeShift(state, step, "shr");
+      break;
+    case "rol":
+      executeRotate(state, step, "rol");
+      break;
+    case "ror":
+      executeRotate(state, step, "ror");
       break;
     default:
       break;
@@ -123,6 +286,7 @@ export function createSimState(ir: PlcIr): SimState {
     ai: Array.from({ length: aiLen }, () => 0),
     do: Array.from({ length: doLen }, () => false),
     ton: new Map(),
+    rs: new Map(),
     scan_index: 0,
     elapsed_ms: 0,
   };
