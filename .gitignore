@@ -17,6 +17,7 @@ nanoplc-vscode/*.vsix
 nanoplc-vscode/.vscode-test/
 packages/ir-schema/node_modules/
 packages/ir-schema/dist/
+packages/ir-schema/src/**/*.js
 **/npm-debug.log*
 **/yarn-debug.log*
 **/yarn-error.log*

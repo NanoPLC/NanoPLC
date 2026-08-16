@@ -4,8 +4,6 @@
 #include "esp_log.h"
 #include "m5_stamplc_io.h"
 
-#include <string.h>
-
 static const char *TAG = "aw9523";
 
 #define AW9523_REG_INPUT0   0x00

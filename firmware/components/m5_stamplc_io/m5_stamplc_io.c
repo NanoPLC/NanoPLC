@@ -3,8 +3,6 @@
 #include "driver/i2c_master.h"
 #include "esp_log.h"
 
-#include <string.h>
-
 static const char *TAG = "stamplc_io";
 
 #define REG_IO_CONTROL 0x10u

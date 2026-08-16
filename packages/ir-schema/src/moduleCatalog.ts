@@ -1,6 +1,5 @@
 import { IO_MAP_SCHEMA_VERSION } from "./constants";
 import {
-  deviceDoChannels,
   listDeviceIoChannels,
   type DeviceIoProfile,
 } from "./deviceCatalog";
@@ -186,7 +185,6 @@ export function buildModuleIoMapEntries(
     });
   }
 
-  const doChannels = deviceDoChannels(entry.io);
   for (const ch of doList) {
     rows.push({
       symbol: `${entry.io.do_symbol_prefix}${offsets.do + ch.channel}`,

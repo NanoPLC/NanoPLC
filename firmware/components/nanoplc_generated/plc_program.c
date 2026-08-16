@@ -5,11 +5,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Provided by nanoplc_runtime — forward declare to avoid CMake cycle (generated ↔ runtime). */
-uint32_t nanoplc_runtime_scan_period_ms(void);
-
-#define NPGEN_SCAN_DT_MS 10u
-
 static bool npgen_di[2];
 static bool npgen_do[1];
 static bool npgen_v_DI_Enable;
@@ -24,8 +19,6 @@ uint32_t nanoplc_generated_magic(void)
 
 void nanoplc_generated_program_scan(void)
 {
-    const uint32_t npgen_scan_dt_ms = nanoplc_runtime_scan_period_ms();
-
     npgen_di[0] = nanoplc_hal_read_di(0);
     npgen_v_DI_Start = npgen_di[0];
     npgen_di[1] = nanoplc_hal_read_di(1);

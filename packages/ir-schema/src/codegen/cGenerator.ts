@@ -345,7 +345,7 @@ function usesMathLib(ir: PlcIr): boolean {
   return allSteps(ir).some((s) => s.op === "pow" || s.op === "sqrt");
 }
 
-export function computeIrMagic(ir: PlcIr, irSha256Hex: string): number {
+export function computeIrMagic(_ir: PlcIr, irSha256Hex: string): number {
   const crc16 = parseInt(irSha256Hex.slice(0, 4), 16) & 0xffff;
   return ((IR_VERSION & 0xff) << 24) | (crc16 << 8) | (IR_VERSION & 0xff);
 }
@@ -384,14 +384,19 @@ export function codegenC(ir: PlcIr, irSha256Hex: string, _ioMap?: IoMap): Codege
     })
     .join("\n\n");
   const body = ir.schedule.flatMap((step) => line(step, dtExpr)).join("\n");
-  const dtDecl =
-    pous.length > 0
-      ? "static uint32_t npgen_scan_dt_ms;\n"
-      : "";
-  const scanDt =
-    pous.length > 0
-      ? "    npgen_scan_dt_ms = nanoplc_runtime_scan_period_ms();"
-      : "    const uint32_t npgen_scan_dt_ms = nanoplc_runtime_scan_period_ms();";
+  const needsDt = tons.length > 0;
+  const dtDecl = needsDt && pous.length > 0 ? "static uint32_t npgen_scan_dt_ms;\n" : "";
+  const scanDt = !needsDt
+    ? ""
+    : pous.length > 0
+      ? "    npgen_scan_dt_ms = nanoplc_runtime_scan_period_ms();\n\n"
+      : "    const uint32_t npgen_scan_dt_ms = nanoplc_runtime_scan_period_ms();\n\n";
+  const scanPeriodProto = needsDt
+    ? `/* Provided by nanoplc_runtime — forward declare to avoid CMake cycle (generated ↔ runtime). */
+uint32_t nanoplc_runtime_scan_period_ms(void);
+
+`
+    : "";
 
   const plc_program_c = `/* Auto-generated from IR v${IR_VERSION} — do not edit. */
 #include "nanoplc_generated.h"
@@ -400,11 +405,7 @@ export function codegenC(ir: PlcIr, irSha256Hex: string, _ioMap?: IoMap): Codege
 #include <stdbool.h>
 #include <stdint.h>
 ${needMath ? "#include <math.h>\n" : ""}
-/* Provided by nanoplc_runtime — forward declare to avoid CMake cycle (generated ↔ runtime). */
-uint32_t nanoplc_runtime_scan_period_ms(void);
-
-#define NPGEN_SCAN_DT_MS ${ir.project.scan_period_ms}u
-${diCount > 0 ? `static bool npgen_di[${diCount}];\n` : ""}${aiCount > 0 ? `static float npgen_ai[${aiCount}];\n` : ""}${doCount > 0 ? `static bool npgen_do[${doCount}];\n` : ""}${varDecls ? `${varDecls}\n` : ""}${tonStructs ? `${tonStructs}\n` : ""}${rsStructs ? `${rsStructs}\n` : ""}${dtDecl}${pouProtos ? `${pouProtos}\n` : ""}
+${scanPeriodProto}${diCount > 0 ? `static bool npgen_di[${diCount}];\n` : ""}${aiCount > 0 ? `static float npgen_ai[${aiCount}];\n` : ""}${doCount > 0 ? `static bool npgen_do[${doCount}];\n` : ""}${varDecls ? `${varDecls}\n` : ""}${tonStructs ? `${tonStructs}\n` : ""}${rsStructs ? `${rsStructs}\n` : ""}${dtDecl}${pouProtos ? `${pouProtos}\n` : ""}
 uint32_t nanoplc_generated_magic(void)
 {
     return 0x${magic.toString(16).padStart(8, "0")}u;
@@ -412,9 +413,7 @@ uint32_t nanoplc_generated_magic(void)
 ${pouFns ? `\n${pouFns}\n` : ""}
 void nanoplc_generated_program_scan(void)
 {
-${scanDt}
-
-${body}
+${scanDt}${body}
 }
 `;
 

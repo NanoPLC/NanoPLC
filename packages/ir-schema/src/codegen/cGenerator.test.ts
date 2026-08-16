@@ -43,6 +43,9 @@ test("codegenC emits scan function for and_gate", () => {
   assert.match(out.plc_program_c, /&&/);
   assert.match(out.plc_program_c, /npgen_do\[0\]/);
   assert.doesNotMatch(out.plc_program_c, /npgen_ai/);
+  assert.doesNotMatch(out.plc_program_c, /npgen_scan_dt_ms/);
+  assert.doesNotMatch(out.plc_program_c, /NPGEN_SCAN_DT_MS/);
+  assert.doesNotMatch(out.plc_program_c, /nanoplc_runtime_scan_period_ms/);
 });
 
 test("codegenC emits math and RS for numeric network", () => {
@@ -128,7 +131,7 @@ test("codegenC emits pou function for CALL", () => {
   const out = codegenC(compiled.ir, hash);
   assert.match(out.plc_program_c, /npgen_pou_aux/);
   assert.match(out.plc_program_c, /static void npgen_pou_aux\(void\)/);
-  assert.match(out.plc_program_c, /static uint32_t npgen_scan_dt_ms;/);
+  assert.doesNotMatch(out.plc_program_c, /npgen_scan_dt_ms/);
 });
 
 test("codegenC copies CALL IN and OUT variables", () => {
@@ -168,4 +171,27 @@ test("codegenC copies CALL IN and OUT variables", () => {
   const out = codegenC(compiled.ir, hash);
   assert.match(out.plc_program_c, /npgen_v_aux__Enable/);
   assert.match(out.plc_program_c, /npgen_pou_aux\(\);/);
+});
+
+test("codegenC emits scan dt only when TON is present", () => {
+  const fbd: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [
+      { id: "di1", type: "DI", params: { channel: 1, symbol: "DI_Start" } },
+      { id: "ton1", type: "TON", params: { pt_ms: 500 } },
+      { id: "do1", type: "DO", params: { channel: 1, symbol: "DO_Lamp" } },
+    ],
+    wires: [
+      { from: { block: "di1", port: "Q" }, to: { block: "ton1", port: "IN" } },
+      { from: { block: "ton1", port: "Q" }, to: { block: "do1", port: "IN" } },
+    ],
+  };
+  const compiled = compileFbdToIr(project, fbd, "main");
+  assert.ok(compiled.ir);
+  const hash = createHash("sha256").update(JSON.stringify(compiled.ir)).digest("hex");
+  const out = codegenC(compiled.ir, hash);
+  assert.match(out.plc_program_c, /const uint32_t npgen_scan_dt_ms = nanoplc_runtime_scan_period_ms\(\);/);
+  assert.match(out.plc_program_c, /npgen_ton_ton1\.et_ms \+= npgen_scan_dt_ms/);
+  assert.doesNotMatch(out.plc_program_c, /NPGEN_SCAN_DT_MS/);
 });

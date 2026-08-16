@@ -113,7 +113,7 @@ export class NanoPlcTreeItem extends vscode.TreeItem {
         this.iconPath = new vscode.ThemeIcon("symbol-event");
         if (relPath) {
           this.resourceUri = vscode.Uri.file(path.join(root, relPath));
-          this.command = openProgramCommand(this.resourceUri, label);
+          this.command = openProgramCommand(this.resourceUri);
         }
         break;
       case "programs_group":
@@ -123,7 +123,7 @@ export class NanoPlcTreeItem extends vscode.TreeItem {
         this.iconPath = new vscode.ThemeIcon("symbol-method");
         if (relPath) {
           this.resourceUri = vscode.Uri.file(path.join(root, relPath));
-          this.command = openProgramCommand(this.resourceUri, label);
+          this.command = openProgramCommand(this.resourceUri);
         }
         break;
       case "firmware":
@@ -138,7 +138,7 @@ function openFileCommand(uri: vscode.Uri): vscode.Command {
   return { command: "vscode.open", title: "Open", arguments: [uri] };
 }
 
-function openProgramCommand(uri: vscode.Uri, label: string): vscode.Command {
+function openProgramCommand(uri: vscode.Uri): vscode.Command {
   if (uri.fsPath.endsWith(".fbd.json")) {
     return {
       command: "vscode.openWith",

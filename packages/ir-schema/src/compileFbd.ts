@@ -3,7 +3,6 @@ import type {
   CompileDiagnostic,
   CompileResult,
   FbdBlock,
-  FbdSource,
   FbdVariable,
   FbdWire,
   IoMap,

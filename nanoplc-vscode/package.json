@@ -26,36 +26,6 @@
     "ESP32"
   ],
   "activationEvents": [
-    "onLanguage:iec-st",
-    "onLanguage:iec-lad",
-    "onLanguage:iec-fbd",
-    "onCommand:nanoplc.showTargetInfo",
-    "onCommand:nanoplc.setupToolchain",
-    "onCommand:nanoplc.checkToolchain",
-    "onCommand:nanoplc.addEspIdfToPowerShellProfile",
-    "onCommand:nanoplc.firmwareBuild",
-    "onCommand:nanoplc.firmwareFlash",
-    "onCommand:nanoplc.firmwareMonitor",
-    "onCommand:nanoplc.firmwareFlashMonitor",
-    "onCommand:nanoplc.firmwareSetTarget",
-    "onCommand:nanoplc.firmwareDiagnose",
-    "onView:nanoplcProject",
-    "onCommand:nanoplc.createProject",
-    "onCommand:nanoplc.addDevice",
-    "onCommand:nanoplc.addModule",
-    "onCommand:nanoplc.addDriver",
-    "onCommand:nanoplc.addProgram",
-    "onCommand:nanoplc.addTask",
-    "onCommand:nanoplc.configureTask",
-    "onCommand:nanoplc.deleteTask",
-    "onCommand:nanoplc.addProgramToTask",
-    "onCommand:nanoplc.removeProgramFromTask",
-    "onCommand:nanoplc.compileProgram",
-    "onCommand:nanoplc.refreshProjectTree",
-    "onCommand:nanoplc.startSimulation",
-    "onCommand:nanoplc.stopSimulation",
-    "onCommand:nanoplc.codegenFirmware",
-    "onCustomEditor:nanoplc.fbdEditor",
     "workspaceContains:**/nanoplc.project.json"
   ],
   "main": "./out/extension.js",
@@ -431,5 +401,9 @@
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.2.1",
     "typescript": "^5.3.3"
+  },
+  "allowScripts": {
+    "@vscode/vsce-sign@2.0.9": true,
+    "keytar@7.9.0": true
   }
 }

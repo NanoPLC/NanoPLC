@@ -1,8 +1,6 @@
 /* Stub until first NanoPLC compile/codegen — do not edit. */
 #include "nanoplc_generated.h"
 
-uint32_t nanoplc_runtime_scan_period_ms(void);
-
 void nanoplc_generated_program_scan(void)
 {
 }

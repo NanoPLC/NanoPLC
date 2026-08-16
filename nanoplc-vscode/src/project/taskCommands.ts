@@ -8,7 +8,6 @@ import {
   MIN_TASK_PRIORITY,
   ensureProjectTasks,
   findTask,
-  isPlcTaskKind,
   setTaskProgram,
   syncScanFromTasks,
   taskEntryProgramId,
