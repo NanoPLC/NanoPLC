@@ -17,6 +17,13 @@ export interface SimulatorSnapshot {
   do: boolean[];
 }
 
+/** Optional process-image lengths (device I/O map may be larger than compiled IR). */
+export interface SimIoCapacity {
+  di?: number;
+  ai?: number;
+  do?: number;
+}
+
 export interface SimState {
   vars: Record<string, boolean | number>;
   di: boolean[];

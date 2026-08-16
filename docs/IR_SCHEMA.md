@@ -144,7 +144,7 @@ Types, validation, `compileFbdToIr()`, and `compileProjectToIr()` (entry PROGRAM
 
 ### Simulator
 
-`PlcSimulator` loads compiled `PlcIr` and runs the ordered `schedule` each scan. A `call` step runs the matching `pou_schedules` entry (shared vars / process image; recursion is skipped at runtime and rejected at compile). Supported ops include `read_di`, `read_ai`, `write_do`, `and`, `or`, `not`, `ton`, `move`, `const`, `call`, math, and bit ops. The simulation webview exposes manual **DI**, **DO**, and **AI** (REAL) values for bound channels.
+`PlcSimulator` loads compiled `PlcIr` and runs the ordered `schedule` each scan. A `call` step runs the matching `pou_schedules` entry (shared vars / process image; recursion is skipped at runtime and rejected at compile). Supported ops include `read_di`, `read_ai`, `write_do`, `and`, `or`, `not`, `ton`, `move`, `const`, `call`, math, and bit ops. The simulation webview is a watch list: add **DI / DO / AI** by module and channel, and add PROGRAM **IN / IN_OUT / OUT / VAR / TEMP** symbols.
 
 ### C codegen
 

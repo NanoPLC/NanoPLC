@@ -52,7 +52,7 @@ This keeps maintenance simpler and reduces «simulator differs from silicon» dr
 | ST editor | Standard **text** VS Code surface + grammar/services; **not** a canvas (§3.1) |
 | IR / AST layer | Graph normalization, checks, stable export format |
 | Simulator (Virtual PLC) | Scan cycle, vars, timers, virtual I/O |
-| Watch / live UI | Live values, highlight active flows (e.g. «green trace»); optional force |
+| Watch / live UI | v0: simulator **watch list** (add DI/DO/AI by module/channel + POU vars). Later: green-trace on the FBD canvas; sticky force |
 | C codegen | IR → C + headers/tables for runtime |
 | Build & flash | Invoke **ESP-IDF** (`idf.py build flash monitor`) from the workspace |
 | Online debug (later) | Device ↔ IDE protocol (Serial / WebSocket, etc.) |
@@ -224,6 +224,8 @@ Watchdog: register each PLC task with the ESP task WDT; log `task overrun` when 
 
 One JS timer per **cyclic** task; freewheeling via queued microtasks with a yield; event tasks when the bound BOOL rises in the PI. v0 simulator still runs a **single** interval: the primary cyclic task’s `interval_ms`, executing that task’s entry PROGRAM (same limit as compile, §5.9).
 
+**v0 watch panel:** the webview starts empty. The user adds **DI / DO / AI** with the same **module → local channel** picker as FBD I/O blocks, and adds PROGRAM **IN / IN_OUT / OUT / VAR / TEMP**. DI and AI are writable; DO is read-only; BOOL vars toggle, numeric vars use a field. `PlcSimulator` can size the process image from the full device I/O map (`SimIoCapacity`), not only compiled `io_image`. Watches persist in VS Code `workspaceState` per project. Green-trace on the canvas and sticky force remain later work.
+
 ### 5.9. Compile / codegen — current vs target
 
 **Now (T0 + CALL):** compile and simulate the **entry PROGRAM** of the primary cyclic task, including FBD `CALL` into other PROGRAMS (`pou_schedules`). Extra **tasks** are stored and validated, with an explicit compile note. A task may bind only one program (`NP-0116`).
@@ -256,9 +258,9 @@ Compile copies IN / IN_OUT into the callee before its schedule (`call_in`), runs
 
 ## 6. What to simulate (order)
 
-1. Digital I/O (buttons, coils, lamps). **Done (v0)** — `DI` / `DO` blocks, simulator panel, GPIO / AW9523 / StamPLC IO DO paths.
+1. Digital I/O (buttons, coils, lamps). **Done (v0)** — `DI` / `DO` blocks, simulator **watch list** (add by module/channel), GPIO / AW9523 / StamPLC IO DO paths.
 2. Standard timers (TON, TOF, pulse—per your block library). **Partial (v0)** — TON in IR + simulator; TOF/pulse todo.
-3. Analog I/O vs analog **device stubs**. **Partial (v0)** — **`AI` block**, `read_ai` in schedule, simulator **AI** sliders/fields, StamPLC IO voltage read on device; **todo:** themed virtual transmitters (temperature, pressure, generic ADC profiles) as simulator widgets above raw REAL values.
+3. Analog I/O vs analog **device stubs**. **Partial (v0)** — **`AI` block**, `read_ai` in schedule, simulator **AI** watch fields (module/channel), StamPLC IO voltage read on device; **todo:** themed virtual transmitters (temperature, pressure, generic ADC profiles) as simulator widgets above raw REAL values.
 4. Virtual devices (tank, motor, conveyor, valve)—layer above I/O («mini Factory I/O»).
 5. Virtual fieldbuses (Modbus, MQTT, OPC UA—as needed to test SCADA without hardware).
 
@@ -352,7 +354,7 @@ Mitigate simulator/MCU mismatch: tight IR spec + tests + (later) shared C runtim
 ### Phase 1 — MVP «mini PLC IDE»
 
 1. [ ] IDE structure: **Device/project tree** (§3.2); **FBD** Node-RED–style canvas (§3.1); **ST** plain VS Code editor (§3.1). **Done so far:** CODESYS-style **Project tree** (device → modules → drivers → application → **Task configuration** + programs); **FBD canvas v0**; ST/LAD grammar-only text—see §49.
-2. [x] **JS/TS Virtual PLC** + **Run Simulation** (basic I/O panel, scan loop; flow highlighting todo).
+2. [x] **JS/TS Virtual PLC** + **Run Simulation** (watch list: add DI/DO/AI by module/channel and POU vars; scan loop; flow highlighting todo).
 3. [x] **C codegen** from IR → `firmware/components/nanoplc_generated/` (auto on compile; CLI `tools/codegen`).
 4. [x] **ESP-IDF** skeleton under `firmware/` with working `idf.py build`; **manual** CLI flash/monitor. **Done:** NanoPLC IDE commands for Build/Flash/Monitor (§7.4); **per-project firmware scaffold** + **build on compile** (§7.4 item 3).
 5. [x] **NanoPLC: Setup toolchain** flow installs pinned ESP-IDF via bundled bootstrap (`install.bat` / `install.sh`); settings keys §18 wired. Optional on Windows: command **NanoPLC: Add ESP-IDF export to PowerShell profile(s)** for `export.ps1`. **Todo:** gated first-build onboarding (§48) and coupling to the Espressif extension (§48.4).
@@ -974,7 +976,7 @@ _Last reviewed: 2026-08-16._
 | Device / project tree (§3.2) | **Partial (v0)** — CODESYS-style hierarchy; **Task configuration** (one entry PROGRAM per task); **device catalog** + **module catalog** (StamPLC IO); Add device/module/driver/program/task |
 | `packages/ir-schema` + `docs/IR_SCHEMA.md` | **Done** |
 | Example `examples/and_gate` | **Done** |
-| TS **Virtual PLC** simulator (`PlcSimulator`, Run/Stop + I/O panel) | **Done** (v0 — DI/DO/AI panel; no green-trace yet) |
+| TS **Virtual PLC** simulator (`PlcSimulator`, Run/Stop + watch list) | **Done** (v0 — add DI/DO/AI by module/channel and POU IN/IN_OUT/OUT/VAR/TEMP; no green-trace yet) |
 | **C codegen** → `nanoplc_generated/plc_program.c` | **Done** (v0 schedule ops including `call` / `call_in` / `call_out`; omit unused DI/AI/DO arrays; auto on compile via `nanoplc.codegenOnCompile`) |
 | **`nanoplc_hal`** GPIO + registered I2C readers/writers from codegen | **Done** (v0 digital I/O; AW9523 DI/DO, StamPLC IO DO/AI) |
 | **Device catalog** + scaffold on **Add device** | **Done** (v0 — StamPLC K141, generic ESP32-S3 GPIO) |
@@ -1017,7 +1019,7 @@ Unchanged: IR format lock, ordered graph compile, TS simulator, C codegen, onlin
 - **§49 implementation snapshot** plus §11 / §14 checkmarks aligned to current repo (`firmware/` bootstrap shipped, extension grammars + toolchain commands; IDE build/flash and FBD canvas still open).
 - Extension: **Build / Flash / Monitor / Set target / Diagnose** commands invoking `idf.py` under `nanoplc.firmwareRoot` with ESP-IDF export activation (§7.4, §49).
 - **Phase 0:** JSON IR (`docs/IR_SCHEMA.md`), `packages/ir-schema` compiler, project scaffold + **Compile PLC program**, Device tree, `examples/and_gate`.
-- **Phase 1 (partial):** `PlcSimulator` scan runtime + **Run simulation** webview for virtual DI/DO/AI (§6).
+- **Phase 1 (partial):** `PlcSimulator` scan runtime + **Run simulation** watch-list webview (§6, §5.8).
 - **FBD editor v0:** `customEditor` for `*.fbd.json` — Node-RED–style canvas (palette, wires, layout); opens from Device tree program nodes.
 - **FBD wiring UX pass:** drag-to-connect (mousedown port → drag → release on compatible port) alongside click output→input; inputs accept a single wire (new connection replaces old), outputs fan out freely; wire selection/deletion fixed (click + Delete/Backspace, double-click, or **Delete connection** in properties).
 - **Project tree v0 (CODESYS-style):** device → configuration → modules → drivers → communication → application → **Task configuration** + programs; `modules[]` / `drivers[]` / `tasks[]` in `nanoplc.project.json`.
@@ -1031,5 +1033,6 @@ Unchanged: IR format lock, ordered graph compile, TS simulator, C codegen, onlin
 - **FBD I/O + CONST + build gate:** DI/DO/AI module/channel binding; typed **CONST**; compile/`Build firmware` require I/O binding (`NP-0214`); editor toolbar Compile / Build firmware.
 - **StamPLC firmware drivers:** `m5_aw9523` (onboard AW9523), `m5_stamplc_io` (expansion module I2C), `m5_stamplc_ac` (AC relay @ 0x44); codegen emits HAL init + DI/DO/AI hooks in `io_hal_config.c`.
 - **FBD multi-module I/O picker:** module dropdown + local channel per block (avoids DO/AI collisions when expansion modules are added).
-- **Analog I/O (v0 partial):** FBD **Analog In**, IR `read_ai`, simulator AI panel; themed temperature/pressure/ADC stubs remain future work (§6.3).
+- **Analog I/O (v0 partial):** FBD **Analog In**, IR `read_ai`, simulator AI watch fields; themed temperature/pressure/ADC stubs remain future work (§6.3).
 - **IDF 5.3 fix:** `nanoplc_runtime` requires `esp_system` instead of removed `esp_task_wdt` component; default target in `sdkconfig.defaults`.
+- **Simulator watch list (2026-08-16):** panel no longer dumps compiled `io_image`; user adds DI/DO/AI (module + channel, same as FBD) and PROGRAM IN/IN_OUT/OUT/VAR/TEMP; `SimIoCapacity` sizes the process image from the device map; watches persist per project (§5.8).

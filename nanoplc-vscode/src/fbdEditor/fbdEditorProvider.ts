@@ -4,16 +4,15 @@ import * as vscode from "vscode";
 
 import {
   FBD_SOURCE_SCHEMA_VERSION,
-  findDeviceCatalogEntry,
-  listDeviceIoChannels,
-  resolveDeviceTree,
-  type DeviceIoChannel,
   type FbdSource,
-  type IoModuleChannels,
   type NanoPlcProject,
 } from "@nanoplc/ir-schema";
 
-import { loadProjectIoProfile } from "../project/projectIoLoader";
+import {
+  loadEditorIoProfile,
+  loadProjectPouCatalog,
+  type EditorIoProfilePayload,
+} from "../project/editorIoProfile";
 
 import { FBD_BLOCK_CATALOG } from "./blockCatalog";
 import { ensureLayout } from "./layout";
@@ -30,42 +29,7 @@ interface WebviewDocumentPayload {
   layout: Record<string, { x: number; y: number }>;
 }
 
-export interface EditorIoProfilePayload {
-  di: DeviceIoChannel[];
-  do: DeviceIoChannel[];
-  ai: DeviceIoChannel[];
-  modules: IoModuleChannels[];
-  source: "catalog" | "io-map" | "none";
-}
-
-function attachModuleMeta(
-  channels: DeviceIoChannel[],
-  moduleId: string,
-  moduleName: string
-): DeviceIoChannel[] {
-  return channels.map((ch) => ({ ...ch, moduleId, moduleName }));
-}
-
-function catalogModuleProfile(
-  project: NanoPlcProject,
-  entryLabel: string,
-  channels: { di: DeviceIoChannel[]; do: DeviceIoChannel[]; ai: DeviceIoChannel[] }
-): EditorIoProfilePayload {
-  const { modules } = resolveDeviceTree(project);
-  const mod = modules[0];
-  const moduleId = mod?.id ?? "device";
-  const moduleName = mod?.name ?? entryLabel;
-  const di = attachModuleMeta(channels.di, moduleId, moduleName);
-  const doList = attachModuleMeta(channels.do, moduleId, moduleName);
-  const ai = attachModuleMeta(channels.ai, moduleId, moduleName);
-  return {
-    di,
-    do: doList,
-    ai,
-    modules: [{ id: moduleId, name: moduleName, di, do: doList, ai }],
-    source: "catalog",
-  };
-}
+export type { EditorIoProfilePayload };
 
 interface PendingFbdEdit {
   timer: ReturnType<typeof setTimeout>;
@@ -125,36 +89,6 @@ function findProjectRootForDocument(documentUri: vscode.Uri): string | undefined
     dir = parent;
   }
   return undefined;
-}
-
-function loadEditorIoProfile(projectRoot: string): EditorIoProfilePayload {
-  try {
-    const project = readJsonFile<NanoPlcProject>(path.join(projectRoot, PROJECT_FILENAME));
-    const merged = loadProjectIoProfile(projectRoot, project);
-    if (merged.di.length > 0 || merged.do.length > 0 || merged.ai.length > 0) {
-      const hasExpansion = (project.modules?.length ?? 0) > 1;
-      return {
-        di: merged.di,
-        do: merged.do,
-        ai: merged.ai,
-        modules: merged.modules,
-        source: hasExpansion ? "io-map" : project.device?.catalog_id ? "catalog" : "io-map",
-      };
-    }
-
-    const catalogId = project.device?.catalog_id;
-    if (catalogId) {
-      const entry = findDeviceCatalogEntry(catalogId);
-      if (entry) {
-        const channels = listDeviceIoChannels(entry.io);
-        return catalogModuleProfile(project, entry.label, channels);
-      }
-    }
-  } catch {
-    // Ignore.
-  }
-
-  return { di: [], do: [], ai: [], modules: [], source: "none" };
 }
 
 /** Apply any debounced FBD webview edits so compile/build see the latest graph. */
@@ -240,30 +174,7 @@ export class FbdEditorProvider implements vscode.CustomTextEditorProvider {
           type: "programs",
           payload: {
             currentProgramId: current?.id,
-            programs: project.programs.map((p) => {
-              let variables: { name: string; class: string; type: string }[] = [];
-              try {
-                const abs = path.normalize(path.join(root, p.source));
-                const open = vscode.workspace.textDocuments.find(
-                  (d) => path.normalize(d.uri.fsPath) === abs
-                );
-                const text = open ? open.getText() : fs.readFileSync(abs, "utf8");
-                const raw = JSON.parse(text) as {
-                  variables?: { name: string; class: string; type: string }[];
-                };
-                if (Array.isArray(raw.variables)) {
-                  variables = raw.variables;
-                }
-              } catch {
-                variables = [];
-              }
-              return {
-                id: p.id,
-                name: p.name,
-                language: p.language,
-                variables,
-              };
-            }),
+            programs: loadProjectPouCatalog(root, project),
           },
         });
       } catch {

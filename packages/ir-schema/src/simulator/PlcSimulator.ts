@@ -1,16 +1,18 @@
 import type { PlcIr } from "../types";
 import { createSimState, runScan, snapshot } from "./executeScan";
-import type { SimState, SimulatorSnapshot } from "./types";
+import type { SimIoCapacity, SimState, SimulatorSnapshot } from "./types";
 
 export class PlcSimulator {
   private readonly ir: PlcIr;
+  private readonly capacity: SimIoCapacity | undefined;
   private state: SimState;
   private timer: ReturnType<typeof setInterval> | undefined;
   private listener: ((snap: SimulatorSnapshot) => void) | undefined;
 
-  constructor(ir: PlcIr) {
+  constructor(ir: PlcIr, capacity?: SimIoCapacity) {
     this.ir = ir;
-    this.state = createSimState(ir);
+    this.capacity = capacity;
+    this.state = createSimState(ir, capacity);
   }
 
   get scanPeriodMs(): number {
@@ -22,8 +24,12 @@ export class PlcSimulator {
   }
 
   reset(): void {
-    this.state = createSimState(this.ir);
+    this.state = createSimState(this.ir, this.capacity);
     this.listener?.(snapshot(this.state));
+  }
+
+  setVar(name: string, value: boolean | number): void {
+    this.state.vars[name] = value;
   }
 
   setDi(index: number, value: boolean): void {

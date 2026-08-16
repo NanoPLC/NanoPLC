@@ -29,7 +29,7 @@ Open the Command Palette (**Ctrl+Shift+P** / **Cmd+Shift+P**) and run:
 | **NanoPLC: Add task** | Adds a CODESYS-style task (cyclic / freewheeling / event) under Task configuration |
 | **NanoPLC: Assign program to task** | Binds one PROGRAM as that task’s entry (replace, not a list) |
 | **NanoPLC: Compile PLC program** | Compiles FBD JSON to `build/ir.json` (see `docs/IR_SCHEMA.md`) |
-| **NanoPLC: Run simulation** | Executes compiled IR on a scan timer; open **Simulator** panel to toggle virtual inputs |
+| **NanoPLC: Run simulation** | Executes compiled IR on a scan timer; **Simulator** panel to add module/channel I/O and program variables |
 | **NanoPLC: Stop simulation** | Stops the virtual PLC scan loop |
 | **NanoPLC: Generate firmware C from IR** | Writes `plc_program.c` from existing `build/ir.json` |
 | **NanoPLC: Refresh project tree** | Reloads the **Device** sidebar |
@@ -37,7 +37,7 @@ Open the Command Palette (**Ctrl+Shift+P** / **Cmd+Shift+P**) and run:
 
 ## Simulator
 
-After **Compile PLC program**, run **NanoPLC: Run simulation**. Use the **NanoPLC Simulator** panel to toggle digital inputs and watch outputs update each scan (default 10 ms; UI refresh capped by `nanoplc.simulatorRefreshMs`).
+After **Compile PLC program**, run **NanoPLC: Run simulation**. The **NanoPLC Simulator** panel starts empty: add digital/analog I/O by **module and channel** (same picker as FBD DI/DO/AI blocks) and add **IN / IN_OUT / OUT / VAR / TEMP** from FBD programs. Toggle or edit values each scan (default 10 ms; UI refresh capped by `nanoplc.simulatorRefreshMs`). Watches are kept per project.
 
 Runtime lives in `@nanoplc/ir-schema` (`PlcSimulator`) so golden tests can share the same semantics as the IDE.
 

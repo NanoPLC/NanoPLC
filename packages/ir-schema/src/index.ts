@@ -20,7 +20,7 @@ export { codegenC, computeIrMagic, codegenFirmware } from "./codegen/cGenerator"
 export type { CodegenCResult } from "./codegen/cGenerator";
 export type { CodegenFirmwareOutput, CodegenIoContext } from "./codegen/codegenFirmware";
 export { PlcSimulator } from "./simulator/PlcSimulator";
-export type { SimulatorSnapshot, TonInstanceState } from "./simulator/types";
+export type { SimIoCapacity, SimulatorSnapshot, TonInstanceState } from "./simulator/types";
 export { createSimState, executeScheduleStep, runScan, snapshot } from "./simulator/executeScan";
 export type {
   CompileDiagnostic,

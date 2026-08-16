@@ -1,5 +1,11 @@
 import type { PlcIr, PlcPrimitiveType, ScheduleStep } from "../types";
-import type { RsInstanceState, SimState, SimulatorSnapshot, TonInstanceState } from "./types";
+import type {
+  RsInstanceState,
+  SimIoCapacity,
+  SimState,
+  SimulatorSnapshot,
+  TonInstanceState,
+} from "./types";
 import { pouIrName } from "../pouVars";
 
 function readBool(state: SimState, name: string | undefined): boolean {
@@ -269,10 +275,15 @@ export function executeScheduleStep(state: SimState, step: ScheduleStep, dt_ms: 
   }
 }
 
-export function createSimState(ir: PlcIr): SimState {
-  const diLen = Math.max(0, ...ir.io_image.di.map((d) => d.index + 1), 0);
-  const aiLen = Math.max(0, ...ir.io_image.ai.map((d) => d.index + 1), 0);
-  const doLen = Math.max(0, ...ir.io_image.do.map((d) => d.index + 1), 0);
+function imageLength(entries: { index: number }[], extra?: number): number {
+  const fromIr = entries.reduce((max, entry) => Math.max(max, entry.index + 1), 0);
+  return Math.max(fromIr, extra ?? 0);
+}
+
+export function createSimState(ir: PlcIr, capacity?: SimIoCapacity): SimState {
+  const diLen = imageLength(ir.io_image.di, capacity?.di);
+  const aiLen = imageLength(ir.io_image.ai, capacity?.ai);
+  const doLen = imageLength(ir.io_image.do, capacity?.do);
 
   const vars: Record<string, boolean | number> = {};
   for (const v of ir.variables) {

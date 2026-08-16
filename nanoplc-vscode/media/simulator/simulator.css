@@ -1,0 +1,143 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 12px;
+  font-family: var(--vscode-font-family);
+  font-size: 13px;
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+}
+
+h2 {
+  font-size: 1em;
+  margin: 16px 0 8px;
+}
+
+.meta {
+  font-size: 0.9em;
+  color: var(--vscode-descriptionForeground);
+  margin-bottom: 12px;
+}
+
+.add-card {
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 4px;
+  padding: 10px 12px 8px;
+  margin-bottom: 12px;
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+
+.add-card h2 {
+  margin: 0 0 8px;
+}
+
+.add-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+select,
+button,
+input[type="number"] {
+  font: inherit;
+  color: var(--vscode-dropdown-foreground, var(--vscode-foreground));
+  background: var(--vscode-dropdown-background, var(--vscode-input-background));
+  border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border));
+  border-radius: 2px;
+  padding: 4px 8px;
+}
+
+button {
+  cursor: pointer;
+  background: var(--vscode-button-secondaryBackground, var(--vscode-input-background));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+}
+
+button:hover:not(:disabled) {
+  background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground));
+}
+
+button:disabled,
+select:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+button.primary {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border-color: transparent;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--vscode-button-hoverBackground);
+}
+
+button.di-toggle {
+  min-width: 72px;
+}
+
+button.remove {
+  min-width: auto;
+  padding: 2px 8px;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  vertical-align: middle;
+}
+
+th {
+  font-weight: 600;
+  color: var(--vscode-descriptionForeground);
+}
+
+td.on {
+  color: var(--vscode-testing-iconPassed);
+  font-weight: 600;
+}
+
+td.off {
+  color: var(--vscode-descriptionForeground);
+}
+
+td.value-cell {
+  min-width: 96px;
+}
+
+input.ai-value,
+input.var-value {
+  width: 100%;
+  max-width: 140px;
+}
+
+.hint {
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.9em;
+  margin: 8px 0 0;
+}
+
+.empty {
+  color: var(--vscode-descriptionForeground);
+  font-style: italic;
+  padding: 8px;
+}
+
+.kind-tag {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}

@@ -103,6 +103,44 @@ test("examples/and_gate IR file compiles and simulates", () => {
   assert.equal(sim.stepOnce().vars["DO_Lamp"], true);
 });
 
+test("simulator process image can be larger than compiled io_image", () => {
+  const compiled = compileFbdToIr(baseProject, andFbd, "main");
+  assert.ok(compiled.ir);
+  const sim = new PlcSimulator(compiled.ir, { di: 8, do: 4, ai: 2 });
+  sim.setDi(7, true);
+  sim.setAi(1, 3.5);
+  const snap = sim.stepOnce();
+  assert.equal(snap.di.length, 8);
+  assert.equal(snap.do.length, 4);
+  assert.equal(snap.ai.length, 2);
+  assert.equal(snap.di[7], true);
+  assert.equal(snap.ai[1], 3.5);
+});
+
+test("simulator setVar writes a PROGRAM variable", () => {
+  const project: NanoPlcProject = {
+    ...baseProject,
+    programs: [{ id: "main", name: "Main", source: "src/main.fbd.json", language: "fbd" }],
+  };
+  const fbd: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    variables: [{ name: "Flag", class: "VAR", type: "BOOL", initial: false }],
+    blocks: [
+      { id: "loc", type: "LOCAL", params: { name: "Flag" } },
+      { id: "do1", type: "DO", params: { channel: 1, symbol: "DO_Lamp" } },
+    ],
+    wires: [{ from: { block: "loc", port: "Q" }, to: { block: "do1", port: "IN" } }],
+  };
+  const compiled = compileFbdToIr(project, fbd, "main");
+  assert.ok(compiled.ok && compiled.ir, compiled.diagnostics.map((d) => d.message).join("; "));
+  const sim = new PlcSimulator(compiled.ir);
+  sim.setVar("main__Flag", true);
+  const snap = sim.stepOnce();
+  assert.equal(snap.vars["main__Flag"], true);
+  assert.equal(snap.vars["DO_Lamp"], true);
+});
+
 test("simulator CALL copies IN to callee and OUT back to caller", () => {
   const project: NanoPlcProject = {
     ...baseProject,

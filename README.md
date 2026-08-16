@@ -26,12 +26,25 @@ Each **user project** is a folder with `nanoplc.project.json`, `src/`, `build/`,
 5. Edit **Main** in the FBD canvas (Project tree → Application → Programs). New projects already run Main from **MainTask**. Extra programs: bind each to its own task, **or** CALL them from another FBD (palette **Programs**). Declare **IN / IN_OUT / OUT / VAR / TEMP** under **Variables**; CALL boxes show IN, IN_OUT, and OUT as ports — drag a variable onto the canvas to use it. On every **Digital In**, **Digital Out**, and **Analog In** block, pick **module → channel** in properties (e.g. onboard **DO 1** vs expansion **StamPLC IO · DO 1**). Optional: **Constant** (`BOOL` / `INT` / `WORD` / …). With StamPLC, use **Add I/O module** in the device tree for **StamPLC IO** expansion (extra DO + AI over I2C).
 6. **Compile** (FBD toolbar or **NanoPLC: Compile PLC program**) — validates the graph (including I/O bindings), writes `build/ir.json`, generates `firmware/components/nanoplc_generated/*.c`. When `nanoplc.buildFirmwareOnCompile` is true, also runs **`idf.py build`**.
 7. **Build firmware** (FBD toolbar or **NanoPLC: Build firmware**) — same PLC compile + checks, then always runs **`idf.py build`** for the project device. Refuses to build if an I/O block has no module/channel (or symbol) assigned.
-8. **NanoPLC: Run simulation** — virtual DI / DO / AI before hardware.
+8. **NanoPLC: Run simulation** — Virtual PLC watch list (see below).
 9. **NanoPLC: Flash firmware** — after a successful build.
 
 **Compile vs Build firmware:** Compile = FBD → IR → C (+ optional idf build via setting). Build firmware = that pipeline (with validation) + explicit ESP-IDF build.
 
 Device catalog and I/O templates live in [`packages/ir-schema/src/deviceCatalog.ts`](packages/ir-schema/src/deviceCatalog.ts). IR and project fields: [`docs/IR_SCHEMA.md`](docs/IR_SCHEMA.md).
+
+## Simulation (Virtual PLC)
+
+**NanoPLC: Run simulation** loads `build/ir.json` and runs the primary cyclic task on a scan timer (typically 10 ms). The **NanoPLC Simulator** panel starts **empty** — add only the points you want to watch:
+
+| Add | How | In the table |
+|-----|-----|----------------|
+| **I/O** | Kind (Digital In / Analog In / Digital Out) → **module** → **channel** (same picker as FBD DI/DO/AI blocks) | DI toggle, AI REAL field, DO read-only |
+| **Variable** | FBD program → **IN / IN_OUT / OUT / VAR / TEMP** | BOOL toggle; numeric types as a number |
+
+Watches persist per project. The process image is sized from the **device I/O map**, so you can force channels that are not yet used on the canvas. **TEMP** resets at the start of each POU call; values the program writes each scan overwrite a manual edit on the next cycle. Stop with **NanoPLC: Stop simulation** (or the status-bar item). Canvas green-trace is not in v0.
+
+UI refresh is capped by `nanoplc.simulatorRefreshMs` (default 50 ms).
 
 ## Programs, tasks, and CALL
 
@@ -106,6 +119,7 @@ Install the VSIX → **Developer: Reload Window**. Details: [`nanoplc-vscode/REA
 | `nanoplc.codegenOnCompile` | `true` | Emit `plc_program.c` + `io_hal_config.c` after compile |
 | `nanoplc.buildFirmwareOnCompile` | `true` | Run `idf.py set-target` + `idf.py build` after codegen |
 | `nanoplc.firmwareRoot` | `firmware` | Fallback ESP-IDF path when project has no `firmware_root` |
+| `nanoplc.simulatorRefreshMs` | `50` | Minimum interval (ms) for refreshing the simulator watch panel |
 | `nanoplc-idf.buildTarget` | `esp32s3` | Default IDF target if project omits `device.idf_target` |
 | `nanoplc-idf.idfSetupScript` | — | Path to ESP-IDF `export.ps1` / `export.sh` |
 
