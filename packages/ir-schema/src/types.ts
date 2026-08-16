@@ -16,11 +16,64 @@ export const PLC_PRIMITIVE_TYPES: readonly PlcPrimitiveType[] = [
   "REAL",
 ];
 
+/** IEC-style variable sections on a PROGRAM. */
+export const PLC_VAR_CLASSES = ["IN", "IN_OUT", "OUT", "VAR", "TEMP"] as const;
+export type PlcVarClass = (typeof PLC_VAR_CLASSES)[number];
+
+export interface FbdVariable {
+  name: string;
+  class: PlcVarClass;
+  type: PlcPrimitiveType;
+  /** Cold-start value. TEMP is reapplied at the start of every call. */
+  initial?: boolean | number;
+}
+
 export interface NanoPlcProgramRef {
   id: string;
   name: string;
   source: string;
   language: "fbd" | "st" | "lad";
+}
+
+/** CODESYS-like task kinds (Task Configuration). */
+export const PLC_TASK_KINDS = ["cyclic", "freewheeling", "event"] as const;
+export type PlcTaskKind = (typeof PLC_TASK_KINDS)[number];
+
+export interface NanoPlcTaskWatchdog {
+  enabled: boolean;
+  /** Watchdog timeout in milliseconds. */
+  time_ms: number;
+}
+
+/** One PROGRAM call inside a task. Legacy; a task now has a single `program`. */
+export interface NanoPlcTaskPouCall {
+  /** Program id from `programs[]`. */
+  program: string;
+}
+
+/**
+ * PLC task — schedules one entry PROGRAM, analogous to CODESYS Task Configuration.
+ * Siemens-style OB numbers are not used. Extra programs belong on other tasks, or
+ * are called from a PROGRAM (FBD `CALL` block).
+ */
+export interface NanoPlcTaskRef {
+  id: string;
+  name: string;
+  kind: PlcTaskKind;
+  /** 0 = highest priority (CODESYS-like), 31 = lowest. */
+  priority: number;
+  /** Cyclic interval in milliseconds. Required when `kind` is `cyclic`. */
+  interval_ms?: number;
+  /** BOOL symbol that triggers an `event` task (rising edge). Runtime later. */
+  event?: string;
+  watchdog?: NanoPlcTaskWatchdog;
+  /** Entry PROGRAM id. A task runs exactly one program. */
+  program?: string;
+  /**
+   * Legacy call list. If present, must contain at most one entry; prefer `program`.
+   * @deprecated
+   */
+  pous?: NanoPlcTaskPouCall[];
 }
 
 /** Field I/O module (maps to `io-map.json` or future module configs). */
@@ -52,13 +105,22 @@ export interface NanoPlcProject {
     vendor?: string;
     model?: string;
   };
-  scan: {
+  /**
+   * Legacy single-scan period. When `tasks[]` is present, treat as a cache of the
+   * primary cyclic task interval (kept so older IR/codegen keep working).
+   */
+  scan?: {
     period_ms: number;
   };
   /** Optional I/O modules (default: onboard GPIO when omitted). */
   modules?: NanoPlcModuleRef[];
   /** Optional HAL / fieldbus drivers (default: `nanoplc_hal` when omitted). */
   drivers?: NanoPlcDriverRef[];
+  /**
+   * CODESYS-style Task Configuration. When omitted, the IDE synthesizes MainTask
+   * from `scan.period_ms` and the first program.
+   */
+  tasks?: NanoPlcTaskRef[];
   programs: NanoPlcProgramRef[];
   firmware_root?: string;
 }
@@ -84,6 +146,8 @@ export interface FbdSource {
   name: string;
   blocks: FbdBlock[];
   wires: FbdWire[];
+  /** PROGRAM variable declarations (IN, IN_OUT, OUT, VAR, TEMP). */
+  variables?: FbdVariable[];
   /** Optional editor canvas positions (ignored by IR compiler). */
   layout?: Record<string, { x: number; y: number }>;
 }
@@ -105,6 +169,7 @@ export interface IrVariable {
   name: string;
   type: PlcPrimitiveType;
   role: "internal" | "di" | "do" | "ai" | "fb_state";
+  initial?: boolean | number;
 }
 
 export interface IrIoImage {
@@ -135,7 +200,8 @@ export type ScheduleOp =
   | "shr"
   | "rol"
   | "ror"
-  | "rs";
+  | "rs"
+  | "call";
 
 export interface ScheduleStep {
   step: number;
@@ -153,6 +219,12 @@ export interface ScheduleStep {
   value?: boolean | number;
   /** PLC type of the `const` literal / destination. */
   value_type?: PlcPrimitiveType;
+  /** Callee program id for `call` ops. */
+  program?: string;
+  /** Caller wire names for callee IN / IN_OUT ports (`port → source`). */
+  call_in?: Record<string, string>;
+  /** Caller dest names for callee OUT / IN_OUT ports (`port → dest`). */
+  call_out?: Record<string, string>;
 }
 
 export interface PlcIr {
@@ -171,12 +243,16 @@ export interface PlcIr {
   };
   instances: { id: string; type: string; params?: Record<string, unknown> }[];
   schedule: ScheduleStep[];
+  /** Callee PROGRAM schedules invoked by `call` ops in `schedule` (and nested calls). */
+  pou_schedules?: { id: string; schedule: ScheduleStep[] }[];
 }
 
 export interface CompileDiagnostic {
   code: string;
   message: string;
   block_id?: string;
+  /** Program id when the diagnostic belongs to a specific POU. */
+  program_id?: string;
   severity: "error" | "warning";
 }
 

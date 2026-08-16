@@ -1,6 +1,7 @@
 import type { PlcIr, PlcPrimitiveType, ScheduleStep } from "../types";
 import type { IoMap } from "../types";
 import { IR_VERSION } from "../constants";
+import { pouIrName } from "../pouVars";
 import { codegenIoHalConfig, type CodegenFirmwareOutput, type CodegenIoContext } from "./codegenFirmware";
 
 export interface CodegenCResult {
@@ -258,42 +259,90 @@ function line(step: ScheduleStep, dtExpr: string): string[] {
       return numericRotateOp(step, "rol");
     case "ror":
       return numericRotateOp(step, "ror");
+    case "call": {
+      const id = cIdent(step.program ?? "pou");
+      const lines: string[] = [];
+      for (const [port, src] of Object.entries(step.call_in ?? {})) {
+        const dest = pouIrName(step.program ?? "pou", port);
+        lines.push(`    ${varRef(dest)} = ${varRef(src)};`);
+      }
+      lines.push(`    npgen_pou_${id}();`);
+      for (const [port, dest] of Object.entries(step.call_out ?? {})) {
+        const src = pouIrName(step.program ?? "pou", port);
+        lines.push(`    ${varRef(dest)} = ${varRef(src)};`);
+      }
+      return lines;
+    }
     default:
       return [`    /* unsupported op ${step.op} */`];
   }
 }
 
-function collectTypedVars(ir: PlcIr): { name: string; type: PlcPrimitiveType }[] {
-  const byName = new Map<string, PlcPrimitiveType>();
+function allSteps(ir: PlcIr): ScheduleStep[] {
+  const extra = ir.pou_schedules?.flatMap((p) => p.schedule) ?? [];
+  return [...ir.schedule, ...extra];
+}
+
+function collectTypedVars(ir: PlcIr): { name: string; type: PlcPrimitiveType; initial?: boolean | number }[] {
+  const byName = new Map<string, { type: PlcPrimitiveType; initial?: boolean | number }>();
   for (const v of ir.variables) {
-    byName.set(v.name, v.type);
+    byName.set(v.name, { type: v.type, initial: v.initial });
   }
-  for (const step of ir.schedule) {
+  for (const step of allSteps(ir)) {
     for (const name of [step.out, step.in1, step.in2, step.symbol]) {
       if (name && !byName.has(name)) {
-        byName.set(name, step.value_type && name === step.out ? step.value_type : "BOOL");
+        byName.set(name, {
+          type: step.value_type && name === step.out ? step.value_type : "BOOL",
+        });
+      }
+    }
+    for (const name of Object.values(step.call_in ?? {})) {
+      if (name && !byName.has(name)) {
+        byName.set(name, { type: "BOOL" });
+      }
+    }
+    for (const name of Object.values(step.call_out ?? {})) {
+      if (name && !byName.has(name)) {
+        byName.set(name, { type: "BOOL" });
       }
     }
   }
   return [...byName.entries()]
-    .map(([name, type]) => ({ name, type }))
+    .map(([name, info]) => ({ name, ...info }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+function uniqueById<T extends { id: string }>(rows: T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const row of rows) {
+    if (seen.has(row.id)) {
+      continue;
+    }
+    seen.add(row.id);
+    out.push(row);
+  }
+  return out;
+}
+
 function tonBlocks(ir: PlcIr): { id: string; pt_ms: number }[] {
-  return ir.schedule
-    .filter((s) => s.op === "ton")
-    .map((s) => ({ id: cIdent(s.block_id ?? "ton"), pt_ms: s.pt_ms ?? 1000 }));
+  return uniqueById(
+    allSteps(ir)
+      .filter((s) => s.op === "ton")
+      .map((s) => ({ id: cIdent(s.block_id ?? "ton"), pt_ms: s.pt_ms ?? 1000 }))
+  );
 }
 
 function rsBlocks(ir: PlcIr): { id: string }[] {
-  return ir.schedule
-    .filter((s) => s.op === "rs")
-    .map((s) => ({ id: cIdent(s.block_id ?? "rs") }));
+  return uniqueById(
+    allSteps(ir)
+      .filter((s) => s.op === "rs")
+      .map((s) => ({ id: cIdent(s.block_id ?? "rs") }))
+  );
 }
 
 function usesMathLib(ir: PlcIr): boolean {
-  return ir.schedule.some((s) => s.op === "pow" || s.op === "sqrt");
+  return allSteps(ir).some((s) => s.op === "pow" || s.op === "sqrt");
 }
 
 export function computeIrMagic(ir: PlcIr, irSha256Hex: string): number {
@@ -313,14 +362,36 @@ export function codegenC(ir: PlcIr, irSha256Hex: string, _ioMap?: IoMap): Codege
   const needMath = usesMathLib(ir);
 
   const varDecls = typedVars
-    .map((v) => `static ${cTypeFor(v.type)} npgen_v_${cIdent(v.name)};`)
+    .map((v) => {
+      const init =
+        v.initial === undefined ? "" : ` = ${cLiteral(v.type, v.initial)}`;
+      return `static ${cTypeFor(v.type)} npgen_v_${cIdent(v.name)}${init};`;
+    })
     .join("\n");
   const tonStructs = tons
     .map((t) => `static struct { uint32_t et_ms; bool q; } npgen_ton_${t.id};`)
     .join("\n");
   const rsStructs = rss.map((r) => `static struct { bool q; } npgen_rs_${r.id};`).join("\n");
 
+  const pous = ir.pou_schedules ?? [];
+  const pouProtos = pous
+    .map((p) => `static void npgen_pou_${cIdent(p.id)}(void);`)
+    .join("\n");
+  const pouFns = pous
+    .map((p) => {
+      const pouBody = p.schedule.flatMap((step) => line(step, dtExpr)).join("\n");
+      return `static void npgen_pou_${cIdent(p.id)}(void)\n{\n${pouBody}\n}`;
+    })
+    .join("\n\n");
   const body = ir.schedule.flatMap((step) => line(step, dtExpr)).join("\n");
+  const dtDecl =
+    pous.length > 0
+      ? "static uint32_t npgen_scan_dt_ms;\n"
+      : "";
+  const scanDt =
+    pous.length > 0
+      ? "    npgen_scan_dt_ms = nanoplc_runtime_scan_period_ms();"
+      : "    const uint32_t npgen_scan_dt_ms = nanoplc_runtime_scan_period_ms();";
 
   const plc_program_c = `/* Auto-generated from IR v${IR_VERSION} — do not edit. */
 #include "nanoplc_generated.h"
@@ -333,19 +404,15 @@ ${needMath ? "#include <math.h>\n" : ""}
 uint32_t nanoplc_runtime_scan_period_ms(void);
 
 #define NPGEN_SCAN_DT_MS ${ir.project.scan_period_ms}u
-
-static bool npgen_di[${diCount || 1}];
-static float npgen_ai[${aiCount || 1}];
-static bool npgen_do[${doCount || 1}];
-${varDecls ? `${varDecls}\n` : ""}${tonStructs ? `${tonStructs}\n` : ""}${rsStructs ? `${rsStructs}\n` : ""}
+${diCount > 0 ? `static bool npgen_di[${diCount}];\n` : ""}${aiCount > 0 ? `static float npgen_ai[${aiCount}];\n` : ""}${doCount > 0 ? `static bool npgen_do[${doCount}];\n` : ""}${varDecls ? `${varDecls}\n` : ""}${tonStructs ? `${tonStructs}\n` : ""}${rsStructs ? `${rsStructs}\n` : ""}${dtDecl}${pouProtos ? `${pouProtos}\n` : ""}
 uint32_t nanoplc_generated_magic(void)
 {
     return 0x${magic.toString(16).padStart(8, "0")}u;
 }
-
+${pouFns ? `\n${pouFns}\n` : ""}
 void nanoplc_generated_program_scan(void)
 {
-    const uint32_t npgen_scan_dt_ms = nanoplc_runtime_scan_period_ms();
+${scanDt}
 
 ${body}
 }

@@ -7,12 +7,16 @@ import {
   buildIoMapFromCatalog,
   buildProjectDeviceFields,
   catalogLabel,
-  compileFbdToIr,
+  compileProjectToIr,
+  defaultMainTask,
   DEVICE_CATALOG,
+  entryProgram,
   FBD_SOURCE_SCHEMA_VERSION,
   IO_MAP_SCHEMA_VERSION,
   IR_VERSION,
+  primaryCyclicTask,
   PROJECT_SCHEMA_VERSION,
+  resolveTaskConfiguration,
   validateProject,
   type CompileDiagnostic,
   type DeviceCatalogEntry,
@@ -75,6 +79,43 @@ function publishDiagnostics(
   );
 }
 
+function publishCompileDiagnostics(
+  rootPath: string,
+  project: NanoPlcProject,
+  diagnostics: CompileDiagnostic[]
+): void {
+  const leftover: CompileDiagnostic[] = [];
+  const byProgram = new Map<string, CompileDiagnostic[]>();
+  for (const d of diagnostics) {
+    if (d.program_id) {
+      const list = byProgram.get(d.program_id) ?? [];
+      list.push(d);
+      byProgram.set(d.program_id, list);
+    } else {
+      leftover.push(d);
+    }
+  }
+  for (const prog of project.programs) {
+    publishDiagnostics(rootPath, prog.source, byProgram.get(prog.id) ?? []);
+  }
+  publishDiagnostics(rootPath, "nanoplc.project.json", leftover);
+}
+
+function loadProjectFbdSources(rootPath: string, project: NanoPlcProject): Map<string, unknown> {
+  const sources = new Map<string, unknown>();
+  for (const prog of project.programs) {
+    if (prog.language !== "fbd") {
+      continue;
+    }
+    try {
+      sources.set(prog.id, loadFbdRaw(rootPath, prog.source));
+    } catch {
+      // compileProjectToIr reports a missing source.
+    }
+  }
+  return sources;
+}
+
 function sha256(text: string): string {
   return crypto.createHash("sha256").update(text, "utf8").digest("hex");
 }
@@ -101,7 +142,7 @@ function loadFbdRaw(rootPath: string, relSource: string): unknown {
  * Publishes Problems diagnostics. Used by Compile and by Build firmware.
  */
 export function gateProjectFbd(rootPath: string, project: NanoPlcProject): ProjectFbdGateResult {
-  const program = project.programs[0];
+  const program = entryProgram(project);
   if (!program) {
     return {
       ok: false,
@@ -124,18 +165,6 @@ export function gateProjectFbd(rootPath: string, project: NanoPlcProject): Proje
     };
   }
 
-  let fbdRaw: unknown;
-  try {
-    fbdRaw = loadFbdRaw(rootPath, program.source);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return {
-      ok: false,
-      unboundIoBlocks: [],
-      diagnostics: [{ code: "NP-0200", message: `Cannot read FBD source: ${msg}`, severity: "error" }],
-    };
-  }
-
   let ioMap: IoMap | undefined;
   try {
     const projectForIo = readJsonFile<NanoPlcProject>(path.join(rootPath, "nanoplc.project.json"));
@@ -147,8 +176,9 @@ export function gateProjectFbd(rootPath: string, project: NanoPlcProject): Proje
     ioMap = undefined;
   }
 
-  const result = compileFbdToIr(project, fbdRaw, program.id, ioMap);
-  publishDiagnostics(rootPath, program.source, result.diagnostics);
+  const sources = loadProjectFbdSources(rootPath, project);
+  const result = compileProjectToIr(project, sources, program.id, ioMap);
+  publishCompileDiagnostics(rootPath, project, result.diagnostics);
 
   return {
     ok: result.ok,
@@ -204,8 +234,9 @@ export async function compileProjectAt(
     void vscode.window.showErrorMessage("NanoPLC: Project validation failed. See Problems.");
     return false;
   }
+  publishDiagnostics(rootPath, "nanoplc.project.json", projectDiags);
 
-  const program = project.programs[0];
+  const program = entryProgram(project);
   if (!program) {
     void vscode.window.showErrorMessage("NanoPLC: No program defined in project.");
     return false;
@@ -215,15 +246,6 @@ export async function compileProjectAt(
     void vscode.window.showWarningMessage(
       `NanoPLC: Compile supports FBD JSON only in this release (${program.language} not yet implemented).`
     );
-    return false;
-  }
-
-  let fbdRaw: unknown;
-  try {
-    fbdRaw = loadFbdRaw(rootPath, program.source);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    void vscode.window.showErrorMessage(`NanoPLC: Cannot read FBD source: ${msg}`);
     return false;
   }
 
@@ -237,8 +259,9 @@ export async function compileProjectAt(
     );
   }
 
-  const result = compileFbdToIr(project, fbdRaw, program.id, ioMap);
-  publishDiagnostics(rootPath, program.source, [...projectDiags, ...result.diagnostics]);
+  const sources = loadProjectFbdSources(rootPath, project);
+  const result = compileProjectToIr(project, sources, program.id, ioMap);
+  publishCompileDiagnostics(rootPath, project, [...projectDiags, ...result.diagnostics]);
 
   if (!result.ok || !result.ir) {
     showFbdGateFailure(
@@ -285,6 +308,7 @@ export async function compileProjectAt(
     compiled_at: new Date().toISOString(),
     program_id: program.id,
     program_source: program.source,
+    task_id: primaryCyclicTask(resolveTaskConfiguration(project))?.id,
     schedule_steps: result.ir.schedule.length,
     codegen_cli_version: "0.1.0",
     device: {
@@ -314,6 +338,10 @@ export async function compileProjectAt(
 
   if (!options.quietSuccess) {
     let detail = `Compiled "${program.name}" → build/ir.json (${result.ir.schedule.length} steps).`;
+    const taskLimit = compileTaskLimitNote(project);
+    if (taskLimit) {
+      detail += ` ${taskLimit}`;
+    }
     if (codegenResult.ok && codegenResult.message.startsWith("Generated")) {
       detail += ` ${codegenResult.message}`;
     } else if (!codegenResult.ok) {
@@ -328,6 +356,14 @@ export async function compileProjectAt(
   }
 
   return true;
+}
+
+function compileTaskLimitNote(project: NanoPlcProject): string | undefined {
+  const tasks = resolveTaskConfiguration(project);
+  if (tasks.length <= 1) {
+    return undefined;
+  }
+  return "additional tasks are stored but not scheduled yet.";
 }
 
 export async function compileActiveProject(options?: CompileProjectOptions): Promise<boolean> {
@@ -358,6 +394,7 @@ export async function scaffoldProject(
     scan: { period_ms: catalogEntry.scan_period_ms },
     modules: [{ ...catalogEntry.module }],
     drivers: [{ ...catalogEntry.driver, binds: catalogEntry.module.id }],
+    tasks: [defaultMainTask(catalogEntry.scan_period_ms, "main")],
     programs: [
       {
         id: "main",
@@ -395,7 +432,7 @@ export async function scaffoldProject(
   }
 
   void vscode.window.showInformationMessage(
-    `NanoPLC: Added ${catalogEntry.model} — ${catalogEntry.io.di_count} DI / ${catalogEntry.io.do_count} DO. Open Application → Programs → Main.`
+    `NanoPLC: Added ${catalogEntry.model} — ${catalogEntry.io.di_count} DI / ${catalogEntry.io.do_count} DO. Open Application → Task configuration → MainTask.`
   );
 }
 

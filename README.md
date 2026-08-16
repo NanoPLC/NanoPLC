@@ -15,7 +15,7 @@ Lightweight **PLC IDE** for VS Code / Cursor: **FBD** editing, **Virtual PLC** s
 | [`tools/codegen/`](tools/codegen/) | CLI: IR JSON → generated C |
 | [`docs/`](docs/) | Architecture, IR format, toolchain bootstrap |
 
-Each **user project** is a folder with `nanoplc.project.json`, `src/`, `build/`, and its own **`firmware/`** tree (scaffolded from the extension template on **Add device** or **Compile**).
+Each **user project** is a folder with `nanoplc.project.json`, `src/`, `build/`, and its own **`firmware/`** tree (scaffolded from the extension template on **Add device** or **Compile**). Application logic lives in **Programs**; **Task configuration** chooses which programs run and how often (CODESYS-style). Extra FBD programs can also be invoked with a **CALL** block from another program.
 
 ## Quick start (extension)
 
@@ -23,7 +23,7 @@ Each **user project** is a folder with `nanoplc.project.json`, `src/`, `build/`,
 2. **Setup ESP-IDF:** Command Palette → **NanoPLC: Setup ESP-IDF toolchain** — then set `nanoplc-idf.idfSetupScript` to the printed `export.ps1` / `export.sh` path ([`docs/BOOTSTRAP_TOOLCHAIN.md`](docs/BOOTSTRAP_TOOLCHAIN.md)).
 3. **Open an empty folder** as workspace.
 4. **NanoPLC: Add device** — pick a device from the catalog (e.g. **M5Stack StamPLC** — 8 DI / 4 DO, or **Generic ESP32-S3**). Creates `nanoplc.project.json`, FBD starter, `io-map.json`, and `firmware/`.
-5. Edit **Main** in the FBD canvas (Project tree → Application → Programs). On every **Digital In**, **Digital Out**, and **Analog In** block, pick **module → channel** in properties (e.g. onboard **DO 1** vs expansion **StamPLC IO · DO 1**). Optional: **Constant** (`BOOL` / `INT` / `WORD` / …). With StamPLC, use **Add I/O module** in the device tree for **StamPLC IO** expansion (extra DO + AI over I2C).
+5. Edit **Main** in the FBD canvas (Project tree → Application → Programs). New projects already run Main from **MainTask**. Extra programs: bind each to its own task, **or** CALL them from another FBD (palette **Programs**). Declare **IN / IN_OUT / OUT / VAR / TEMP** under **Variables**; CALL boxes show IN, IN_OUT, and OUT as ports — drag a variable onto the canvas to use it. On every **Digital In**, **Digital Out**, and **Analog In** block, pick **module → channel** in properties (e.g. onboard **DO 1** vs expansion **StamPLC IO · DO 1**). Optional: **Constant** (`BOOL` / `INT` / `WORD` / …). With StamPLC, use **Add I/O module** in the device tree for **StamPLC IO** expansion (extra DO + AI over I2C).
 6. **Compile** (FBD toolbar or **NanoPLC: Compile PLC program**) — validates the graph (including I/O bindings), writes `build/ir.json`, generates `firmware/components/nanoplc_generated/*.c`. When `nanoplc.buildFirmwareOnCompile` is true, also runs **`idf.py build`**.
 7. **Build firmware** (FBD toolbar or **NanoPLC: Build firmware**) — same PLC compile + checks, then always runs **`idf.py build`** for the project device. Refuses to build if an I/O block has no module/channel (or symbol) assigned.
 8. **NanoPLC: Run simulation** — virtual DI / DO / AI before hardware.
@@ -33,11 +33,26 @@ Each **user project** is a folder with `nanoplc.project.json`, `src/`, `build/`,
 
 Device catalog and I/O templates live in [`packages/ir-schema/src/deviceCatalog.ts`](packages/ir-schema/src/deviceCatalog.ts). IR and project fields: [`docs/IR_SCHEMA.md`](docs/IR_SCHEMA.md).
 
+## Programs, tasks, and CALL
+
+CODESYS-style **Task configuration**: each task runs **exactly one** entry PROGRAM (cyclic / freewheeling / event). Extra programs get their own task, or are called from FBD.
+
+| Feature | Behavior |
+|---------|----------|
+| **Programs** palette | Other FBD POUs appear as `CALL` boxes (current program omitted; ST not callable yet) |
+| **Variables** | Per-program `IN`, `IN_OUT`, `OUT`, `VAR`, `TEMP` on `src/*.fbd.json` |
+| **CALL ports** | Callee **IN** / **IN_OUT** on the left, **OUT** / **IN_OUT** on the right |
+| **LOCAL** | Drag a variable onto the canvas to read/write it in that program |
+| **VAR** vs **TEMP** | VAR persists between calls (PROGRAM singleton); TEMP resets each call |
+| **Process image** | DI / DO / AI stay shared; CALL also copies interface vars (`call_in` / `call_out`) |
+
+Compile walks CALL transitively (`pou_schedules` in `build/ir.json`) and emits `npgen_pou_<id>()` in firmware. Self-call and call cycles are errors (`NP-0410`, `NP-0411`). See [`docs/VIRTUAL_PLC_PLAN.md`](docs/VIRTUAL_PLC_PLAN.md) §5.10 and §33 T3.
+
 ## User project layout
 
 ```
 my-plc/
-├── nanoplc.project.json    # device, modules, drivers, programs, firmware_root
+├── nanoplc.project.json    # device, modules, drivers, tasks, programs, firmware_root
 ├── src/
 │   ├── main.fbd.json
 │   ├── io-map.json         # onboard module I/O map

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { compileFbdToIr } from "./compileFbd";
+import { compileFbdToIr, compileProjectToIr } from "./compileFbd";
 import { FBD_SOURCE_SCHEMA_VERSION, IO_MAP_SCHEMA_VERSION, PROJECT_SCHEMA_VERSION } from "./constants";
 import type { FbdSource, NanoPlcProject } from "./types";
 
@@ -308,4 +308,214 @@ test("compileFbdToIr SHL compiles", () => {
   const result = compileFbdToIr(baseProject, fbd, "main");
   assert.equal(result.ok, true);
   assert.equal(result.ir?.schedule.find((s) => s.op === "shl")?.value_type, "WORD");
+});
+
+test("compileFbdToIr CALL rejects self-call", () => {
+  const fbd: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [{ id: "c1", type: "CALL", params: { program: "main" } }],
+    wires: [],
+  };
+  const result = compileFbdToIr(baseProject, fbd, "main");
+  assert.equal(result.ok, false);
+  assert.ok(result.diagnostics.some((d) => d.code === "NP-0410"));
+});
+
+test("compileFbdToIr CALL rejects missing and unknown program", () => {
+  const empty: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [{ id: "c1", type: "CALL", params: {} }],
+    wires: [],
+  };
+  const missing = compileFbdToIr(baseProject, empty, "main");
+  assert.equal(missing.ok, false);
+  assert.ok(missing.diagnostics.some((d) => d.code === "NP-0412"));
+
+  const unknown: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [{ id: "c1", type: "CALL", params: { program: "nope" } }],
+    wires: [],
+  };
+  const result = compileFbdToIr(baseProject, unknown, "main");
+  assert.equal(result.ok, false);
+  assert.ok(result.diagnostics.some((d) => d.code === "NP-0413"));
+});
+
+test("compileProjectToIr inlines a CALL into pou_schedules", () => {
+  const project: NanoPlcProject = {
+    ...baseProject,
+    programs: [
+      { id: "main", name: "Main", source: "src/main.fbd.json", language: "fbd" },
+      { id: "aux", name: "Aux", source: "src/aux.fbd.json", language: "fbd" },
+    ],
+  };
+  const main: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [
+      { id: "di1", type: "DI", params: { channel: 1, symbol: "DI_Start" } },
+      { id: "call1", type: "CALL", params: { program: "aux" } },
+    ],
+    wires: [],
+  };
+  const aux: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Aux",
+    blocks: [
+      { id: "di1", type: "DI", params: { channel: 2, symbol: "DI_Enable" } },
+      { id: "and1", type: "AND" },
+      { id: "do1", type: "DO", params: { channel: 1, symbol: "DO_Lamp" } },
+    ],
+    wires: [
+      { from: { block: "di1", port: "Q" }, to: { block: "and1", port: "IN1" } },
+      { from: { block: "di1", port: "Q" }, to: { block: "and1", port: "IN2" } },
+      { from: { block: "and1", port: "Q" }, to: { block: "do1", port: "IN" } },
+    ],
+  };
+  const result = compileProjectToIr(
+    project,
+    new Map<string, unknown>([
+      ["main", main],
+      ["aux", aux],
+    ]),
+    "main"
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.ir?.schedule.some((s) => s.op === "call" && s.program === "aux"), true);
+  assert.equal(result.ir?.pou_schedules?.length, 1);
+  assert.equal(result.ir?.pou_schedules?.[0]?.id, "aux");
+  assert.ok(result.ir?.pou_schedules?.[0]?.schedule.some((s) => s.op === "write_do"));
+  assert.ok(result.ir?.variables.some((v) => v.name === "__aux_and1_Q"));
+  assert.equal(result.ir?.variables.some((v) => v.name === "__and1_Q"), false);
+  assert.ok(result.ir?.variables.some((v) => v.name === "DI_Enable"));
+});
+
+test("compileProjectToIr follows nested CALL", () => {
+  const project: NanoPlcProject = {
+    ...baseProject,
+    programs: [
+      { id: "main", name: "Main", source: "src/main.fbd.json", language: "fbd" },
+      { id: "aux", name: "Aux", source: "src/aux.fbd.json", language: "fbd" },
+      { id: "helper", name: "Helper", source: "src/helper.fbd.json", language: "fbd" },
+    ],
+  };
+  const main: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [{ id: "c1", type: "CALL", params: { program: "aux" } }],
+    wires: [],
+  };
+  const aux: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Aux",
+    blocks: [{ id: "c1", type: "CALL", params: { program: "helper" } }],
+    wires: [],
+  };
+  const helper: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Helper",
+    blocks: [
+      { id: "di1", type: "DI", params: { channel: 1, symbol: "DI_Start" } },
+      { id: "do1", type: "DO", params: { channel: 1, symbol: "DO_Lamp" } },
+    ],
+    wires: [{ from: { block: "di1", port: "Q" }, to: { block: "do1", port: "IN" } }],
+  };
+  const result = compileProjectToIr(
+    project,
+    new Map<string, unknown>([
+      ["main", main],
+      ["aux", aux],
+      ["helper", helper],
+    ]),
+    "main"
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.ir?.pou_schedules?.length, 2);
+  assert.ok(result.ir?.pou_schedules?.some((p) => p.id === "aux" && p.schedule.some((s) => s.op === "call" && s.program === "helper")));
+  assert.ok(result.ir?.pou_schedules?.some((p) => p.id === "helper" && p.schedule.some((s) => s.op === "write_do")));
+});
+
+test("compileProjectToIr detects a program call cycle", () => {
+  const project: NanoPlcProject = {
+    ...baseProject,
+    programs: [
+      { id: "main", name: "Main", source: "src/main.fbd.json", language: "fbd" },
+      { id: "aux", name: "Aux", source: "src/aux.fbd.json", language: "fbd" },
+    ],
+  };
+  const main: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [{ id: "c1", type: "CALL", params: { program: "aux" } }],
+    wires: [],
+  };
+  const aux: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Aux",
+    blocks: [{ id: "c1", type: "CALL", params: { program: "main" } }],
+    wires: [],
+  };
+  const result = compileProjectToIr(
+    project,
+    new Map<string, unknown>([
+      ["main", main],
+      ["aux", aux],
+    ]),
+    "main"
+  );
+  assert.equal(result.ok, false);
+  assert.ok(result.diagnostics.some((d) => d.code === "NP-0411"));
+});
+
+test("compileProjectToIr CALL copies IN and OUT ports", () => {
+  const project: NanoPlcProject = {
+    ...baseProject,
+    programs: [
+      { id: "main", name: "Main", source: "src/main.fbd.json", language: "fbd" },
+      { id: "aux", name: "Aux", source: "src/aux.fbd.json", language: "fbd" },
+    ],
+  };
+  const main: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [
+      { id: "c1", type: "CONST", params: { data_type: "BOOL", value: true } },
+      { id: "call1", type: "CALL", params: { program: "aux" } },
+      { id: "do1", type: "DO", params: { channel: 1, symbol: "DO_Lamp" } },
+    ],
+    wires: [
+      { from: { block: "c1", port: "Q" }, to: { block: "call1", port: "Enable" } },
+      { from: { block: "call1", port: "Result" }, to: { block: "do1", port: "IN" } },
+    ],
+  };
+  const aux: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Aux",
+    variables: [
+      { name: "Enable", class: "IN", type: "BOOL" },
+      { name: "Result", class: "OUT", type: "BOOL" },
+    ],
+    blocks: [
+      { id: "in1", type: "LOCAL", params: { name: "Enable" } },
+      { id: "out1", type: "LOCAL", params: { name: "Result" } },
+    ],
+    wires: [{ from: { block: "in1", port: "Q" }, to: { block: "out1", port: "IN" } }],
+  };
+  const result = compileProjectToIr(
+    project,
+    new Map<string, unknown>([
+      ["main", main],
+      ["aux", aux],
+    ]),
+    "main"
+  );
+  assert.equal(result.ok, true, result.diagnostics.map((d) => d.message).join("; "));
+  const call = result.ir?.schedule.find((s) => s.op === "call");
+  assert.equal(call?.call_in?.Enable, "__main_c1_Q");
+  assert.ok(call?.call_out?.Result);
+  assert.ok(result.ir?.variables.some((v) => v.name === "aux__Enable"));
+  assert.ok(result.ir?.variables.some((v) => v.name === "aux__Result"));
 });

@@ -8,7 +8,7 @@ IEC 61131-3 oriented language support (ST, LAD, FBD) and helpers for NanoPLC to
 |------|---------|
 | **Languages** | Syntax highlighting for **Structured Text** (`.st`, `.iecst`), **Ladder** (`.lad`, `.ld`), **FBD** (`.fbd`) |
 | **Toolchain** | Bootstrap **ESP-IDF** into your user profile (`~/.nanoplc` or `%USERPROFILE%\.nanoplc`), check `idf.py`, and **Build / Flash / Monitor** under `firmware/` |
-| **Project** | `nanoplc.project.json`, **Device** tree view, FBD JSON → IR compile, `examples/and_gate` |
+| **Project** | `nanoplc.project.json`, **Device** tree (including **Task configuration**), FBD JSON → IR compile, `examples/and_gate`. FBD programs declare IN / IN_OUT / OUT / VAR / TEMP; CALL boxes show the interface ports |
 
 ## Commands
 
@@ -24,7 +24,10 @@ Open the Command Palette (**Ctrl+Shift+P** / **Cmd+Shift+P**) and run:
 | **NanoPLC: Flash and monitor** | `idf.py flash monitor` in one step |
 | **NanoPLC: Set ESP-IDF target** | Runs `idf.py set-target` using `nanoplc-idf.buildTarget` (once per fresh `firmware/` tree) |
 | **NanoPLC: Diagnose firmware build environment** | Logs firmware path, export script, and `idf.py --version` to the output panel |
-| **NanoPLC: Create project** | Scaffolds `nanoplc.project.json`, `src/main.fbd.json`, and `build/` |
+| **NanoPLC: Add device** | Scaffolds `nanoplc.project.json`, MainTask, `src/main.fbd.json`, and `build/` |
+| **NanoPLC: Add program (POU)** | Creates an FBD/ST program under Application → Programs. Other FBD programs then appear in the FBD **Programs** palette as `CALL` blocks |
+| **NanoPLC: Add task** | Adds a CODESYS-style task (cyclic / freewheeling / event) under Task configuration |
+| **NanoPLC: Assign program to task** | Binds one PROGRAM as that task’s entry (replace, not a list) |
 | **NanoPLC: Compile PLC program** | Compiles FBD JSON to `build/ir.json` (see `docs/IR_SCHEMA.md`) |
 | **NanoPLC: Run simulation** | Executes compiled IR on a scan timer; open **Simulator** panel to toggle virtual inputs |
 | **NanoPLC: Stop simulation** | Stops the virtual PLC scan loop |

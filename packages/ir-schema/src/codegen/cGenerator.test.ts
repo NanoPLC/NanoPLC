@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 
-import { compileFbdToIr } from "../compileFbd";
+import { compileFbdToIr, compileProjectToIr } from "../compileFbd";
 import { FBD_SOURCE_SCHEMA_VERSION, PROJECT_SCHEMA_VERSION } from "../constants";
 import { codegenC } from "./cGenerator";
 import type { FbdSource, NanoPlcProject } from "../types";
@@ -42,6 +42,7 @@ test("codegenC emits scan function for and_gate", () => {
   assert.match(out.plc_program_c, /nanoplc_hal_write_do/);
   assert.match(out.plc_program_c, /&&/);
   assert.match(out.plc_program_c, /npgen_do\[0\]/);
+  assert.doesNotMatch(out.plc_program_c, /npgen_ai/);
 });
 
 test("codegenC emits math and RS for numeric network", () => {
@@ -89,4 +90,82 @@ test("codegenC emits powf when POW block present", () => {
   const out = codegenC(compiled.ir, hash);
   assert.match(out.plc_program_c, /#include <math.h>/);
   assert.match(out.plc_program_c, /powf/);
+});
+
+test("codegenC emits pou function for CALL", () => {
+  const multi: NanoPlcProject = {
+    ...project,
+    programs: [
+      { id: "main", name: "Main", source: "src/main.fbd.json", language: "fbd" },
+      { id: "aux", name: "Aux", source: "src/aux.fbd.json", language: "fbd" },
+    ],
+  };
+  const main: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [{ id: "c1", type: "CALL", params: { program: "aux" } }],
+    wires: [],
+  };
+  const aux: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Aux",
+    blocks: [
+      { id: "di1", type: "DI", params: { channel: 1, symbol: "DI_Start" } },
+      { id: "do1", type: "DO", params: { channel: 1, symbol: "DO_Lamp" } },
+    ],
+    wires: [{ from: { block: "di1", port: "Q" }, to: { block: "do1", port: "IN" } }],
+  };
+  const compiled = compileProjectToIr(
+    multi,
+    new Map([
+      ["main", main],
+      ["aux", aux],
+    ]),
+    "main"
+  );
+  assert.ok(compiled.ir);
+  const hash = createHash("sha256").update(JSON.stringify(compiled.ir)).digest("hex");
+  const out = codegenC(compiled.ir, hash);
+  assert.match(out.plc_program_c, /npgen_pou_aux/);
+  assert.match(out.plc_program_c, /static void npgen_pou_aux\(void\)/);
+  assert.match(out.plc_program_c, /static uint32_t npgen_scan_dt_ms;/);
+});
+
+test("codegenC copies CALL IN and OUT variables", () => {
+  const multi: NanoPlcProject = {
+    ...project,
+    programs: [
+      { id: "main", name: "Main", source: "src/main.fbd.json", language: "fbd" },
+      { id: "aux", name: "Aux", source: "src/aux.fbd.json", language: "fbd" },
+    ],
+  };
+  const main: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [
+      { id: "c1", type: "CONST", params: { data_type: "BOOL", value: true } },
+      { id: "call1", type: "CALL", params: { program: "aux" } },
+    ],
+    wires: [{ from: { block: "c1", port: "Q" }, to: { block: "call1", port: "Enable" } }],
+  };
+  const aux: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Aux",
+    variables: [{ name: "Enable", class: "IN", type: "BOOL" }],
+    blocks: [{ id: "in1", type: "LOCAL", params: { name: "Enable" } }],
+    wires: [],
+  };
+  const compiled = compileProjectToIr(
+    multi,
+    new Map([
+      ["main", main],
+      ["aux", aux],
+    ]),
+    "main"
+  );
+  assert.ok(compiled.ir);
+  const hash = createHash("sha256").update(JSON.stringify(compiled.ir)).digest("hex");
+  const out = codegenC(compiled.ir, hash);
+  assert.match(out.plc_program_c, /npgen_v_aux__Enable/);
+  assert.match(out.plc_program_c, /npgen_pou_aux\(\);/);
 });

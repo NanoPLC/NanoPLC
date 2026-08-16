@@ -16,12 +16,26 @@ import type {
 import {
   buildBlockOutputTypes,
   inferInputPortType,
-  inputPortsForType,
+  inputPortsForBlock,
+  isBlockOutputPort,
+  blockOutputType,
   parseConstDataType,
   typesCompatible,
+  type FbdPortContext,
 } from "./fbdPortTypes";
 import { PLC_PRIMITIVE_TYPES } from "./types";
+import { projectScanPeriodMs } from "./tasks";
 import { validateFbdSource } from "./validate";
+import {
+  callPortIrName,
+  defaultPouInitial,
+  findPouVariable,
+  parsePouVariables,
+  pouIrName,
+  pouInterfaceInputs,
+  pouInterfaceOutputs,
+} from "./pouVars";
+import type { FbdVariable } from "./types";
 
 const BLOCK_OUTPUT_PORT = "Q";
 const SUPPORTED_BLOCKS = new Set([
@@ -46,6 +60,8 @@ const SUPPORTED_BLOCKS = new Set([
   "SHR",
   "ROL",
   "ROR",
+  "CALL",
+  "LOCAL",
 ]);
 
 function diag(
@@ -143,18 +159,11 @@ function parseConstValue(
   return { ok: true, value: dataType === "REAL" ? num : Math.trunc(num) };
 }
 
-function isOutputPort(type: string, port: string): boolean {
-  const u = type.toUpperCase();
-  if (port.toUpperCase() === BLOCK_OUTPUT_PORT) {
-    return u !== "DO";
-  }
-  return false;
-}
-
 function validateWires(
   blocks: Map<string, FbdBlock>,
   wires: FbdWire[],
-  outputTypes: Map<string, PlcPrimitiveType>
+  outputTypes: Map<string, PlcPrimitiveType>,
+  ctx?: FbdPortContext
 ): CompileDiagnostic[] {
   const diagnostics: CompileDiagnostic[] = [];
   for (const wire of wires) {
@@ -168,30 +177,24 @@ function validateWires(
       diagnostics.push(diag("NP-0301", `Wire references unknown block "${wire.to.block}".`));
       continue;
     }
-    if (!isOutputPort(fromBlock.type, wire.from.port)) {
+    if (!isBlockOutputPort(fromBlock, wire.from.port, ctx)) {
       diagnostics.push(
         diag("NP-0302", `Port "${wire.from.port}" is not an output on block ${fromBlock.id}.`, fromBlock.id)
       );
     }
-    const allowedIn = inputPortsForType(toBlock.type);
-    if (!allowedIn.has(wire.to.port.toUpperCase()) && wire.to.port.toUpperCase() !== "IN") {
-      if (toBlock.type.toUpperCase() === "DO" && wire.to.port.toUpperCase() !== "IN") {
-        diagnostics.push(
-          diag("NP-0303", `DO block expects input port IN, got "${wire.to.port}".`, toBlock.id)
-        );
-      } else if (!allowedIn.has(wire.to.port.toUpperCase())) {
-        diagnostics.push(
-          diag(
-            "NP-0303",
-            `Invalid input port "${wire.to.port}" on ${toBlock.type} block ${toBlock.id}.`,
-            toBlock.id
-          )
-        );
-      }
+    const allowedIn = inputPortsForBlock(toBlock, ctx);
+    if (!allowedIn.has(wire.to.port.toUpperCase())) {
+      diagnostics.push(
+        diag(
+          "NP-0303",
+          `Invalid input port "${wire.to.port}" on ${toBlock.type} block ${toBlock.id}.`,
+          toBlock.id
+        )
+      );
     }
 
-    const fromType = outputTypes.get(fromBlock.id) ?? "BOOL";
-    const toType = inferInputPortType(toBlock, wire.to.port, outputTypes);
+    const fromType = blockOutputType(fromBlock, wire.from.port, outputTypes, ctx);
+    const toType = inferInputPortType(toBlock, wire.to.port, outputTypes, ctx);
     if (!typesCompatible(fromType, toType)) {
       diagnostics.push(
         diag(
@@ -355,7 +358,10 @@ function validateIoBindings(blocks: FbdBlock[]): CompileDiagnostic[] {
 function collectVariables(
   blocks: FbdBlock[],
   outputTypes: Map<string, PlcPrimitiveType>,
-  ioMap?: IoMap
+  ioMap: IoMap | undefined,
+  programId: string,
+  localVars: FbdVariable[],
+  calleeVars?: Map<string, FbdVariable[]>
 ): { variables: IrVariable[]; io_image: PlcIr["io_image"] } {
   const variables: IrVariable[] = [];
   const di: PlcIr["io_image"]["di"] = [];
@@ -366,6 +372,15 @@ function collectVariables(
   let diAuto = 0;
   let doAuto = 0;
   let aiAuto = 0;
+
+  for (const v of localVars) {
+    variables.push({
+      name: pouIrName(programId, v.name),
+      type: v.type,
+      role: "internal",
+      initial: v.initial ?? defaultPouInitial(v.type),
+    });
+  }
 
   for (const block of blocks) {
     const t = block.type.toUpperCase();
@@ -386,6 +401,17 @@ function collectVariables(
         doList.push({ symbol: resolved.symbol, index: resolved.index });
         variables.push({ name: resolved.symbol, type: "BOOL", role: "do" });
       }
+    } else if (t === "CALL") {
+      const pid = String(block.params?.program ?? "").trim();
+      for (const v of pouInterfaceOutputs(calleeVars?.get(pid))) {
+        variables.push({
+          name: callPortIrName(block.id, v.name),
+          type: v.type,
+          role: "internal",
+        });
+      }
+    } else if (t === "LOCAL") {
+      continue;
     } else if (t === "CONST") {
       variables.push({
         name: outputVar(block.id),
@@ -409,7 +435,9 @@ function emitScheduleStep(
   wireIns: Map<string, string>,
   io_image: PlcIr["io_image"],
   stepIndex: number,
-  outputTypes: Map<string, PlcPrimitiveType>
+  outputTypes: Map<string, PlcPrimitiveType>,
+  programId: string,
+  calleeVars?: Map<string, FbdVariable[]>
 ): ScheduleStep[] {
   const t = block.type.toUpperCase();
   const out = outputVar(block.id);
@@ -561,12 +589,57 @@ function emitScheduleStep(
       return numericStep("rol", "IN", "N");
     case "ROR":
       return numericStep("ror", "IN", "N");
+    case "CALL": {
+      const target = String(block.params?.program ?? "").trim();
+      const callee = calleeVars?.get(target) ?? [];
+      const call_in: Record<string, string> = {};
+      const call_out: Record<string, string> = {};
+      for (const v of pouInterfaceInputs(callee)) {
+        const src = wireIns.get(v.name.toUpperCase());
+        if (src) {
+          call_in[v.name] = src;
+        }
+      }
+      for (const v of pouInterfaceOutputs(callee)) {
+        call_out[v.name] = callPortIrName(block.id, v.name);
+      }
+      return [
+        {
+          step: stepIndex,
+          op: "call",
+          program: target,
+          block_id: block.id,
+          call_in: Object.keys(call_in).length > 0 ? call_in : undefined,
+          call_out: Object.keys(call_out).length > 0 ? call_out : undefined,
+        },
+      ];
+    }
+    case "LOCAL": {
+      const name = String(block.params?.name ?? "").trim();
+      const src = wireIns.get("IN");
+      if (!src || !name) {
+        return [];
+      }
+      return [
+        {
+          step: stepIndex,
+          op: "move",
+          in1: src,
+          out: pouIrName(programId, name),
+        },
+      ];
+    }
     default:
       return [];
   }
 }
 
-function wireValue(blocks: Map<string, FbdBlock>, blockId: string, port: string): string {
+function wireValue(
+  blocks: Map<string, FbdBlock>,
+  blockId: string,
+  port: string,
+  programId: string
+): string {
   const block = blocks.get(blockId);
   if (!block) {
     return "";
@@ -578,6 +651,12 @@ function wireValue(blocks: Map<string, FbdBlock>, blockId: string, port: string)
   if (t === "AI") {
     return resolveIoSymbol(block, "AI");
   }
+  if (t === "LOCAL") {
+    return pouIrName(programId, String(block.params?.name ?? "").trim());
+  }
+  if (t === "CALL") {
+    return callPortIrName(blockId, port);
+  }
   if (port.toUpperCase() === BLOCK_OUTPUT_PORT) {
     return outputVar(blockId);
   }
@@ -588,13 +667,18 @@ export function compileFbdToIr(
   project: NanoPlcProject,
   fbdRaw: unknown,
   programId: string,
-  ioMap?: IoMap
+  ioMap?: IoMap,
+  programVars?: Map<string, FbdVariable[]>
 ): CompileResult {
   const { fbd, diagnostics: fbdValDiags } = validateFbdSource(fbdRaw);
   const diagnostics = [...fbdValDiags];
   if (!fbd) {
     return { ok: false, diagnostics };
   }
+
+  const parsedVars = parsePouVariables(fbd.variables);
+  const localVars = parsedVars.variables;
+  const portCtx: FbdPortContext = { localVars, calleeVars: programVars };
 
   const blocks = blockById(fbd.blocks);
   const blockIds = fbd.blocks.map((b) => b.id);
@@ -619,11 +703,13 @@ export function compileFbdToIr(
     }
   }
 
+  diagnostics.push(...validateCallBlocks(fbd.blocks, project, programId));
+  diagnostics.push(...validateLocalBlocks(fbd.blocks, localVars));
   diagnostics.push(...validateIoBindings(fbd.blocks));
   diagnostics.push(...validateConstBlocks(fbd.blocks));
 
-  const outputTypes = buildBlockOutputTypes(blocks, fbd.wires);
-  diagnostics.push(...validateWires(blocks, fbd.wires, outputTypes));
+  const outputTypes = buildBlockOutputTypes(blocks, fbd.wires, portCtx);
+  diagnostics.push(...validateWires(blocks, fbd.wires, outputTypes, portCtx));
 
   const edges = new Map<string, Set<string>>();
   for (const id of blockIds) {
@@ -652,7 +738,14 @@ export function compileFbdToIr(
   }
 
   const program = project.programs.find((p) => p.id === programId);
-  const { variables, io_image } = collectVariables(fbd.blocks, outputTypes, ioMap);
+  const { variables, io_image } = collectVariables(
+    fbd.blocks,
+    outputTypes,
+    ioMap,
+    programId,
+    localVars,
+    programVars
+  );
 
   const wireInsByBlock = new Map<string, Map<string, string>>();
   for (const wire of fbd.wires) {
@@ -660,15 +753,37 @@ export function compileFbdToIr(
       wireInsByBlock.set(wire.to.block, new Map());
     }
     const portKey = wire.to.port.toUpperCase();
-    wireInsByBlock.get(wire.to.block)!.set(portKey, wireValue(blocks, wire.from.block, wire.from.port));
+    wireInsByBlock
+      .get(wire.to.block)!
+      .set(portKey, wireValue(blocks, wire.from.block, wire.from.port, programId));
   }
 
   const schedule: ScheduleStep[] = [];
   let stepNum = 0;
+  for (const v of localVars) {
+    if (v.class !== "TEMP") {
+      continue;
+    }
+    schedule.push({
+      step: stepNum++,
+      op: "const",
+      out: pouIrName(programId, v.name),
+      value: v.initial ?? defaultPouInitial(v.type),
+      value_type: v.type,
+    });
+  }
   for (const blockId of order ?? []) {
     const block = blocks.get(blockId)!;
     const ins = wireInsByBlock.get(blockId) ?? new Map();
-    const steps = emitScheduleStep(block, ins, io_image, stepNum, outputTypes);
+    const steps = emitScheduleStep(
+      block,
+      ins,
+      io_image,
+      stepNum,
+      outputTypes,
+      programId,
+      programVars
+    );
     for (const s of steps) {
       schedule.push({ ...s, step: stepNum++ });
     }
@@ -696,7 +811,7 @@ export function compileFbdToIr(
     project: {
       name: project.name,
       board: project.device.board,
-      scan_period_ms: project.scan.period_ms,
+      scan_period_ms: projectScanPeriodMs(project),
       program: program?.name ?? fbd.name,
     },
     variables,
@@ -707,4 +822,305 @@ export function compileFbdToIr(
   };
 
   return { ok: true, ir, diagnostics };
+}
+
+function validateCallBlocks(
+  blocks: FbdBlock[],
+  project: NanoPlcProject,
+  programId: string
+): CompileDiagnostic[] {
+  const diagnostics: CompileDiagnostic[] = [];
+  for (const block of blocks) {
+    if (block.type.toUpperCase() !== "CALL") {
+      continue;
+    }
+    const target = String(block.params?.program ?? "").trim();
+    if (!target) {
+      diagnostics.push(
+        diag("NP-0412", `CALL block "${block.id}" has no program assigned.`, block.id)
+      );
+      continue;
+    }
+    if (target === programId) {
+      diagnostics.push(
+        diag("NP-0410", `Program cannot call itself ("${target}").`, block.id)
+      );
+      continue;
+    }
+    const prog = project.programs.find((p) => p.id === target);
+    if (!prog) {
+      diagnostics.push(
+        diag("NP-0413", `CALL block "${block.id}" references unknown program "${target}".`, block.id)
+      );
+      continue;
+    }
+    if (prog.language !== "fbd") {
+      diagnostics.push(
+        diag(
+          "NP-0205",
+          `CALL currently supports FBD programs only ("${prog.name}" is ${prog.language}).`,
+          block.id
+        )
+      );
+    }
+  }
+  return diagnostics;
+}
+
+function validateLocalBlocks(blocks: FbdBlock[], localVars: FbdVariable[]): CompileDiagnostic[] {
+  const diagnostics: CompileDiagnostic[] = [];
+  for (const block of blocks) {
+    if (block.type.toUpperCase() !== "LOCAL") {
+      continue;
+    }
+    const name = String(block.params?.name ?? "").trim();
+    if (!name) {
+      diagnostics.push(
+        diag("NP-0219", `Variable block "${block.id}" has no variable assigned.`, block.id)
+      );
+      continue;
+    }
+    if (!findPouVariable(localVars, name)) {
+      diagnostics.push(
+        diag("NP-0219", `Variable block "${block.id}" references unknown variable "${name}".`, block.id)
+      );
+    }
+  }
+  return diagnostics;
+}
+
+function prefixInternalName(programId: string, name: string | undefined): string | undefined {
+  if (!name) {
+    return name;
+  }
+  if (name.startsWith("__")) {
+    return `__${programId}_${name.slice(2)}`;
+  }
+  return name;
+}
+
+function prefixMap(
+  programId: string,
+  map: Record<string, string> | undefined
+): Record<string, string> | undefined {
+  if (!map) {
+    return map;
+  }
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(map)) {
+    out[key] = prefixInternalName(programId, value) ?? value;
+  }
+  return out;
+}
+
+function prefixSchedule(programId: string, steps: ScheduleStep[]): ScheduleStep[] {
+  return steps.map((step) => ({
+    ...step,
+    out: prefixInternalName(programId, step.out),
+    in1: prefixInternalName(programId, step.in1),
+    in2: prefixInternalName(programId, step.in2),
+    block_id: step.block_id ? `${programId}__${step.block_id}` : step.block_id,
+    call_in: prefixMap(programId, step.call_in),
+    call_out: prefixMap(programId, step.call_out),
+  }));
+}
+
+function mergeIoImage(parts: PlcIr["io_image"][]): PlcIr["io_image"] {
+  const di = new Map<string, { symbol: string; index: number }>();
+  const doList = new Map<string, { symbol: string; index: number }>();
+  const ai = new Map<string, { symbol: string; index: number }>();
+  for (const part of parts) {
+    for (const row of part.di) {
+      di.set(row.symbol, row);
+    }
+    for (const row of part.do) {
+      doList.set(row.symbol, row);
+    }
+    for (const row of part.ai) {
+      ai.set(row.symbol, row);
+    }
+  }
+  return {
+    di: [...di.values()],
+    do: [...doList.values()],
+    ai: [...ai.values()],
+  };
+}
+
+function detectCallCycle(edges: Map<string, string[]>): string[] | undefined {
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const stack: string[] = [];
+
+  const dfs = (id: string): string[] | undefined => {
+    if (visiting.has(id)) {
+      const start = stack.indexOf(id);
+      return [...stack.slice(start), id];
+    }
+    if (visited.has(id)) {
+      return undefined;
+    }
+    visiting.add(id);
+    stack.push(id);
+    for (const next of edges.get(id) ?? []) {
+      const cycle = dfs(next);
+      if (cycle) {
+        return cycle;
+      }
+    }
+    stack.pop();
+    visiting.delete(id);
+    visited.add(id);
+    return undefined;
+  };
+
+  for (const id of edges.keys()) {
+    const cycle = dfs(id);
+    if (cycle) {
+      return cycle;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Compile the entry PROGRAM and every FBD PROGRAM it calls (transitively).
+ * `sources` maps program id → FBD JSON.
+ */
+export function compileProjectToIr(
+  project: NanoPlcProject,
+  sources: Map<string, unknown>,
+  entryProgramId: string,
+  ioMap?: IoMap
+): CompileResult {
+  const compiled = new Map<string, CompileResult>();
+  const diagnostics: CompileDiagnostic[] = [];
+  const programVars = new Map<string, FbdVariable[]>();
+  for (const [id, raw] of sources) {
+    const varsRaw =
+      raw && typeof raw === "object" ? (raw as { variables?: unknown }).variables : undefined;
+    programVars.set(id, parsePouVariables(varsRaw).variables);
+  }
+  const queue = [entryProgramId];
+  const enqueued = new Set<string>();
+
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    if (enqueued.has(id)) {
+      continue;
+    }
+    enqueued.add(id);
+
+    const prog = project.programs.find((p) => p.id === id);
+    if (!prog) {
+      diagnostics.push(diag("NP-0413", `Unknown program "${id}".`));
+      continue;
+    }
+    if (prog.language !== "fbd") {
+      diagnostics.push(
+        diag("NP-0205", `Compile supports FBD JSON only (${prog.language} not yet implemented).`)
+      );
+      continue;
+    }
+    const raw = sources.get(id);
+    if (raw === undefined) {
+      diagnostics.push(diag("NP-0200", `Cannot read FBD source for program "${prog.name}".`));
+      continue;
+    }
+
+    const result = compileFbdToIr(project, raw, id, ioMap, programVars);
+    compiled.set(id, result);
+    for (const d of result.diagnostics) {
+      diagnostics.push({ ...d, program_id: id });
+    }
+    if (result.ir) {
+      for (const step of result.ir.schedule) {
+        if (step.op === "call" && step.program) {
+          queue.push(step.program);
+        }
+      }
+    }
+  }
+
+  const edges = new Map<string, string[]>();
+  for (const [id, result] of compiled) {
+    edges.set(
+      id,
+      (result.ir?.schedule ?? [])
+        .filter((s) => s.op === "call" && s.program)
+        .map((s) => s.program as string)
+    );
+  }
+  const cycle = detectCallCycle(edges);
+  if (cycle) {
+    diagnostics.push(
+      diag("NP-0411", `Program call cycle: ${cycle.join(" → ")}.`)
+    );
+  }
+
+  if (diagnostics.some((d) => d.severity === "error")) {
+    return { ok: false, diagnostics };
+  }
+
+  const entryResult = compiled.get(entryProgramId);
+  if (!entryResult?.ir) {
+    return { ok: false, diagnostics: [...diagnostics, diag("NP-0105", "Entry program failed to compile.")] };
+  }
+
+  const needsPrefix = compiled.size > 1;
+  const pou_schedules: { id: string; schedule: ScheduleStep[] }[] = [];
+  const variables: IrVariable[] = [];
+  const ioParts: PlcIr["io_image"][] = [];
+  const instances: PlcIr["instances"] = [];
+
+  for (const [id, result] of compiled) {
+    const ir = result.ir!;
+    ioParts.push(ir.io_image);
+    const prefixedVars = needsPrefix
+      ? ir.variables.map((v) =>
+          v.role === "internal" ? { ...v, name: prefixInternalName(id, v.name) ?? v.name } : v
+        )
+      : ir.variables;
+    for (const v of prefixedVars) {
+      if (!variables.some((x) => x.name === v.name)) {
+        variables.push(v);
+      }
+    }
+    for (const inst of ir.instances) {
+      instances.push({
+        ...inst,
+        id: needsPrefix ? `${id}__${inst.id}` : inst.id,
+      });
+    }
+    if (id !== entryProgramId) {
+      pou_schedules.push({
+        id,
+        schedule: needsPrefix ? prefixSchedule(id, ir.schedule) : ir.schedule,
+      });
+    }
+  }
+
+  const entryIr = entryResult.ir;
+  const schedule = needsPrefix ? prefixSchedule(entryProgramId, entryIr.schedule) : entryIr.schedule;
+  const program = project.programs.find((p) => p.id === entryProgramId);
+
+  return {
+    ok: true,
+    diagnostics,
+    ir: {
+      ir_version: IR_VERSION,
+      project: {
+        name: project.name,
+        board: project.device.board,
+        scan_period_ms: projectScanPeriodMs(project),
+        program: program?.name ?? entryIr.project.program,
+      },
+      variables,
+      io_image: mergeIoImage(ioParts),
+      network: entryIr.network,
+      instances,
+      schedule,
+      pou_schedules: pou_schedules.length > 0 ? pou_schedules : undefined,
+    },
+  };
 }

@@ -6,8 +6,8 @@
   const BLOCK_W = 168;
   const BLOCK_H = 56;
 
-  /** @type {{ outputs: Record<string, string>, inputs: Record<string, Record<string, string>> }} */
-  let portTypes = { outputs: {}, inputs: {} };
+  /** @type {{ outputs: Record<string, string>, outputPorts?: Record<string, Record<string, string>>, inputs: Record<string, Record<string, string>> }} */
+  let portTypes = { outputs: {}, outputPorts: {}, inputs: {} };
 
   /** @type {import('@nanoplc/ir-schema').FbdSource & { layout: Record<string, {x:number,y:number}> } | null} */
   let doc = null;
@@ -38,7 +38,76 @@
     btnBuild: document.getElementById("btn-build"),
   };
 
-  function findDef(type) {
+  /** @type {{ currentProgramId?: string, programs: Array<{id:string,name:string,language:string,variables?:Array<{name:string,class:string,type:string}>}> }} */
+  let projectPrograms = { currentProgramId: undefined, programs: [] };
+  let selectedVarName = null;
+
+  function callablePrograms() {
+    return (projectPrograms.programs || []).filter(
+      (p) => p.language === "fbd" && p.id !== projectPrograms.currentProgramId
+    );
+  }
+
+  function findProgram(id) {
+    return (projectPrograms.programs || []).find((p) => p.id === id);
+  }
+
+  function docVariables() {
+    return doc?.variables || [];
+  }
+
+  function findPouVariable(vars, name) {
+    const key = String(name || "").trim().toUpperCase();
+    return (vars || []).find((v) => String(v.name).toUpperCase() === key);
+  }
+
+  function callBlockPorts(vars) {
+    const list = vars || [];
+    return {
+      inputs: list.filter((v) => v.class === "IN" || v.class === "IN_OUT").map((v) => v.name),
+      outputs: list.filter((v) => v.class === "OUT" || v.class === "IN_OUT").map((v) => v.name),
+    };
+  }
+
+  function localBlockPorts(variable) {
+    if (!variable) {
+      return { inputs: [], outputs: [] };
+    }
+    if (variable.class === "IN") {
+      return { inputs: [], outputs: ["Q"] };
+    }
+    if (variable.class === "OUT") {
+      return { inputs: ["IN"], outputs: [] };
+    }
+    return { inputs: ["IN"], outputs: ["Q"] };
+  }
+
+  function findDef(type, block) {
+    if (String(type).toUpperCase() === "CALL") {
+      const pid = block?.params?.program;
+      const prog = pid ? findProgram(pid) : undefined;
+      const ports = callBlockPorts(prog?.variables);
+      return {
+        type: "CALL",
+        label: prog?.name || pid || "Program",
+        description: "Calls another PROGRAM. IN, IN_OUT, and OUT appear as ports.",
+        category: "program",
+        inputs: ports.inputs,
+        outputs: ports.outputs,
+      };
+    }
+    if (String(type).toUpperCase() === "LOCAL") {
+      const v = findPouVariable(docVariables(), block?.params?.name);
+      const ports = localBlockPorts(v);
+      return {
+        type: "LOCAL",
+        label: v?.name || block?.params?.name || "Variable",
+        description: "Reads or writes a program variable.",
+        category: "variable",
+        inputs: ports.inputs,
+        outputs: ports.outputs,
+      };
+    }
     return catalog.find((b) => b.type === String(type).toUpperCase());
   }
 
@@ -83,6 +152,9 @@
       result = parseConstDataType(block.params);
     } else if (t === "AI") {
       result = "REAL";
+    } else if (t === "LOCAL") {
+      const v = findPouVariable(docVariables(), block.params?.name);
+      result = v?.type || "BOOL";
     } else if (REAL_MATH_BLOCKS.has(t)) {
       result = "REAL";
     } else if (MATH_BLOCKS.has(t)) {
@@ -118,7 +190,22 @@
       }
       return "BOOL";
     }
-    return inferOutputTypeForBlock(wire.from.block, blocks, wires, memo, visiting);
+    return inferSourcePortType(wire.from.block, wire.from.port, blocks, wires, memo, visiting);
+  }
+
+  function inferSourcePortType(fromBlockId, fromPort, blocks, wires, memo, visiting) {
+    const fromBlock = blocks.get(fromBlockId);
+    const ft = fromBlock?.type.toUpperCase() ?? "";
+    if (ft === "CALL") {
+      const prog = findProgram(fromBlock.params?.program);
+      const v = findPouVariable(prog?.variables, fromPort);
+      return v?.type || "BOOL";
+    }
+    if (ft === "LOCAL") {
+      const v = findPouVariable(docVariables(), fromBlock.params?.name);
+      return v?.type || "BOOL";
+    }
+    return inferOutputTypeForBlock(fromBlockId, blocks, wires, memo, visiting);
   }
 
   function buildBlockOutputTypes(blocks, wires) {
@@ -131,8 +218,15 @@
   }
 
   function inferInputPortType(block, port, outputTypes) {
-    const t = block.type.toUpperCase();
-    const p = port.toUpperCase();
+    const t = String(block.type).toUpperCase();
+    const p = String(port).toUpperCase();
+    if (t === "CALL") {
+      const prog = findProgram(block.params?.program);
+      return findPouVariable(prog?.variables, port)?.type || "BOOL";
+    }
+    if (t === "LOCAL") {
+      return findPouVariable(docVariables(), block.params?.name)?.type || "BOOL";
+    }
     if (t === "DO" || BOOL_BLOCKS.has(t)) {
       return "BOOL";
     }
@@ -190,6 +284,17 @@
     }
   }
 
+  function inputPortsForBlock(block) {
+    const t = String(block.type).toUpperCase();
+    if (t === "CALL") {
+      return callBlockPorts(findProgram(block.params?.program)?.variables).inputs;
+    }
+    if (t === "LOCAL") {
+      return localBlockPorts(findPouVariable(docVariables(), block.params?.name)).inputs;
+    }
+    return inputPortsForType(block.type);
+  }
+
   function computePortTypes(source) {
     const blocks = new Map((source?.blocks || []).map((b) => [b.id, b]));
     const wires = source?.wires || [];
@@ -199,8 +304,26 @@
       outputs[id] = type;
     }
     const inputs = {};
+    const outputPorts = {};
     for (const block of source?.blocks || []) {
-      const ports = inputPortsForType(block.type);
+      const t = String(block.type).toUpperCase();
+      if (t === "CALL") {
+        const vars = findProgram(block.params?.program)?.variables || [];
+        const ports = {};
+        for (const v of vars) {
+          if (v.class === "OUT" || v.class === "IN_OUT") {
+            ports[v.name] = v.type || "BOOL";
+          }
+        }
+        outputPorts[block.id] = ports;
+      } else if (t === "LOCAL") {
+        const v = findPouVariable(docVariables(), block.params?.name);
+        if (v) {
+          outputPorts[block.id] = { Q: v.type };
+          outputs[block.id] = v.type;
+        }
+      }
+      const ports = inputPortsForBlock(block);
       if (ports.length === 0) {
         continue;
       }
@@ -210,14 +333,18 @@
       }
       inputs[block.id] = portMap;
     }
-    return { outputs, inputs };
+    return { outputs, outputPorts, inputs };
   }
 
   function typeClassName(type) {
     return `type-${String(type || "BOOL").toLowerCase()}`;
   }
 
-  function outputPortType(blockId) {
+  function outputPortType(blockId, port) {
+    const perPort = portTypes.outputPorts?.[blockId];
+    if (port && perPort && perPort[port]) {
+      return perPort[port];
+    }
     return portTypes.outputs[blockId] ?? "BOOL";
   }
 
@@ -227,7 +354,7 @@
 
   function wireSourceType(fromBlockId, fromPort, fromKind) {
     if (fromKind === "out") {
-      return outputPortType(fromBlockId);
+      return outputPortType(fromBlockId, fromPort);
     }
     return inputPortType(fromBlockId, fromPort);
   }
@@ -436,7 +563,7 @@
       const from = portCenter(wire.from.block, wire.from.port, "out");
       const to = portCenter(wire.to.block, wire.to.port, "in");
       const d = wirePath(from, to);
-      const wireType = outputPortType(wire.from.block);
+      const wireType = outputPortType(wire.from.block, wire.from.port);
       const typeClass = typeClassName(wireType);
       const selected = selectedWireIndex === index;
 
@@ -477,8 +604,14 @@
   }
 
   function blockSubtitle(block) {
-    const def = findDef(block.type);
     const t = String(block.type).toUpperCase();
+    if (t === "CALL") {
+      return "";
+    }
+    if (t === "LOCAL") {
+      const v = findPouVariable(docVariables(), block.params?.name);
+      return v ? `${v.class} · ${v.type}` : String(block.params?.name || "");
+    }
     if ((t === "DI" || t === "DO" || t === "AI") && (block.params?.symbol || block.params?.channel !== undefined)) {
       const label = blockModuleChannelLabel(block, t);
       if (label) {
@@ -592,7 +725,7 @@
       return;
     }
     for (const block of doc.blocks) {
-      const def = findDef(block.type);
+    const def = findDef(block.type, block);
       const pos = doc.layout[block.id] || { x: 48, y: 48 };
       const inputs = def?.inputs || [];
       const outputs = def?.outputs || [];
@@ -627,7 +760,7 @@
       for (let i = 0; i < outputs.length; i++) {
         const p = outputs[i];
         ports.appendChild(
-          createPortRow(block, p, "out", i, outputs.length, outputPortType(block.id))
+          createPortRow(block, p, "out", i, outputs.length, outputPortType(block.id, p))
         );
       }
       body.appendChild(ports);
@@ -647,6 +780,7 @@
         ev.stopPropagation();
         selectedBlockId = block.id;
         selectedWireIndex = null;
+        selectedVarName = null;
         startBlockDrag(ev, block.id);
         renderProperties();
         renderBlocks();
@@ -812,6 +946,7 @@
   function selectWire(index) {
     selectedWireIndex = index;
     selectedBlockId = null;
+    selectedVarName = null;
     // Update selection styling in place; do NOT recreate wire elements,
     // otherwise a following dblclick (for deletion) would target a stale node.
     el.wires.querySelectorAll(".wire-path").forEach((p) => {
@@ -1088,6 +1223,183 @@
     el.properties.appendChild(row);
   }
 
+  function nextVarName(className) {
+    const prefix =
+      className === "IN_OUT"
+        ? "InOut"
+        : className === "TEMP"
+          ? "Temp"
+          : className.charAt(0) + className.slice(1).toLowerCase();
+    const taken = new Set(docVariables().map((v) => String(v.name).toUpperCase()));
+    let n = 1;
+    while (taken.has(`${prefix}${n}`.toUpperCase())) {
+      n++;
+    }
+    return `${prefix}${n}`;
+  }
+
+  function addVariable(className) {
+    if (!doc) {
+      return;
+    }
+    if (!Array.isArray(doc.variables)) {
+      doc.variables = [];
+    }
+    const name = nextVarName(className);
+    doc.variables.push({ name, class: className, type: "BOOL" });
+    selectedVarName = name;
+    selectedBlockId = null;
+    selectedWireIndex = null;
+    commit();
+  }
+
+  function renameVariable(oldName, newName) {
+    const trimmed = String(newName || "").trim();
+    if (!trimmed || trimmed === oldName) {
+      return;
+    }
+    const taken = docVariables().some(
+      (v) => v.name !== oldName && String(v.name).toUpperCase() === trimmed.toUpperCase()
+    );
+    if (taken) {
+      return;
+    }
+    const v = findPouVariable(doc.variables, oldName);
+    if (!v) {
+      return;
+    }
+    v.name = trimmed;
+    for (const block of doc.blocks) {
+      if (String(block.type).toUpperCase() === "LOCAL" && String(block.params?.name) === oldName) {
+        block.params.name = trimmed;
+      }
+    }
+    selectedVarName = trimmed;
+    commit();
+  }
+
+  function renderVariableProperties() {
+    const v = findPouVariable(docVariables(), selectedVarName);
+    if (!v) {
+      el.properties.innerHTML = "<p class=\"muted\">Select a block, variable, or connection</p>";
+      return;
+    }
+    const desc = document.createElement("p");
+    desc.className = "block-description";
+    desc.textContent =
+      "Program variable. IN, IN_OUT, and OUT appear as ports on CALL blocks. Drag the name from the palette onto the canvas to use it.";
+    el.properties.appendChild(desc);
+
+    const nameRow = document.createElement("div");
+    nameRow.className = "prop-row";
+    nameRow.innerHTML = "<label>Name</label>";
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.value = v.name;
+    nameInput.addEventListener("change", () => renameVariable(v.name, nameInput.value));
+    nameRow.appendChild(nameInput);
+    el.properties.appendChild(nameRow);
+
+    const classRow = document.createElement("div");
+    classRow.className = "prop-row";
+    classRow.innerHTML = "<label>Class</label>";
+    const classSelect = document.createElement("select");
+    for (const cls of ["IN", "IN_OUT", "OUT", "VAR", "TEMP"]) {
+      const opt = document.createElement("option");
+      opt.value = cls;
+      opt.textContent = cls;
+      if (cls === v.class) {
+        opt.selected = true;
+      }
+      classSelect.appendChild(opt);
+    }
+    classSelect.addEventListener("change", () => {
+      v.class = classSelect.value;
+      commit();
+    });
+    classRow.appendChild(classSelect);
+    el.properties.appendChild(classRow);
+
+    const typeRow = document.createElement("div");
+    typeRow.className = "prop-row";
+    typeRow.innerHTML = "<label>Type</label>";
+    const typeSelect = document.createElement("select");
+    for (const t of ["BOOL", "INT", "DINT", "UINT", "WORD", "REAL"]) {
+      const opt = document.createElement("option");
+      opt.value = t;
+      opt.textContent = t;
+      if (t === v.type) {
+        opt.selected = true;
+      }
+      typeSelect.appendChild(opt);
+    }
+    typeSelect.addEventListener("change", () => {
+      v.type = typeSelect.value;
+      if (v.type === "BOOL") {
+        v.initial = v.initial === true || v.initial === 1;
+      } else if (typeof v.initial !== "number") {
+        v.initial = 0;
+      }
+      commit();
+    });
+    typeRow.appendChild(typeSelect);
+    el.properties.appendChild(typeRow);
+
+    const initRow = document.createElement("div");
+    initRow.className = "prop-row";
+    initRow.innerHTML = "<label>Initial</label>";
+    if (v.type === "BOOL") {
+      const select = document.createElement("select");
+      const current = v.initial === true || v.initial === 1;
+      for (const [val, text] of [
+        [false, "FALSE"],
+        [true, "TRUE"],
+      ]) {
+        const opt = document.createElement("option");
+        opt.value = val ? "true" : "false";
+        opt.textContent = text;
+        if (val === current) {
+          opt.selected = true;
+        }
+        select.appendChild(opt);
+      }
+      select.addEventListener("change", () => {
+        v.initial = select.value === "true";
+        commit();
+      });
+      initRow.appendChild(select);
+    } else {
+      const input = document.createElement("input");
+      input.type = "number";
+      input.step = v.type === "REAL" ? "any" : "1";
+      const n = Number(v.initial);
+      input.value = Number.isFinite(n) ? String(v.initial) : "0";
+      input.addEventListener("change", () => {
+        const parsed = Number(input.value);
+        v.initial = Number.isFinite(parsed) ? (v.type === "REAL" ? parsed : Math.trunc(parsed)) : 0;
+        commit();
+      });
+      initRow.appendChild(input);
+    }
+    el.properties.appendChild(initRow);
+
+    const del = document.createElement("button");
+    del.className = "btn-danger";
+    del.textContent = "Delete variable";
+    del.addEventListener("click", () => {
+      const name = v.name;
+      doc.variables = docVariables().filter((x) => x.name !== name);
+      for (const block of doc.blocks) {
+        if (String(block.type).toUpperCase() === "LOCAL" && String(block.params?.name) === name) {
+          delete block.params.name;
+        }
+      }
+      selectedVarName = null;
+      commit();
+    });
+    el.properties.appendChild(del);
+  }
+
   function renderProperties() {
     el.properties.innerHTML = "";
     if (!doc) {
@@ -1098,15 +1410,19 @@
       renderWireProperties();
       return;
     }
+    if (selectedVarName) {
+      renderVariableProperties();
+      return;
+    }
     if (!selectedBlockId) {
-      el.properties.innerHTML = "<p class=\"muted\">Select a block or a connection</p>";
+      el.properties.innerHTML = "<p class=\"muted\">Select a block, variable, or connection</p>";
       return;
     }
     const block = doc.blocks.find((b) => b.id === selectedBlockId);
     if (!block) {
       return;
     }
-    const def = findDef(block.type);
+    const def = findDef(block.type, block);
 
     if (def?.description) {
       const desc = document.createElement("p");
@@ -1119,6 +1435,73 @@
     idRow.className = "prop-row";
     idRow.innerHTML = `<label>ID</label><input readonly value="${block.id}" />`;
     el.properties.appendChild(idRow);
+
+    if (String(block.type).toUpperCase() === "CALL") {
+      const row = document.createElement("div");
+      row.className = "prop-row";
+      const label = document.createElement("label");
+      label.textContent = "Program";
+      row.appendChild(label);
+      const select = document.createElement("select");
+      const options = callablePrograms();
+      const current = String(block.params?.program ?? "");
+      if (current && !options.some((p) => p.id === current)) {
+        const orphan = document.createElement("option");
+        orphan.value = current;
+        orphan.textContent = `${current} (missing)`;
+        orphan.selected = true;
+        select.appendChild(orphan);
+      }
+      for (const prog of options) {
+        const opt = document.createElement("option");
+        opt.value = prog.id;
+        opt.textContent = prog.name;
+        if (prog.id === current) {
+          opt.selected = true;
+        }
+        select.appendChild(opt);
+      }
+      select.addEventListener("change", () => {
+        block.params = block.params || {};
+        block.params.program = select.value;
+        commit();
+      });
+      row.appendChild(select);
+      el.properties.appendChild(row);
+    }
+
+    if (String(block.type).toUpperCase() === "LOCAL") {
+      const row = document.createElement("div");
+      row.className = "prop-row";
+      const label = document.createElement("label");
+      label.textContent = "Variable";
+      row.appendChild(label);
+      const select = document.createElement("select");
+      const current = String(block.params?.name ?? "");
+      if (current && !findPouVariable(docVariables(), current)) {
+        const orphan = document.createElement("option");
+        orphan.value = current;
+        orphan.textContent = `${current} (missing)`;
+        orphan.selected = true;
+        select.appendChild(orphan);
+      }
+      for (const v of docVariables()) {
+        const opt = document.createElement("option");
+        opt.value = v.name;
+        opt.textContent = `${v.name} (${v.class} ${v.type})`;
+        if (v.name === current) {
+          opt.selected = true;
+        }
+        select.appendChild(opt);
+      }
+      select.addEventListener("change", () => {
+        block.params = block.params || {};
+        block.params.name = select.value;
+        commit();
+      });
+      row.appendChild(select);
+      el.properties.appendChild(row);
+    }
 
     for (const p of def?.params || []) {
       if (p.type === "channel") {
@@ -1203,6 +1586,57 @@
       (groups[item.category] || groups.logic).push(item);
     }
     el.palette.innerHTML = "";
+
+    const varWrap = document.createElement("div");
+    varWrap.className = "palette-group";
+    varWrap.innerHTML = `<div class="palette-group-title">Variables</div>`;
+    const addRow = document.createElement("div");
+    addRow.className = "var-add-row";
+    for (const cls of ["IN", "IN_OUT", "OUT", "VAR", "TEMP"]) {
+      const addBtn = document.createElement("button");
+      addBtn.type = "button";
+      addBtn.className = "var-add-btn";
+      addBtn.textContent = `+ ${cls}`;
+      addBtn.title = `Add ${cls} variable`;
+      addBtn.addEventListener("click", () => addVariable(cls));
+      addRow.appendChild(addBtn);
+    }
+    varWrap.appendChild(addRow);
+    const vars = docVariables();
+    if (vars.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "muted";
+      empty.style.padding = "4px 8px";
+      empty.textContent = "Add IN / OUT ports for CALL boxes.";
+      varWrap.appendChild(empty);
+    }
+    for (const v of vars) {
+      const btn = document.createElement("button");
+      btn.className = "palette-item var-item" + (selectedVarName === v.name ? " selected" : "");
+      btn.type = "button";
+      btn.textContent = v.name;
+      btn.title = `${v.class} ${v.type} — drag onto the canvas`;
+      const meta = document.createElement("span");
+      meta.className = "var-item-meta";
+      meta.textContent = `${v.class} · ${v.type}`;
+      btn.appendChild(meta);
+      btn.addEventListener("click", () => {
+        selectedVarName = v.name;
+        selectedBlockId = null;
+        selectedWireIndex = null;
+        renderPalette();
+        renderProperties();
+        renderBlocks();
+      });
+      btn.addEventListener("dragstart", (ev) => {
+        ev.dataTransfer.setData("text/nanoplc-block", "LOCAL");
+        ev.dataTransfer.setData("text/nanoplc-local-var", v.name);
+      });
+      btn.draggable = true;
+      varWrap.appendChild(btn);
+    }
+    el.palette.appendChild(varWrap);
+
     for (const [cat, title] of [
       ["io", "I/O"],
       ["logic", "Logic"],
@@ -1227,9 +1661,36 @@
       }
       el.palette.appendChild(wrap);
     }
+
+    const programs = callablePrograms();
+    const wrap = document.createElement("div");
+    wrap.className = "palette-group";
+    wrap.innerHTML = `<div class="palette-group-title">Programs</div>`;
+    if (programs.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "muted";
+      empty.style.padding = "4px 8px";
+      empty.textContent = "Add another program to call it here.";
+      wrap.appendChild(empty);
+    }
+    for (const prog of programs) {
+      const btn = document.createElement("button");
+      btn.className = "palette-item";
+      btn.type = "button";
+      btn.textContent = prog.name;
+      btn.title = `Call PROGRAM ${prog.name}`;
+      btn.addEventListener("click", () => addBlock("CALL", undefined, { program: prog.id }));
+      btn.addEventListener("dragstart", (ev) => {
+        ev.dataTransfer.setData("text/nanoplc-block", "CALL");
+        ev.dataTransfer.setData("text/nanoplc-call-program", prog.id);
+      });
+      btn.draggable = true;
+      wrap.appendChild(btn);
+    }
+    el.palette.appendChild(wrap);
   }
 
-  function addBlock(type, at) {
+  function addBlock(type, at, extraParams) {
     if (!doc) {
       return;
     }
@@ -1239,11 +1700,15 @@
       y: (-panY + el.viewport.clientHeight / 2) / zoom - BLOCK_H / 2,
     };
     const upper = String(type).toUpperCase();
-    const params = upper === "DI" || upper === "DO" || upper === "AI" ? paramsForNewIoBlock(type) : defaultParams(type);
+    const params =
+      upper === "DI" || upper === "DO" || upper === "AI"
+        ? paramsForNewIoBlock(type)
+        : { ...defaultParams(type), ...(extraParams || {}) };
     doc.blocks.push({ id, type: upper, params });
     doc.layout[id] = { x: Math.round(center.x), y: Math.round(center.y) };
     selectedBlockId = id;
     selectedWireIndex = null;
+    selectedVarName = null;
     commit();
   }
 
@@ -1286,6 +1751,7 @@
       if (ev.button === 0) {
         selectedBlockId = null;
         selectedWireIndex = null;
+        selectedVarName = null;
         wireFrom = null;
         renderProperties();
         renderBlocks();
@@ -1347,13 +1813,28 @@
       ev.preventDefault();
       const type = ev.dataTransfer.getData("text/nanoplc-block");
       if (type) {
-        addBlock(type, screenToWorld(ev.clientX, ev.clientY));
+        const extra = {};
+        const callProgram = ev.dataTransfer.getData("text/nanoplc-call-program");
+        if (callProgram) {
+          extra.program = callProgram;
+        }
+        const localVar = ev.dataTransfer.getData("text/nanoplc-local-var");
+        if (localVar) {
+          extra.name = localVar;
+        }
+        addBlock(type, screenToWorld(ev.clientX, ev.clientY), extra);
       }
     });
   }
 
   function payloadKey(d) {
-    return JSON.stringify({ name: d.name, blocks: d.blocks, wires: d.wires, layout: d.layout });
+    return JSON.stringify({
+      name: d.name,
+      blocks: d.blocks,
+      wires: d.wires,
+      variables: d.variables || [],
+      layout: d.layout,
+    });
   }
 
   function commit() {
@@ -1370,6 +1851,7 @@
         name: doc.name,
         blocks: doc.blocks,
         wires: doc.wires,
+        variables: doc.variables || [],
         layout: doc.layout,
       },
     });
@@ -1397,6 +1879,7 @@
     }
     portTypes = computePortTypes(doc);
     el.title.textContent = doc.name || "FBD";
+    renderPalette();
     renderBlocks();
     renderWires();
     renderProperties();
@@ -1418,6 +1901,9 @@
       if (!incoming.layout) {
         incoming.layout = {};
       }
+      if (!Array.isArray(incoming.variables)) {
+        incoming.variables = [];
+      }
       if (dirtyFromUser && window.__nanoplcPendingKey === payloadKey(incoming)) {
         dirtyFromUser = false;
         window.__nanoplcPendingKey = undefined;
@@ -1427,9 +1913,17 @@
       window.__nanoplcPendingKey = undefined;
       doc = incoming;
       el.parseError.classList.add("hidden");
+      renderPalette();
       renderAll();
     } else if (msg.type === "ioProfile") {
       ioProfile = msg.payload || { di: [], do: [], ai: [], modules: [], source: "none" };
+      if (doc) {
+        renderProperties();
+        renderBlocks();
+      }
+    } else if (msg.type === "programs") {
+      projectPrograms = msg.payload || { currentProgramId: undefined, programs: [] };
+      renderPalette();
       if (doc) {
         renderProperties();
         renderBlocks();

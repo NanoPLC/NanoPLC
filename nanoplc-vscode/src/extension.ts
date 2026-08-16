@@ -6,6 +6,7 @@ import * as firmwareTasks from "./firmwareTasks";
 import * as powershellProfileEspIdf from "./powershellProfileEspIdf";
 import * as compileProgram from "./project/compileProgram";
 import * as deviceTreeCommands from "./project/deviceTreeCommands";
+import * as taskCommands from "./project/taskCommands";
 import * as codegenFirmware from "./project/codegenFirmware";
 import * as scaffoldFirmware from "./project/scaffoldFirmware";
 import * as projectTree from "./project/projectTree";
@@ -37,6 +38,7 @@ export function activate(context: vscode.ExtensionContext): void {
     compileProgram.registerCompileProgram(context),
     projectTree.registerProjectTree(context),
     deviceTreeCommands.registerDeviceTreeCommands(context),
+    taskCommands.registerTaskCommands(context),
     simulatorPanel.registerSimulator(context),
     codegenFirmware.registerCodegenFirmware(),
     scaffoldFirmware.registerInitFirmwareTree(),

@@ -3,10 +3,14 @@ import * as vscode from "vscode";
 
 import {
   resolveDeviceTree,
+  resolveTaskConfiguration,
+  taskDescription,
+  taskEntryProgramId,
   type NanoPlcDriverRef,
   type NanoPlcModuleRef,
   type NanoPlcProgramRef,
   type NanoPlcProject,
+  type NanoPlcTaskRef,
 } from "@nanoplc/ir-schema";
 
 import { discoverProjects, findProjectFileAtRoot, readJsonFile, type ProjectLocation } from "./projectPaths";
@@ -25,6 +29,9 @@ export type NanoPlcTreeKind =
   | "communication_group"
   | "communication_placeholder"
   | "application_group"
+  | "tasks_group"
+  | "task"
+  | "task_pou"
   | "programs_group"
   | "program"
   | "firmware";
@@ -36,7 +43,8 @@ export class NanoPlcTreeItem extends vscode.TreeItem {
     collapsible: vscode.TreeItemCollapsibleState,
     public readonly location: ProjectLocation | undefined,
     public readonly relPath?: string,
-    public readonly refId?: string
+    public readonly refId?: string,
+    public readonly auxId?: string
   ) {
     super(label, collapsible);
     this.contextValue = kind;
@@ -63,7 +71,7 @@ export class NanoPlcTreeItem extends vscode.TreeItem {
         this.iconPath = new vscode.ThemeIcon("settings-gear");
         this.resourceUri = vscode.Uri.file(findProjectFileAtRoot(root));
         this.command = openFileCommand(this.resourceUri);
-        this.description = "scan, board, target";
+        this.description = "board, target";
         break;
       case "modules_group":
         this.iconPath = new vscode.ThemeIcon("symbol-module");
@@ -94,6 +102,19 @@ export class NanoPlcTreeItem extends vscode.TreeItem {
         break;
       case "application_group":
         this.iconPath = new vscode.ThemeIcon("layers");
+        break;
+      case "tasks_group":
+        this.iconPath = new vscode.ThemeIcon("clock");
+        break;
+      case "task":
+        this.iconPath = new vscode.ThemeIcon("sync");
+        break;
+      case "task_pou":
+        this.iconPath = new vscode.ThemeIcon("symbol-event");
+        if (relPath) {
+          this.resourceUri = vscode.Uri.file(path.join(root, relPath));
+          this.command = openProgramCommand(this.resourceUri, label);
+        }
         break;
       case "programs_group":
         this.iconPath = new vscode.ThemeIcon("folder");
@@ -255,6 +276,12 @@ export class NanoPlcProjectTreeProvider implements vscode.TreeDataProvider<NanoP
       case "application_group":
         return [
           new NanoPlcTreeItem(
+            "tasks_group",
+            "Task configuration",
+            vscode.TreeItemCollapsibleState.Expanded,
+            location
+          ),
+          new NanoPlcTreeItem(
             "programs_group",
             "Programs",
             vscode.TreeItemCollapsibleState.Expanded,
@@ -262,8 +289,20 @@ export class NanoPlcProjectTreeProvider implements vscode.TreeDataProvider<NanoP
           ),
         ];
 
+      case "tasks_group":
+        return resolveTaskConfiguration(project).map((task) => taskItem(location, task));
+
+      case "task": {
+        const task = resolveTaskConfiguration(project).find((t) => t.id === element.refId);
+        if (!task) {
+          return [];
+        }
+        const programId = taskEntryProgramId(task);
+        return programId ? [taskPouItem(location, project, task, programId)] : [];
+      }
+
       case "programs_group":
-        return project.programs.map((prog) => programItem(location, prog));
+        return project.programs.map((prog) => programItem(location, prog, project));
 
       default:
         return [];
@@ -297,9 +336,51 @@ function driverItem(location: ProjectLocation, drv: NanoPlcDriverRef): NanoPlcTr
   return item;
 }
 
-function programItem(location: ProjectLocation, prog: NanoPlcProgramRef): NanoPlcTreeItem {
+function taskItem(location: ProjectLocation, task: NanoPlcTaskRef): NanoPlcTreeItem {
+  const programId = taskEntryProgramId(task);
+  const item = new NanoPlcTreeItem(
+    "task",
+    task.name,
+    programId ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None,
+    location,
+    undefined,
+    task.id
+  );
+  item.description = taskDescription(task);
+  item.tooltip = programId
+    ? `${task.name}\n${taskDescription(task)}\nRuns ${programId}`
+    : `${task.name}\n${taskDescription(task)}\nNo entry program`;
+  return item;
+}
+
+function taskPouItem(
+  location: ProjectLocation,
+  project: NanoPlcProject,
+  task: NanoPlcTaskRef,
+  programId: string
+): NanoPlcTreeItem {
+  const prog = project.programs.find((p) => p.id === programId);
+  const label = prog ? prog.name : `${programId} (missing)`;
+  const item = new NanoPlcTreeItem(
+    "task_pou",
+    label,
+    vscode.TreeItemCollapsibleState.None,
+    location,
+    prog?.source,
+    task.id,
+    programId
+  );
+  item.description = prog ? prog.language.toUpperCase() : "unresolved";
+  return item;
+}
+
+function programItem(
+  location: ProjectLocation,
+  prog: NanoPlcProgramRef,
+  project: NanoPlcProject
+): NanoPlcTreeItem {
   const lang = prog.language.toUpperCase();
-  return new NanoPlcTreeItem(
+  const item = new NanoPlcTreeItem(
     "program",
     `${prog.name} (${lang})`,
     vscode.TreeItemCollapsibleState.None,
@@ -307,6 +388,11 @@ function programItem(location: ProjectLocation, prog: NanoPlcProgramRef): NanoPl
     prog.source,
     prog.id
   );
+  const callers = resolveTaskConfiguration(project)
+    .filter((t) => taskEntryProgramId(t) === prog.id)
+    .map((t) => t.name);
+  item.description = callers.length > 0 ? callers.join(", ") : "not called";
+  return item;
 }
 
 export function registerProjectTree(context: vscode.ExtensionContext): vscode.Disposable {

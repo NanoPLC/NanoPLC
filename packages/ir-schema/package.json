@@ -11,7 +11,7 @@
   ],
   "scripts": {
     "compile": "tsc -p ./",
-    "test": "node --test dist/**/*.test.js"
+    "test": "node --test dist/*.test.js dist/*/*.test.js"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",

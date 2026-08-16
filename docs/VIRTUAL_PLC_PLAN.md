@@ -33,8 +33,8 @@ ESP32 firmware (ESP-IDF)
 
 **Do not emulate the ESP32 cycle-accurately**; emulate **the PLC execution model**:
 
-- scan cycle;
-- deterministic order of logic execution;
+- **tasks** (CODESYS Task Configuration: cyclic, freewheeling, event);
+- deterministic **call order** of PROGRAM POUs inside each task;
 - timers and variable memory;
 - **process image I/O** (virtual inputs/outputs like a physical process).
 
@@ -46,7 +46,7 @@ This keeps maintenance simpler and reduces «simulator differs from silicon» dr
 
 | Module | Role |
 |--------|------|
-| Project tree (Device) | Hierarchy **device → modules → protocols → programs** akin to TIA Portal / CODESYS (§3.2) |
+| Project tree (Device) | Hierarchy **device → modules → Task configuration → programs** akin to CODESYS (§3.2, §5) |
 | FBD editor | Flow canvas **Node-RED–like** UX: blocks, wires, palette (§3.1) |
 | LAD editor | Power rails / ladder (after FBD stabilizes; §22) |
 | ST editor | Standard **text** VS Code surface + grammar/services; **not** a canvas (§3.1) |
@@ -61,26 +61,29 @@ Existing foundation: `nanoplc-vscode` contributes **IEC ST/LAD/FBD grammars** an
 
 ### 3.1. Editors by language type
 
-- **FBD** — opening a user program (**Function Block Diagram**, FB-style POU files) uses a **dedicated flow editor** similar to [**Node-RED**](https://nodered.org/): pan/zoom canvas, drag blocks from a palette, **wire** outputs to inputs, per-block properties. This is **not** a plain syntax-highlighted `.fbd` text buffer without a WebView/React canvas.
+- **FBD** — opening a user program (**Function Block Diagram**, FB-style POU files) uses a **dedicated flow editor** similar to [**Node-RED**](https://nodered.org/): pan/zoom canvas, drag blocks from a palette, **wire** outputs to inputs, per-block properties. Palette groups include I/O, logic, timers, math, bits, **Variables** (IN / IN_OUT / OUT / VAR / TEMP), and **Programs** (CALL other FBD POUs). This is **not** a plain syntax-highlighted `.fbd` text buffer without a WebView/React canvas.
 - **ST (Structured Text)** — opening uses the normal VS Code **text** `TextEditor` plus IEC ST grammar, completions, diagnostics. No graph canvas.
 - **LAD** — roadmap: dedicated graphic mode (rails, power flow). Until then: text highlighting only where applicable; no promise of a full PLC LAD editor before that ships.
 
 `package.json`: register FBD via **`customEditor`**, `WebviewPanel`, or **virtual document** canvas; ST via the standard language contribution on text URIs.
 
-### 3.2. Project tree: device, modules, protocols, programs
+### 3.2. Project tree: device, modules, tasks, programs
 
-A dedicated NanoPLC **Tree View** («**Project**», activity bar), similar to **TIA Portal** and **CODESYS**: the root is the **device** (logical controller / platform preset, e.g. ESP32-S3). Child nodes are **structured configuration**, not a raw file dump:
+A dedicated NanoPLC **Tree View** («**Project**», activity bar), similar to **CODESYS** (primary) and **TIA Portal** (device/modules): the root is the **device** (logical controller / platform preset, e.g. ESP32-S3). Child nodes are **structured configuration**, not a raw file dump:
 
 | Tree node | Meaning (example) | Opens / action |
 |-----------|-------------------|----------------|
 | **Device** | PLC project + board (`nanoplc.project.json`) | Expand hierarchy |
-| **Device configuration** | Scan period, `idf_target`, board preset | `nanoplc.project.json` |
+| **Device configuration** | Board, `idf_target` | `nanoplc.project.json` |
 | **Modules** | Field I/O modules (GPIO, future racks) | — |
 | ↳ Module | e.g. Onboard GPIO (digital) | `src/io-map.json` |
 | **Drivers** | HAL / fieldbus stacks bound to modules | — |
 | ↳ Driver | e.g. `nanoplc_hal` → module | Driver info dialog (v0) |
 | **Communication** | Modbus, MQTT, online debug (later) | Placeholder until Phase 3+ |
-| **Application → Programs** | POUs (FBD / ST / LAD) | — |
+| **Application → Task configuration** | PLC tasks; each runs **one** PROGRAM (§5) | Add / configure task |
+| ↳ Task | e.g. MainTask (Cyclic · 10 ms · Prio 1) | Task properties wizard |
+| ↳ ↳ Entry program | e.g. Main | Opens that POU’s editor |
+| **Application → Programs** | POU definitions (FBD / ST / LAD) — scheduled by a task **or** invoked by FBD `CALL` | — |
 | ↳ Program | e.g. Main (FBD) | **FBD Diagram** custom editor or ST text |
 | **Firmware** | ESP-IDF tree path | Folder link |
 
@@ -96,18 +99,22 @@ Device (and_gate · esp32-s3)
 ├── Communication
 │   └── (none yet)
 ├── Application
+│   ├── Task configuration
+│   │   └── MainTask (Cyclic · 10 ms · Prio 1)
+│   │       └── Main
 │   └── Programs
 │       └── Main (FBD)          → FBD canvas editor
 └── Firmware (ESP-IDF)
 ```
 
-**Workflow (v0):** **Add device** → pick from **device catalog** (I/O counts pre-filled) → optional **Add module** / **Add driver** → **Add program** → click program to edit. Context **+** on group rows; toolbar **+** for new device.
+**Workflow (v0):** **Add device** → pick from **device catalog** (I/O counts pre-filled) → optional **Add module** / **Add driver** → edit **Main** under Programs → (optional) **Add program** (then CALL it from FBD or bind it to its own task) → (optional) **Add task** / **Call program from task**. Context **+** on group rows; click a task to configure type, interval, priority, watchdog.
 
 - **Device catalog (v0):** [M5Stack StamPLC K141](https://shop.m5stack.com/products/m5stamp-plc-controller-with-m5stamps3) (8 DI / 4 relay via AW9523), generic ESP32-S3 GPIO template. **Module catalog (v0):** M5Stack **StamPLC IO** (3 DO, 2 AI, I2C 0x20–0x2F), **StamPLC AC** (1 AC relay, I2C 0x44). Stored in `device.catalog_id` / module `catalog_id`; `io-map.json` and `src/modules/*.json` generated from templates. Implementation: `packages/ir-schema/src/deviceCatalog.ts`, `moduleCatalog.ts`.
 - **Per-project firmware tree (v0):** **Add device** scaffolds `firmware/` under the project from `nanoplc-vscode/firmware-template/` (synced from repo `firmware/` at extension compile). **Compile PLC program** auto-creates or **patches** an existing tree (e.g. IDF 5.3 `esp_task_wdt` → `esp_system`). Command **NanoPLC: Init firmware tree** for manual init.
 
-- The tree **serializes into** `nanoplc.project.json` (`modules[]`, `drivers[]`, `programs[]`) and **mirrors** `src/` / `build/`—users work from the logical device root, not loose files.
+- The tree **serializes into** `nanoplc.project.json` (`modules[]`, `drivers[]`, `tasks[]`, `programs[]`) and **mirrors** `src/` / `build/`—users work from the logical device root, not loose files.
 - When `modules` / `drivers` are omitted on disk, the IDE shows **sensible defaults** (onboard GPIO + `nanoplc_hal`) via `resolveDeviceTree()` in `packages/ir-schema`.
+- When `tasks[]` is omitted, the IDE **synthesizes MainTask** from legacy `scan.period_ms` and the first program (`resolveTaskConfiguration()`). Editing a task persists `tasks[]` and keeps `scan.period_ms` as a cache of the primary cyclic interval.
 - Adding a «module» or «protocol» runs **templates** that create JSON entries and source files for version control as usual.
 
 ---
@@ -130,13 +137,120 @@ Device (and_gate · esp32-s3)
 
 ---
 
-## 5. Execution model (must be specified)
+## 5. Execution model (CODESYS Task Configuration)
 
-1. **Scan cycle** — configurable period (e.g. 10 ms) in the simulator; on ESP32 the same **intent** (project-level scan contract).
-2. **Execution order** — derived **topological order** (or explicit compiler/user order). **Drawn graph ≠ execution order**—surface order diagnostics in the IDE.
-3. **Typical PLC I/O boundary:** read inputs → run logic → write outputs in one scan.
+NanoPLC schedules work the **CODESYS** way: **a task runs one entry PROGRAM**. There are no Siemens OB numbers (`OB1`, `OB35`, …). A PROGRAM on disk does nothing until a task or another PROGRAM (`CALL` in FBD) invokes it.
 
-Define timer behaviour (TON/TOF, etc.) up front: **`esp_timer` / RTOS tick** vs **delta time between scans**—document in IR spec.
+### 5.1. Roles
+
+| Artifact | Role |
+|----------|------|
+| **PROGRAM** (POU) | User logic (FBD / later ST, LAD). Edited under Application → Programs. |
+| **Task** | Runtime scheduler: kind, interval, priority, watchdog, **exactly one entry PROGRAM**. |
+| **FUNCTION / FB** | Called from programs, never from a task (library work, §33). |
+
+**Several programs, two patterns:**
+
+1. **One program per task.** Fast cycle → FastTask → `Fast_PRG`. Slow cycle → SlowTask → `Diag_PRG`. Each task has its own period and priority.
+2. **PROGRAM calls PROGRAM** (FBD `CALL`). MainTask still runs only `Main`; `Main` may invoke helper PROGRAMS. Callees are not listed on the task.
+
+A task must not list a stack of POUs. Extra programs get their own task, or are called from another PROGRAM (`CALL`). The same PROGRAM should be bound to **one** task (`NP-0115` if it appears in several). `NP-0116` if a task still has a legacy `pous[]` with more than one entry.
+
+### 5.2. Task kinds
+
+| Kind | CODESYS analog | Behavior |
+|------|----------------|----------|
+| `cyclic` | Cyclic | Run every `interval_ms` using delay-until (not a busy loop). Default for MainTask. |
+| `freewheeling` | Freewheeling | After a pass finishes, start the next as soon as the scheduler allows (minimum 1 RTOS tick). No interval. |
+| `event` | Event | Rising edge of a BOOL `event` symbol. **Persisted in the IDE; runtime later (§33 T3).** |
+
+Not in v0: Status tasks, external/interrupt tasks, Siemens-style hardware OBs.
+
+### 5.3. Task properties
+
+Stored on `nanoplc.project.json` → `tasks[]` (`NanoPlcTaskRef` in `packages/ir-schema`):
+
+| Field | Meaning |
+|-------|---------|
+| `id` / `name` | Stable id + display name (default `main_task` / `MainTask`) |
+| `kind` | `cyclic` \| `freewheeling` \| `event` |
+| `priority` | **0 = highest**, 31 = lowest (CODESYS-like). Maps to a FreeRTOS priority band in firmware. |
+| `interval_ms` | Required for `cyclic` |
+| `event` | BOOL symbol for `event` tasks |
+| `watchdog.enabled` / `watchdog.time_ms` | If a pass exceeds the timeout, log (v0) / fail-safe outputs (later) |
+| `program` | Entry PROGRAM id. **Exactly one** per task. |
+
+Legacy `pous[]` with a single `{ "program": "…" }` is still read; the IDE rewrites it to `program` on save.
+
+### 5.4. Default and legacy projects
+
+New **Add device** projects get one **MainTask**: cyclic, catalog `scan_period_ms` (typically 10 ms), priority 1, watchdog ≥ 5× interval, calling **Main**.
+
+Legacy files with only `scan.period_ms` keep working: `resolveTaskConfiguration()` synthesizes MainTask from that period and `programs[0]`. Saving a task edit writes `tasks[]` and refreshes `scan.period_ms` as a **cache of the primary cyclic interval** so older IR/codegen (`scan_period_ms`) stay valid.
+
+**Primary cyclic task** = MainTask by id/name, else the highest-priority (`priority` closest to 0) cyclic task.
+
+### 5.5. I/O boundary (per task pass)
+
+Typical PLC scan still applies **inside each task pass**: read process-image inputs → run the **entry PROGRAM** → write outputs.
+
+Shared process image across tasks. v0 does not lock the PI between tasks; pin PLC tasks to one core when multiple FreeRTOS tasks exist (§7.3). Combinational cycles inside one FBD remain compile errors (`NP-0400`).
+
+### 5.6. Timers
+
+TON/TOF advance by **Δt of the task that executed them**, not a global tick:
+
+- cyclic: nominal `interval_ms` (measured elapsed if overrun);
+- freewheeling: measured elapsed of that pass;
+- event: elapsed since previous run of that task (0 on first edge).
+
+Document this in IR; keep TS simulator and C runtime on the same rule.
+
+### 5.7. Runtime mapping (target)
+
+Each PLC task becomes **one FreeRTOS task** (`np_<task id>`), high enough that Wi‑Fi/OTA cannot starve the fastest cyclic task.
+
+| PLC kind | FreeRTOS pattern |
+|----------|------------------|
+| cyclic | `vTaskDelayUntil` with `interval_ms` |
+| freewheeling | loop + `vTaskDelay(1)` (or yield) after each pass |
+| event | wait on a notification / event bit set from the PI writer |
+
+`app_main` must **not** hard-code `nanoplc_runtime_init(10)`. Codegen/runtime reads `tasks[]` (until then, primary cyclic interval).
+
+Watchdog: register each PLC task with the ESP task WDT; log `task overrun` when elapsed > `interval_ms` (cyclic) or > `watchdog.time_ms`.
+
+### 5.8. Simulator mapping (target)
+
+One JS timer per **cyclic** task; freewheeling via queued microtasks with a yield; event tasks when the bound BOOL rises in the PI. v0 simulator still runs a **single** interval: the primary cyclic task’s `interval_ms`, executing that task’s entry PROGRAM (same limit as compile, §5.9).
+
+### 5.9. Compile / codegen — current vs target
+
+**Now (T0 + CALL):** compile and simulate the **entry PROGRAM** of the primary cyclic task, including FBD `CALL` into other PROGRAMS (`pou_schedules`). Extra **tasks** are stored and validated, with an explicit compile note. A task may bind only one program (`NP-0116`).
+
+**Next (T1):** one FreeRTOS / simulator task per PLC task, each running its entry PROGRAM. IR `tasks[]` each with `kind`, interval/event, `priority`, and that program’s `schedule`.
+
+**Then (T2):** event tasks, watchdog fail-safe.
+
+**Later (T3 remainder):** FB libraries. PROGRAM-from-PROGRAM `CALL` in FBD is already in v0.
+
+Drawn FBD **≠** execution order: topological compile inside a program still applies. Which program runs is the task’s `program` field, plus `CALL` boxes in that program.
+
+### 5.10. PROGRAM variables and CALL ports (v0)
+
+Each FBD PROGRAM may declare IEC-style sections on `src/*.fbd.json` → `variables[]`:
+
+| Class | On the CALL box | Inside the callee |
+|-------|-----------------|-------------------|
+| **IN** | Input port | Read (`LOCAL` output `Q`) |
+| **IN_OUT** | Input and output (same name) | Read/write |
+| **OUT** | Output port | Write (`LOCAL` input `IN`) |
+| **VAR** | Hidden | Static; persists between calls (PROGRAM is a singleton) |
+| **TEMP** | Hidden | Reset to `initial` at the start of every call |
+
+The FBD editor **Variables** list adds these declarations. Drag a name onto the canvas to place a `LOCAL` block. Dropping another program from **Programs** inserts `CALL` (`params.program`); ports update when the callee’s IN / IN_OUT / OUT list changes.
+
+Compile copies IN / IN_OUT into the callee before its schedule (`call_in`), runs `pou_schedules`, then copies OUT / IN_OUT back (`call_out`). Shared process image (DI/DO/AI) is unchanged. Diagnostics: `NP-0216`…`NP-0219` (declarations / LOCAL), `NP-0410`…`NP-0413` (CALL).
 
 ---
 
@@ -182,7 +296,7 @@ firmware/                          ← ESP-IDF app root
 
 ### 7.3. FreeRTOS and networking
 
-- A dedicated **high-priority task** owns the PLC scan loop; Wi‑Fi, OTA, heavy TCP must not starve scans.
+- **One FreeRTOS task per PLC task** (§5.7); Wi‑Fi, OTA, heavy TCP must not starve the highest-priority cyclic task.
 - Prefer **Kconfig** toggles (WebSocket debug, Modbus TCP, OTA) so minimal firmware stays small.
 
 ### 7.4. VS Code integration
@@ -237,7 +351,7 @@ Mitigate simulator/MCU mismatch: tight IR spec + tests + (later) shared C runtim
 
 ### Phase 1 — MVP «mini PLC IDE»
 
-1. [ ] IDE structure: **Device/project tree** (§3.2); **FBD** Node-RED–style canvas (§3.1); **ST** plain VS Code editor (§3.1). **Done so far:** TIA-style **Project tree** (device → modules → drivers → application → programs); **FBD canvas v0**; ST/LAD grammar-only text—see §49.
+1. [ ] IDE structure: **Device/project tree** (§3.2); **FBD** Node-RED–style canvas (§3.1); **ST** plain VS Code editor (§3.1). **Done so far:** CODESYS-style **Project tree** (device → modules → drivers → application → **Task configuration** + programs); **FBD canvas v0**; ST/LAD grammar-only text—see §49.
 2. [x] **JS/TS Virtual PLC** + **Run Simulation** (basic I/O panel, scan loop; flow highlighting todo).
 3. [x] **C codegen** from IR → `firmware/components/nanoplc_generated/` (auto on compile; CLI `tools/codegen`).
 4. [x] **ESP-IDF** skeleton under `firmware/` with working `idf.py build`; **manual** CLI flash/monitor. **Done:** NanoPLC IDE commands for Build/Flash/Monitor (§7.4); **per-project firmware scaffold** + **build on compile** (§7.4 item 3).
@@ -318,7 +432,7 @@ Until a serializer is chosen, record these **conceptual entities**:
 
 | Entity | Role |
 |--------|------|
-| `project` | metadata, target MCU, default scan period |
+| `project` | metadata, target MCU, tasks (kind/interval/priority/entry program); legacy `scan_period_ms` |
 | `variables` | global/instance vars with types (BOOL, INT, REAL, …) and debug addressing |
 | `io_image` | I/O mapping (symbolic name ↔ process-image index) |
 | `network` | POU set / ladder rungs OR FBD blocks and wires |
@@ -336,11 +450,22 @@ Split **fixed runtime** (never generated) vs **generated user logic**.
 ### 16.1. Stable names (example contract)
 
 - `nanoplc_runtime_*` live in `nanoplc_runtime`, never generated.
-- Single user program entry:
+- **v0 (until T2):** single user entry still used by the existing scan task:
 
   ```c
   void nanoplc_generated_program_scan(void);
   ```
+
+  Body is the **entry PROGRAM** of the primary cyclic task. Period comes from that task (`nanoplc_runtime_scan_period_ms`), not a magic `10` in `app_main` (fix when T1 lands).
+
+- **Target (T1):** one generated function per PLC task plus a static table:
+
+  ```c
+  void nanoplc_generated_task_main_task(uint32_t dt_ms);
+  const nanoplc_TaskDesc *nanoplc_generated_tasks(size_t *out_count);
+  ```
+
+  `nanoplc_TaskDesc`: `id`, `kind`, `priority`, `interval_ms`, `watchdog_ms`, function pointer.
 
 - Optional introspection / debug:
 
@@ -358,7 +483,7 @@ Define `nanoplc_VarMeta` once in `nanoplc_runtime` (`name`, `type`, offset or in
 
 ### 16.3. Timers
 
-MVP suggestion: propagate **Δt between scans** (argument to scan or runtime field) so TON/TOF advance deterministically per scan—keeps parity with TS simulator.
+MVP suggestion: propagate **Δt of the executing task** (argument to the generated task function or runtime field) so TON/TOF advance deterministically per task pass—keeps parity with the TS simulator (§5.6).
 
 ---
 
@@ -451,7 +576,7 @@ UX requirements recap: **§3.1** (FBD canvas = Node-RED style; ST = plain text).
 1. **FBD first**—natural DAG + IR wires + topo ordering.
 2. **LAD second**—rungs, power rails, explicit internal order map into same IR with more work.
 
-Concurrent POUs in MVP restrict to **one active program module invoked every scan**; subroutine tables later via IR calls.
+Concurrent POUs: **one entry PROGRAM per task**. Several programs → several tasks (different periods/priorities), **or** `CALL` from the entry program. T0 compile/runtime still execute the primary cyclic task’s entry PROGRAM (plus its CALLs); T1 runs every task (§5.9, §33).
 
 ---
 
@@ -463,6 +588,8 @@ Enough for drills + golden regressions:
 |-------|---------|
 | I/O coupling (BOOL / REAL) | map to process image via **module + channel** picker (`params.moduleId`, `params.channel`, `params.symbol`) and merged `io-map` |
 | AND, OR, NOT | Boolean logic |
+| CALL | Invoke another FBD PROGRAM; ports are the callee’s IN / IN_OUT / OUT |
+| LOCAL | Read/write a program variable (IN, IN_OUT, OUT, VAR, TEMP) |
 | CONST | Typed literal (`BOOL`, `INT`, `DINT`, `UINT`, `WORD`, `REAL`) |
 | RS / SR latch (optional v0.1) | persistent state |
 | TON, TOF | timers with PT/ET/Q |
@@ -477,8 +604,9 @@ Document semantics in **`docs/BLOCK_SEMANTICS.md`**: evaluation order, PT=0 edge
 
 Surface Problems entries:
 
-- **Structural:** dangling wire, incompatible types (`NP-0305`), unresolved variable refs.
+- **Structural:** dangling wire, incompatible types (`NP-0305`), unresolved variable refs (`NP-0219`).
 - **I/O binding:** DI/DO/AI missing binding (`NP-0214`), duplicate symbol (`NP-0213`); invalid CONST (`NP-0215`). Local channel numbers may repeat across modules; uniqueness is by **symbol** (process-image row).
+- **Program interface:** invalid / duplicate variable (`NP-0216`…`NP-0218`); CALL self-call / cycle / missing target (`NP-0410`…`NP-0413`).
 - **Ordering:** combinational-feedback cycles without deliberate trigger semantics—either forbid or insert implicit delay with warning (product rule).
 - **Resource:** FB instance/IR size caps on low-end targets.
 
@@ -490,7 +618,7 @@ Stable codes (**`NP-xxxx`**) anchor docs; diagnostics link graph node IDs. **Bui
 
 | Area | Guideline |
 |------|-----------|
-| Hardware scan interval | Tunable (~10 ms) small programmes should not peg CPU at idle |
+| Fastest cyclic task interval | Tunable (~10 ms); freewheeling must still yield so idle CPU is not pegged |
 | IR + codegen on desktop | Roughly `<1 s` ~500-node graphs via background worker |
 | Live simulator UI refresh | Batch 33–50 ms; push dirty subscriptions only |
 | Debug transport | Avoid full snapshots of 10k vars every tick without subscription |
@@ -585,13 +713,43 @@ Template READMEs must state which artefacts belong in reproducible bundles.
 
 ---
 
-## 33. Post-MVP multitasking and libraries
+## 33. Task runtime, multi-program compile, and libraries
 
-1. Multiple **PROGRAM** scopes plus explicit PLC task invocation order.
-2. **FB libraries** modeled as reusable IR subgraph definitions (`fb_def` plus instances).
-3. User packages keyed to compatible **`ir_version`** branches.
+Section 5 is the **product contract**. This section is the **implementation sequence**.
 
-Single-program MVP stays valid for section 22; this section pins future roadmap.
+### 33.1. T0 — IDE Task Configuration (current)
+
+- [x] `tasks[]` on `nanoplc.project.json` (`NanoPlcTaskRef`).
+- [x] Project tree: Application → **Task configuration** → task → **one** entry PROGRAM.
+- [x] Commands: add / configure / delete task; assign / remove program (replace, not a call list).
+- [x] Default MainTask on **Add device**; legacy projects synthesize MainTask from `scan`.
+- [x] Validation `NP-0106`…`NP-0116` (including **one program per task**).
+- [x] Compile/simulate **entry PROGRAM** of the primary cyclic task (not blindly `programs[0]`).
+
+### 33.2. T1 — Multi-task runtime
+
+1. IR entity `tasks[]`: each task has `kind`, `interval_ms` / `event`, `priority`, `program`, and that program’s `schedule`.
+2. Codegen: `nanoplc_generated_task_<id>(dt_ms)` + `nanoplc_generated_tasks()` table (§16.1).
+3. `nanoplc_runtime` creates one FreeRTOS task per PLC task (§5.7); stop hard-coding `nanoplc_runtime_init(10)` in `app_main`.
+4. Simulator: one timer (or event hook) per PLC task; TON Δt is per-task.
+5. Overrun / watchdog logs include **task id**.
+
+### 33.3. T2 — Event tasks and watchdog fail-safe
+
+1. Event tasks: rising edge of a BOOL in the process image (or a dedicated event bit).
+2. Watchdog timeout → configurable fail-safe (hold last / force outputs OFF).
+
+### 33.4. T3 — PROGRAM calls PROGRAM, libraries
+
+1. **CAL / program-from-program (v0 done):** FBD palette **Programs** lists other FBD POUs. Dropping a block inserts `CALL` (`params.program`) with the callee’s IN / IN_OUT / OUT ports. PROGRAM `variables[]`: IN, IN_OUT, OUT, VAR, TEMP; canvas access is `LOCAL`. Compile emits `call` plus `call_in` / `call_out` and `pou_schedules`. The callee is a singleton (shared process image, one TON/RS instance; VAR persists; TEMP resets each call). Cycles and self-calls are errors (`NP-0410`, `NP-0411`). Missing/unknown callee: `NP-0412`, `NP-0413`. Codegen emits `npgen_pou_<id>()` with argument copies. Process-image arrays (`npgen_di` / `npgen_ai` / `npgen_do`) are omitted when unused.
+2. **FB libraries** as reusable IR subgraphs (`fb_def` plus instances) — not started.
+3. User packages keyed to compatible `ir_version` branches.
+
+Status / external tasks stay out of scope until T2 is stable.
+
+### 33.5. Out of scope (still)
+
+Siemens OB numbering, IEC 61131-3 certification, preemptive locking of the whole process image between tasks.
 
 ---
 
@@ -791,7 +949,7 @@ Expert users bypass wizards entirely by pointing NanoPLC JSON settings at vendor
 
 Rolling record of **what exists in-tree** versus this roadmap—update after meaningful merges.
 
-_Last reviewed: 2026-05-21._
+_Last reviewed: 2026-08-16._
 
 ### Repository and documentation
 
@@ -812,12 +970,12 @@ _Last reviewed: 2026-05-21._
 | Command: **Setup ESP-IDF toolchain** (bundled `bootstrap-idf.ps1` / `.sh`) | **Done** |
 | Command: **Check idf.py in PATH** | **Done** |
 | Command: **Add ESP-IDF export to PowerShell profile(s)** (Windows) | **Done** |
-| FBD graph editor / `customEditor` canvas | **Partial (v0)** — palette, pan/zoom, wiring, properties; **DI/DO/AI** **module → channel** picker (per hardware module); **CONST** typed literals; toolbar **Compile** / **Build firmware**; green trace todo |
-| Device / project tree (§3.2) | **Partial (v0)** — TIA-style hierarchy; **device catalog** + **module catalog** (StamPLC IO); Add device/module/driver/program |
+| FBD graph editor / `customEditor` canvas | **Partial (v0)** — palette, pan/zoom, wiring, properties; **Variables** (IN / IN_OUT / OUT / VAR / TEMP) + **Programs** CALL; **DI/DO/AI** **module → channel** picker (per hardware module); **CONST** typed literals; toolbar **Compile** / **Build firmware**; green trace todo |
+| Device / project tree (§3.2) | **Partial (v0)** — CODESYS-style hierarchy; **Task configuration** (one entry PROGRAM per task); **device catalog** + **module catalog** (StamPLC IO); Add device/module/driver/program/task |
 | `packages/ir-schema` + `docs/IR_SCHEMA.md` | **Done** |
 | Example `examples/and_gate` | **Done** |
 | TS **Virtual PLC** simulator (`PlcSimulator`, Run/Stop + I/O panel) | **Done** (v0 — DI/DO/AI panel; no green-trace yet) |
-| **C codegen** → `nanoplc_generated/plc_program.c` | **Done** (v0 schedule ops; auto on compile via `nanoplc.codegenOnCompile`) |
+| **C codegen** → `nanoplc_generated/plc_program.c` | **Done** (v0 schedule ops including `call` / `call_in` / `call_out`; omit unused DI/AI/DO arrays; auto on compile via `nanoplc.codegenOnCompile`) |
 | **`nanoplc_hal`** GPIO + registered I2C readers/writers from codegen | **Done** (v0 digital I/O; AW9523 DI/DO, StamPLC IO DO/AI) |
 | **Device catalog** + scaffold on **Add device** | **Done** (v0 — StamPLC K141, generic ESP32-S3 GPIO) |
 | **Per-project `firmware/` scaffold** + template in VSIX | **Done** (`firmware-template/`, `scripts/sync-firmware-template.js`) |
@@ -832,7 +990,7 @@ _Last reviewed: 2026-05-21._
 | ESP-IDF app + `main` + `nanoplc_runtime` + `nanoplc_generated` (§7.2, §14) | **Done** |
 | `sdkconfig.defaults` for ESP32-S3 (`CONFIG_IDF_TARGET="esp32s3"`) | **Done** |
 | `nanoplc_runtime` CMake: `esp_system` (IDF 5.3; replaces removed `esp_task_wdt` component) | **Done** |
-| PLC scan FreeRTOS task, WDT, overrun logging, stub `nanoplc_generated_program_scan` | **Done** |
+| PLC scan FreeRTOS task, WDT, overrun logging, stub `nanoplc_generated_program_scan` | **Done** (single cyclic task; T1 = one FreeRTOS task per PLC task, §33) |
 | Maintainer workflow `idf.py set-target esp32s3` + `idf.py build` | **Done** (see `firmware/README.md`) |
 | **StamPLC AW9523 driver** (`m5_aw9523` — onboard 8 DI / 4 relay DO @ I2C 0x59) | **Done** |
 | **StamPLC IO I2C driver** (`m5_stamplc_io` — expansion DO + analog voltage read) | **Done** |
@@ -862,7 +1020,11 @@ Unchanged: IR format lock, ordered graph compile, TS simulator, C codegen, onlin
 - **Phase 1 (partial):** `PlcSimulator` scan runtime + **Run simulation** webview for virtual DI/DO/AI (§6).
 - **FBD editor v0:** `customEditor` for `*.fbd.json` — Node-RED–style canvas (palette, wires, layout); opens from Device tree program nodes.
 - **FBD wiring UX pass:** drag-to-connect (mousedown port → drag → release on compatible port) alongside click output→input; inputs accept a single wire (new connection replaces old), outputs fan out freely; wire selection/deletion fixed (click + Delete/Backspace, double-click, or **Delete connection** in properties).
-- **Project tree v0 (TIA/CODESYS-style):** device → configuration → modules → drivers → communication → application/programs; `modules[]` / `drivers[]` in `nanoplc.project.json`.
+- **Project tree v0 (CODESYS-style):** device → configuration → modules → drivers → communication → application → **Task configuration** + programs; `modules[]` / `drivers[]` / `tasks[]` in `nanoplc.project.json`.
+- **Task Configuration (T0, 2026-08-16):** CODESYS-like tasks (`cyclic` / `freewheeling` / `event`); **one entry PROGRAM per task**; extra programs → extra tasks or FBD `CALL` (§33 T3); compile/simulate the primary cyclic task’s program (plus CALLs); runtime multi-task is §33 T1.
+- **FBD CALL (2026-08-16):** Programs palette lists other FBD POUs; compile `call` + `pou_schedules`; simulator and C codegen invoke the callee (`NP-0410`…`NP-0413`).
+- **PROGRAM variables (2026-08-16):** FBD `variables[]` — IN, IN_OUT, OUT, VAR, TEMP; editor Variables list + `LOCAL` blocks; CALL boxes show IN / IN_OUT / OUT; `call_in` / `call_out` in IR, simulator, and codegen (§5.10, §33 T3).
+- **Codegen unused I/O arrays (2026-08-16):** emit `npgen_di` / `npgen_ai` / `npgen_do` only when the IR process image has that kind (fixes `-Wunused-variable` on empty AI).
 - **Device catalog (v0):** QuickPick on **Add device**; StamPLC K141 (8 DI / 4 DO) + generic ESP32-S3; `deviceCatalog.ts`, auto `io-map.json`.
 - **Firmware per project (v0):** `firmware-template/` packaged in VSIX; scaffold on **Add device** / **Compile** / **Init firmware tree**; auto-patch legacy trees for IDF 5.3.
 - **Compile pipeline (v0):** `build/ir.json` + expanded `generated.manifest.json` (`device`, `codegen`, `firmware`); optional `idf.py build` for `device.idf_target`.

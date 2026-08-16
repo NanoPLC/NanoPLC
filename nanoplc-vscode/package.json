@@ -45,6 +45,11 @@
     "onCommand:nanoplc.addModule",
     "onCommand:nanoplc.addDriver",
     "onCommand:nanoplc.addProgram",
+    "onCommand:nanoplc.addTask",
+    "onCommand:nanoplc.configureTask",
+    "onCommand:nanoplc.deleteTask",
+    "onCommand:nanoplc.addProgramToTask",
+    "onCommand:nanoplc.removeProgramFromTask",
     "onCommand:nanoplc.compileProgram",
     "onCommand:nanoplc.refreshProjectTree",
     "onCommand:nanoplc.startSimulation",
@@ -194,6 +199,28 @@
         "icon": "$(add)"
       },
       {
+        "command": "nanoplc.addTask",
+        "title": "NanoPLC: Add task",
+        "icon": "$(add)"
+      },
+      {
+        "command": "nanoplc.configureTask",
+        "title": "NanoPLC: Configure task"
+      },
+      {
+        "command": "nanoplc.deleteTask",
+        "title": "NanoPLC: Delete task"
+      },
+      {
+        "command": "nanoplc.addProgramToTask",
+        "title": "NanoPLC: Assign program to task",
+        "icon": "$(add)"
+      },
+      {
+        "command": "nanoplc.removeProgramFromTask",
+        "title": "NanoPLC: Remove program from task"
+      },
+      {
         "command": "nanoplc.compileProgram",
         "title": "NanoPLC: Compile PLC program",
         "icon": "$(play)"
@@ -295,6 +322,31 @@
           "command": "nanoplc.addProgram",
           "when": "view == nanoplcProject && viewItem == programs_group",
           "group": "inline@1"
+        },
+        {
+          "command": "nanoplc.addTask",
+          "when": "view == nanoplcProject && viewItem == tasks_group",
+          "group": "inline@1"
+        },
+        {
+          "command": "nanoplc.addProgramToTask",
+          "when": "view == nanoplcProject && viewItem == task",
+          "group": "inline@1"
+        },
+        {
+          "command": "nanoplc.configureTask",
+          "when": "view == nanoplcProject && viewItem == task",
+          "group": "1_modification@1"
+        },
+        {
+          "command": "nanoplc.deleteTask",
+          "when": "view == nanoplcProject && viewItem == task",
+          "group": "1_modification@2"
+        },
+        {
+          "command": "nanoplc.removeProgramFromTask",
+          "when": "view == nanoplcProject && viewItem == task_pou",
+          "group": "1_modification@1"
         }
       ]
     },

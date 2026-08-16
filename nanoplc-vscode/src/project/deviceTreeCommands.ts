@@ -7,6 +7,7 @@ import {
   buildModuleConfig,
   defaultProjectDrivers,
   defaultProjectModules,
+  ensureProjectTasks,
   FBD_SOURCE_SCHEMA_VERSION,
   ioMapIndexOffsets,
   IO_MAP_SCHEMA_VERSION,
@@ -18,6 +19,9 @@ import {
   nextStamPlcAcModuleId,
   parseModuleConfig,
   resolveDeviceTree,
+  setTaskProgram,
+  syncScanFromTasks,
+  taskEntryProgramId,
   type ModuleCatalogEntry,
   type NanoPlcDriverRef,
   type NanoPlcModuleRef,
@@ -54,6 +58,9 @@ function loadProject(location: ProjectLocation): NanoPlcProject {
 }
 
 function saveProject(location: ProjectLocation, project: NanoPlcProject): void {
+  if (project.tasks && project.tasks.length > 0) {
+    syncScanFromTasks(project);
+  }
   writeJsonFile(findProjectFileAtRoot(location.rootPath), project);
 }
 
@@ -394,6 +401,47 @@ export function registerDeviceTreeCommands(context: vscode.ExtensionContext): vs
       }
 
       project.programs.push(program);
+
+      const tasks = ensureProjectTasks(project);
+      if (item?.kind === "task" && item.refId) {
+        const task = tasks.find((t) => t.id === item.refId);
+        if (task) {
+          setTaskProgram(task, program.id);
+        }
+      } else if (tasks.length === 1 && !taskEntryProgramId(tasks[0])) {
+        setTaskProgram(tasks[0], program.id);
+      } else if (tasks.length >= 1) {
+        const picked = await vscode.window.showQuickPick(
+          [
+            ...tasks.map((t) => {
+              const current = taskEntryProgramId(t);
+              return {
+                label: t.name,
+                description: current ? `currently ${current}` : t.id,
+                task: t,
+              };
+            }),
+            { label: "Do not run from a task", description: "POU only — drop it from the FBD Programs palette to CALL it", task: undefined },
+          ],
+          { placeHolder: `Run "${program.name}" from which task?` }
+        );
+        if (picked?.task) {
+          const existing = taskEntryProgramId(picked.task);
+          if (existing && existing !== program.id) {
+            const ok = await vscode.window.showWarningMessage(
+              `Task "${picked.task.name}" already runs another program. Replace it? Extra programs need their own task, or a CALL from another program.`,
+              { modal: true },
+              "Replace"
+            );
+            if (ok === "Replace") {
+              setTaskProgram(picked.task, program.id);
+            }
+          } else {
+            setTaskProgram(picked.task, program.id);
+          }
+        }
+      }
+
       saveProject(location, project);
       refreshTree?.();
 

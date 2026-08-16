@@ -2,7 +2,7 @@
 
 NanoPLC uses **JSON** as the canonical intermediate representation (IR) on disk (`build/ir.json`). Binary encodings may be added later for transport; the schema and semantics are defined here first.
 
-See also: `docs/VIRTUAL_PLC_PLAN.md` §15, §20, §29.
+See also: `docs/VIRTUAL_PLC_PLAN.md` §5 (tasks), §15, §20, §29.
 
 ## Version fields
 
@@ -37,6 +37,17 @@ Bump and migrate when semantics change (`packages/ir-schema`).
       "binds": "gpio1"
     }
   ],
+  "tasks": [
+    {
+      "id": "main_task",
+      "name": "MainTask",
+      "kind": "cyclic",
+      "priority": 1,
+      "interval_ms": 10,
+      "watchdog": { "enabled": true, "time_ms": 50 },
+      "program": "main"
+    }
+  ],
   "programs": [
     { "id": "main", "name": "Main", "source": "src/main.fbd.json", "language": "fbd" }
   ],
@@ -44,7 +55,11 @@ Bump and migrate when semantics change (`packages/ir-schema`).
 }
 ```
 
-Optional **`modules[]`** and **`drivers[]`** drive the TIA-style Project tree (§3.2). When omitted, the IDE assumes one onboard GPIO module and `nanoplc_hal`.
+Optional **`modules[]`** and **`drivers[]`** drive the Project tree (§3.2). When omitted, the IDE assumes one onboard GPIO module and `nanoplc_hal`.
+
+**`tasks[]`** is the CODESYS-style **Task Configuration** (`docs/VIRTUAL_PLC_PLAN.md` §5). Each task has `kind` (`cyclic` | `freewheeling` | `event`), `priority` (0 = highest … 31 = lowest), optional `interval_ms` / `event` / `watchdog`, and **`program`** — the single entry PROGRAM. Extra programs belong on other tasks, or are invoked with an FBD **`CALL`** block (`params.program`).
+
+When `tasks[]` is omitted, the IDE synthesizes **MainTask** from `scan.period_ms` and the first program. `scan.period_ms` remains a cache of the **primary cyclic** interval for IR `scan_period_ms` (compile T0). Compile currently runs the entry PROGRAM of that primary task. Legacy `pous[]` with one entry is still accepted.
 
 **Device catalog fields** on `device`:
 
@@ -64,7 +79,11 @@ Optional **`layout`** map (`block id → { x, y }`) stores canvas positions for 
 
 Open `*.fbd.json` in VS Code with the **FBD Diagram** custom editor (palette, pan/zoom, wiring, properties).
 
-Supported block types (v0): `DI`, `DO`, `AI`, `AND`, `OR`, `NOT`, `RS`, `TON`, `CONST`, `ADD`, `SUB`, `MUL`, `DIV`, `POW`, `SQRT`, `SETBIT`, `RESETBIT`, `SHL`, `SHR`, `ROL`, `ROR`.
+Supported block types (v0): `DI`, `DO`, `AI`, `AND`, `OR`, `NOT`, `RS`, `TON`, `CONST`, `ADD`, `SUB`, `MUL`, `DIV`, `POW`, `SQRT`, `SETBIT`, `RESETBIT`, `SHL`, `SHR`, `ROL`, `ROR`, `CALL`, `LOCAL`.
+
+**`CALL`** invokes another FBD PROGRAM (`params.program` = callee id). The box shows the callee’s **IN**, **IN_OUT**, and **OUT** variables as ports. VAR and TEMP stay internal. The callee is a singleton that shares the process image (DI/DO/AI symbols) and keeps VAR state between calls. TEMP is reset at the start of every call. The current program is omitted from the FBD **Programs** palette. Self-call is `NP-0410`; a call cycle is `NP-0411`; empty `params.program` is `NP-0412`; unknown id is `NP-0413`. ST programs cannot be called (`NP-0205`).
+
+Each FBD program may declare **`variables[]`**: `{ name, class, type, initial? }` with `class` one of `IN`, `IN_OUT`, `OUT`, `VAR`, `TEMP`. Use them on the canvas with **`LOCAL`** blocks (`params.name`). Invalid names are `NP-0216`; duplicates `NP-0217`; unknown LOCAL target `NP-0219`.
 
 For `DI`, `DO`, and `AI`, bind the block to a process-image row via the FBD editor **module → channel** picker. Persisted params:
 
@@ -94,34 +113,42 @@ Top-level entities:
 
 | Entity | Role |
 |--------|------|
-| `project` | Name, board, scan period, active program |
+| `project` | Name, board, scan period (primary cyclic task), active program |
 | `variables` | Symbols with PLC types and roles (`di`, `do`, `ai`, `internal`, …) |
 | `io_image` | Ordered DI / DO / AI index map for simulator and HAL |
 | `network` | Original FBD blocks and wires |
 | `instances` | FB instances (e.g. `TON`, `RS`) |
-| `schedule` | **Ordered** execution steps (topological compile output) |
+| `schedule` | **Ordered** execution steps of the entry PROGRAM (topological compile output) |
+| `pou_schedules` | Callee PROGRAM schedules invoked by `call` ops (omitted when there are no CALLs) |
 
-Example schedule fragment:
+Example schedule fragments:
 
 ```json
 { "step": 2, "op": "and", "in1": "DI_Start", "in2": "DI_Enable", "out": "__and1_Q" }
+{ "step": 3, "op": "call", "program": "aux", "block_id": "call1" }
 ```
 
 ## Compile diagnostics
 
 Stable codes live in `packages/ir-schema` (e.g. `NP-0400` combinational cycle). The VS Code extension surfaces them in **Problems** when you run **NanoPLC: Compile PLC program**.
 
+Task configuration: `NP-0106` invalid task, `NP-0107` duplicate task id, `NP-0108` unknown program in a task, `NP-0109` cyclic task missing `interval_ms`, `NP-0110` priority out of 0..31, `NP-0112` event task without variable (warning), `NP-0113` no entry program (warning), `NP-0115` same PROGRAM bound to multiple tasks (warning), `NP-0116` more than one program on a task.
+
+Program `CALL`: `NP-0410` self-call, `NP-0411` call cycle, `NP-0412` CALL with no program, `NP-0413` unknown program.
+
+Program variables: `NP-0216` invalid name, `NP-0217` duplicate name, `NP-0218` invalid class/type, `NP-0219` LOCAL block with unknown variable.
+
 ## Implementation
 
-Types, validation, and `compileFbdToIr()` live in **`packages/ir-schema/`**. The VS Code extension depends on this package via `file:../packages/ir-schema`.
+Types, validation, `compileFbdToIr()`, and `compileProjectToIr()` (entry PROGRAM plus transitive `CALL`s) live in **`packages/ir-schema/`**. The VS Code extension depends on this package via `file:../packages/ir-schema`.
 
 ### Simulator
 
-`PlcSimulator` loads compiled `PlcIr` and runs the ordered `schedule` each scan. Supported ops: `read_di`, `read_ai`, `write_do`, `and`, `or`, `not`, `ton`, `move`, `const`. The simulation webview exposes manual **DI**, **DO**, and **AI** (REAL) values for bound channels.
+`PlcSimulator` loads compiled `PlcIr` and runs the ordered `schedule` each scan. A `call` step runs the matching `pou_schedules` entry (shared vars / process image; recursion is skipped at runtime and rejected at compile). Supported ops include `read_di`, `read_ai`, `write_do`, `and`, `or`, `not`, `ton`, `move`, `const`, `call`, math, and bit ops. The simulation webview exposes manual **DI**, **DO**, and **AI** (REAL) values for bound channels.
 
 ### C codegen
 
-`codegenC(ir, irSha256)` emits `plc_program.c` for `nanoplc_generated`. CLI: `tools/codegen/` (`nanoplc-codegen`).
+`codegenC(ir, irSha256)` emits `plc_program.c` for `nanoplc_generated`. Each callee becomes `static void npgen_pou_<id>(void);` invoked from the scan (or from another pou). CLI: `tools/codegen/` (`nanoplc-codegen`).
 
 With project I/O metadata (`src/io-map.json`, `src/modules/*.json`), codegen emits **`io_hal_config.c`**: GPIO tables plus registered DI/DO/AI hooks (`nanoplc_hal_read_di`, `nanoplc_hal_write_do`, `nanoplc_hal_read_ai`) for onboard AW9523 and StamPLC IO I2C drivers when present in the device tree.
 

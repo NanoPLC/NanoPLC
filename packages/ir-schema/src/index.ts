@@ -4,9 +4,18 @@ export {
   IR_VERSION,
   PROJECT_SCHEMA_VERSION,
 } from "./constants";
-export { compileFbdToIr } from "./compileFbd";
+export { compileFbdToIr, compileProjectToIr } from "./compileFbd";
 export { inferFbdPortTypes } from "./fbdPortTypes";
-export type { FbdPortTypes } from "./fbdPortTypes";
+export type { FbdPortTypes, FbdPortContext } from "./fbdPortTypes";
+export {
+  callBlockPorts,
+  defaultPouInitial,
+  findPouVariable,
+  localBlockPorts,
+  nextPouVarName,
+  parsePouVariables,
+  pouIrName,
+} from "./pouVars";
 export { codegenC, computeIrMagic, codegenFirmware } from "./codegen/cGenerator";
 export type { CodegenCResult } from "./codegen/cGenerator";
 export type { CodegenFirmwareOutput, CodegenIoContext } from "./codegen/codegenFirmware";
@@ -19,6 +28,7 @@ export type {
   FbdBlock,
   FbdPortRef,
   FbdSource,
+  FbdVariable,
   FbdWire,
   IoMap,
   IoMapEntry,
@@ -28,12 +38,41 @@ export type {
   NanoPlcModuleRef,
   NanoPlcDriverRef,
   NanoPlcProject,
+  NanoPlcTaskPouCall,
+  NanoPlcTaskRef,
+  NanoPlcTaskWatchdog,
   PlcIr,
   PlcPrimitiveType,
+  PlcTaskKind,
+  PlcVarClass,
   ScheduleOp,
   ScheduleStep,
 } from "./types";
-export { PLC_PRIMITIVE_TYPES } from "./types";
+export { PLC_PRIMITIVE_TYPES, PLC_TASK_KINDS, PLC_VAR_CLASSES } from "./types";
+export {
+  DEFAULT_CYCLIC_INTERVAL_MS,
+  DEFAULT_EXTRA_TASK_PRIORITY,
+  DEFAULT_MAIN_TASK_ID,
+  DEFAULT_MAIN_TASK_NAME,
+  DEFAULT_TASK_PRIORITY,
+  DEFAULT_WATCHDOG_TIME_MS,
+  MAX_TASK_PRIORITY,
+  MIN_TASK_PRIORITY,
+  defaultMainTask,
+  ensureProjectTasks,
+  entryProgram,
+  findTask,
+  isPlcTaskKind,
+  normalizeTask,
+  primaryCyclicTask,
+  projectScanPeriodMs,
+  resolveTaskConfiguration,
+  setTaskProgram,
+  syncScanFromTasks,
+  taskDescription,
+  taskEntryProgramId,
+  taskKindLabel,
+} from "./tasks";
 export {
   DEVICE_CATALOG,
   GENERIC_ESP32_S3_GPIO,

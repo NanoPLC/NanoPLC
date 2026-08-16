@@ -15,7 +15,7 @@ export interface FbdBlockDef {
   type: string;
   label: string;
   description: string;
-  category: "io" | "logic" | "timer" | "math" | "bit";
+  category: "io" | "logic" | "timer" | "math" | "bit" | "program" | "variable";
   inputs: string[];
   outputs: string[];
   params?: FbdBlockParamDef[];

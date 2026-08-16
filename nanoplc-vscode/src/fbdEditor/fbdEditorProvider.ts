@@ -26,6 +26,7 @@ interface WebviewDocumentPayload {
   name: string;
   blocks: FbdSource["blocks"];
   wires: FbdSource["wires"];
+  variables?: FbdSource["variables"];
   layout: Record<string, { x: number; y: number }>;
 }
 
@@ -87,6 +88,9 @@ function serializeDocument(fbd: FbdSource): string {
     blocks: fbd.blocks,
     wires: fbd.wires,
   };
+  if (fbd.variables && fbd.variables.length > 0) {
+    out.variables = fbd.variables;
+  }
   if (fbd.layout && Object.keys(fbd.layout).length > 0) {
     out.layout = fbd.layout;
   }
@@ -99,6 +103,7 @@ function toPayload(fbd: FbdSource): WebviewDocumentPayload {
     name: fbd.name,
     blocks: fbd.blocks,
     wires: fbd.wires,
+    variables: fbd.variables ?? [],
     layout: ensureLayout(fbd),
   };
 }
@@ -218,11 +223,63 @@ export class FbdEditorProvider implements vscode.CustomTextEditorProvider {
       webviewPanel.webview.postMessage({ type: "ioProfile", payload: profile });
     };
 
+    const postPrograms = (): void => {
+      const root = findProjectRootForDocument(document.uri);
+      if (!root) {
+        webviewPanel.webview.postMessage({
+          type: "programs",
+          payload: { currentProgramId: undefined, programs: [] },
+        });
+        return;
+      }
+      try {
+        const project = readJsonFile<NanoPlcProject>(path.join(root, PROJECT_FILENAME));
+        const rel = path.relative(root, document.uri.fsPath).replace(/\\/g, "/");
+        const current = project.programs.find((p) => p.source.replace(/\\/g, "/") === rel);
+        webviewPanel.webview.postMessage({
+          type: "programs",
+          payload: {
+            currentProgramId: current?.id,
+            programs: project.programs.map((p) => {
+              let variables: { name: string; class: string; type: string }[] = [];
+              try {
+                const abs = path.normalize(path.join(root, p.source));
+                const open = vscode.workspace.textDocuments.find(
+                  (d) => path.normalize(d.uri.fsPath) === abs
+                );
+                const text = open ? open.getText() : fs.readFileSync(abs, "utf8");
+                const raw = JSON.parse(text) as {
+                  variables?: { name: string; class: string; type: string }[];
+                };
+                if (Array.isArray(raw.variables)) {
+                  variables = raw.variables;
+                }
+              } catch {
+                variables = [];
+              }
+              return {
+                id: p.id,
+                name: p.name,
+                language: p.language,
+                variables,
+              };
+            }),
+          },
+        });
+      } catch {
+        webviewPanel.webview.postMessage({
+          type: "programs",
+          payload: { currentProgramId: undefined, programs: [] },
+        });
+      }
+    };
+
     const postDocument = (): void => {
       try {
         const fbd = parseDocument(document.getText());
         webviewPanel.webview.postMessage({ type: "document", payload: toPayload(fbd) });
         postIoProfile();
+        postPrograms();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         webviewPanel.webview.postMessage({ type: "parseError", message });
@@ -230,22 +287,31 @@ export class FbdEditorProvider implements vscode.CustomTextEditorProvider {
     };
 
     const changeDocumentSubscription = vscode.workspace.onDidChangeTextDocument((e) => {
-      if (e.document.uri.toString() !== document.uri.toString()) {
+      if (e.document.uri.toString() === document.uri.toString()) {
+        if (applyingExternalEdit) {
+          return;
+        }
+        postDocument();
         return;
       }
-      if (applyingExternalEdit) {
-        return;
+      if (e.document.uri.fsPath.replace(/\\/g, "/").endsWith(".fbd.json")) {
+        postPrograms();
       }
-      postDocument();
     });
 
     const projectRoot = findProjectRootForDocument(document.uri);
     const watchers: vscode.Disposable[] = [];
     if (projectRoot) {
       const projectWatcher = vscode.workspace.createFileSystemWatcher(
-        new vscode.RelativePattern(projectRoot, `{${PROJECT_FILENAME},src/io-map.json,src/modules/*.json}`)
+        new vscode.RelativePattern(
+          projectRoot,
+          `{${PROJECT_FILENAME},src/io-map.json,src/modules/*.json,src/*.fbd.json}`
+        )
       );
-      const refreshProfile = (): void => postIoProfile();
+      const refreshProfile = (): void => {
+        postIoProfile();
+        postPrograms();
+      };
       projectWatcher.onDidChange(refreshProfile);
       projectWatcher.onDidCreate(refreshProfile);
       projectWatcher.onDidDelete(refreshProfile);
@@ -262,6 +328,7 @@ export class FbdEditorProvider implements vscode.CustomTextEditorProvider {
               name: message.payload.name,
               blocks: message.payload.blocks,
               wires: message.payload.wires,
+              variables: message.payload.variables,
               layout: message.payload.layout,
             };
             await this.queueTextDocumentUpdate(document, serializeDocument(fbd));

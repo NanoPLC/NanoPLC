@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { compileFbdToIr } from "../compileFbd";
+import { compileFbdToIr, compileProjectToIr } from "../compileFbd";
 import { FBD_SOURCE_SCHEMA_VERSION, PROJECT_SCHEMA_VERSION } from "../constants";
 import { PlcSimulator } from "./PlcSimulator";
 import type { FbdSource, NanoPlcProject } from "../types";
@@ -53,6 +53,44 @@ test("simulator and_gate: one input false → DO off", () => {
   assert.equal(snap.do[0], false);
 });
 
+test("simulator executes a CALL into another program", () => {
+  const project: NanoPlcProject = {
+    ...baseProject,
+    programs: [
+      { id: "main", name: "Main", source: "src/main.fbd.json", language: "fbd" },
+      { id: "aux", name: "Aux", source: "src/aux.fbd.json", language: "fbd" },
+    ],
+  };
+  const main: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [{ id: "call1", type: "CALL", params: { program: "aux" } }],
+    wires: [],
+  };
+  const aux: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Aux",
+    blocks: [
+      { id: "di1", type: "DI", params: { channel: 1, symbol: "DI_Start" } },
+      { id: "do1", type: "DO", params: { channel: 1, symbol: "DO_Lamp" } },
+    ],
+    wires: [{ from: { block: "di1", port: "Q" }, to: { block: "do1", port: "IN" } }],
+  };
+  const compiled = compileProjectToIr(
+    project,
+    new Map<string, unknown>([
+      ["main", main],
+      ["aux", aux],
+    ]),
+    "main"
+  );
+  assert.ok(compiled.ok && compiled.ir);
+  const sim = new PlcSimulator(compiled.ir);
+  sim.setDiBySymbol("DI_Start", true);
+  const snap = sim.stepOnce();
+  assert.equal(snap.vars["DO_Lamp"], true);
+});
+
 test("examples/and_gate IR file compiles and simulates", () => {
   const root = join(__dirname, "..", "..", "..", "..", "examples", "and_gate");
   const project = JSON.parse(readFileSync(join(root, "nanoplc.project.json"), "utf8"));
@@ -62,5 +100,52 @@ test("examples/and_gate IR file compiles and simulates", () => {
   const sim = new PlcSimulator(compiled.ir);
   sim.setDiBySymbol("DI_Start", true);
   sim.setDiBySymbol("DI_Enable", true);
+  assert.equal(sim.stepOnce().vars["DO_Lamp"], true);
+});
+
+test("simulator CALL copies IN to callee and OUT back to caller", () => {
+  const project: NanoPlcProject = {
+    ...baseProject,
+    programs: [
+      { id: "main", name: "Main", source: "src/main.fbd.json", language: "fbd" },
+      { id: "aux", name: "Aux", source: "src/aux.fbd.json", language: "fbd" },
+    ],
+  };
+  const main: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [
+      { id: "c1", type: "CONST", params: { data_type: "BOOL", value: true } },
+      { id: "call1", type: "CALL", params: { program: "aux" } },
+      { id: "do1", type: "DO", params: { channel: 1, symbol: "DO_Lamp" } },
+    ],
+    wires: [
+      { from: { block: "c1", port: "Q" }, to: { block: "call1", port: "Enable" } },
+      { from: { block: "call1", port: "Result" }, to: { block: "do1", port: "IN" } },
+    ],
+  };
+  const aux: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Aux",
+    variables: [
+      { name: "Enable", class: "IN", type: "BOOL" },
+      { name: "Result", class: "OUT", type: "BOOL" },
+    ],
+    blocks: [
+      { id: "in1", type: "LOCAL", params: { name: "Enable" } },
+      { id: "out1", type: "LOCAL", params: { name: "Result" } },
+    ],
+    wires: [{ from: { block: "in1", port: "Q" }, to: { block: "out1", port: "IN" } }],
+  };
+  const compiled = compileProjectToIr(
+    project,
+    new Map<string, unknown>([
+      ["main", main],
+      ["aux", aux],
+    ]),
+    "main"
+  );
+  assert.ok(compiled.ok && compiled.ir, compiled.diagnostics.map((d) => d.message).join("; "));
+  const sim = new PlcSimulator(compiled.ir);
   assert.equal(sim.stepOnce().vars["DO_Lamp"], true);
 });

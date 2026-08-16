@@ -44,5 +44,19 @@
       "language": "st"
     }
   ],
+  "tasks": [
+    {
+      "id": "main_task",
+      "name": "MainTask",
+      "kind": "cyclic",
+      "priority": 1,
+      "interval_ms": 10,
+      "watchdog": {
+        "enabled": true,
+        "time_ms": 50
+      },
+      "program": "main"
+    }
+  ],
   "firmware_root": "../../firmware"
 }

@@ -1,5 +1,6 @@
 import type { PlcIr, PlcPrimitiveType, ScheduleStep } from "../types";
 import type { RsInstanceState, SimState, SimulatorSnapshot, TonInstanceState } from "./types";
+import { pouIrName } from "../pouVars";
 
 function readBool(state: SimState, name: string | undefined): boolean {
   if (!name) {
@@ -261,6 +262,8 @@ export function executeScheduleStep(state: SimState, step: ScheduleStep, dt_ms: 
     case "ror":
       executeRotate(state, step, "ror");
       break;
+    case "call":
+      break;
     default:
       break;
   }
@@ -273,7 +276,9 @@ export function createSimState(ir: PlcIr): SimState {
 
   const vars: Record<string, boolean | number> = {};
   for (const v of ir.variables) {
-    if (v.type === "BOOL") {
+    if (v.initial !== undefined) {
+      vars[v.name] = v.initial;
+    } else if (v.type === "BOOL") {
       vars[v.name] = false;
     } else {
       vars[v.name] = 0;
@@ -293,12 +298,42 @@ export function createSimState(ir: PlcIr): SimState {
 }
 
 export function runScan(state: SimState, ir: PlcIr, dt_ms: number): SimulatorSnapshot {
-  for (const step of ir.schedule) {
-    executeScheduleStep(state, step, dt_ms);
-  }
+  executeSteps(state, ir.schedule, ir, dt_ms, []);
   state.scan_index += 1;
   state.elapsed_ms += dt_ms;
   return snapshot(state);
+}
+
+function executeSteps(
+  state: SimState,
+  steps: ScheduleStep[],
+  ir: PlcIr,
+  dt_ms: number,
+  callStack: string[]
+): void {
+  for (const step of steps) {
+    if (step.op === "call") {
+      const target = step.program;
+      if (!target || callStack.includes(target)) {
+        continue;
+      }
+      const pou = ir.pou_schedules?.find((p) => p.id === target);
+      if (!pou) {
+        continue;
+      }
+      for (const [port, src] of Object.entries(step.call_in ?? {})) {
+        const dest = pouIrName(target, port);
+        state.vars[dest] = state.vars[src] ?? false;
+      }
+      executeSteps(state, pou.schedule, ir, dt_ms, [...callStack, target]);
+      for (const [port, dest] of Object.entries(step.call_out ?? {})) {
+        const src = pouIrName(target, port);
+        state.vars[dest] = state.vars[src] ?? false;
+      }
+      continue;
+    }
+    executeScheduleStep(state, step, dt_ms);
+  }
 }
 
 export function snapshot(state: SimState): SimulatorSnapshot {
