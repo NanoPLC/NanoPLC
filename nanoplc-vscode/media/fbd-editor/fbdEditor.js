@@ -23,6 +23,8 @@
   let panY = 0;
   let zoom = 1;
   let dirtyFromUser = false;
+  /** @type {{ running: boolean, vars: Record<string, boolean|number> }} */
+  let simLive = { running: false, vars: {} };
 
   const el = {
     title: document.getElementById("doc-title"),
@@ -36,6 +38,7 @@
     properties: document.getElementById("properties-body"),
     btnCompile: document.getElementById("btn-compile"),
     btnBuild: document.getElementById("btn-build"),
+    simLiveBadge: document.getElementById("sim-live-badge"),
   };
 
   /** @type {{ currentProgramId?: string, programs: Array<{id:string,name:string,language:string,variables?:Array<{name:string,class:string,type:string}>}> }} */
@@ -554,6 +557,130 @@
     return `M ${from.x} ${from.y} C ${from.x + dx} ${from.y}, ${to.x - dx} ${to.y}, ${to.x} ${to.y}`;
   }
 
+  /** Keep in sync with packages/ir-schema/src/fbdIrNames.ts */
+  function sourcePortIrName(block, port) {
+    const programId = projectPrograms.currentProgramId || "main";
+    const t = String(block.type || "").toUpperCase();
+    if (t === "DI") {
+      return String(block.params?.symbol || `DI_${block.params?.channel || block.id}`);
+    }
+    if (t === "AI") {
+      return String(block.params?.symbol || `AI_${block.params?.channel || block.id}`);
+    }
+    if (t === "DO") {
+      return String(block.params?.symbol || `DO_${block.params?.channel || block.id}`);
+    }
+    if (t === "LOCAL") {
+      return `${programId}__${String(block.params?.name || "").trim()}`;
+    }
+    if (t === "CALL") {
+      return `__${block.id}_${port}`;
+    }
+    return `__${block.id}_Q`;
+  }
+
+  function liveBool(value) {
+    return value === true || value === 1;
+  }
+
+  function formatLiveValue(value, type) {
+    if (type === "BOOL" || typeof value === "boolean") {
+      return liveBool(value) ? "TRUE" : "FALSE";
+    }
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      return "";
+    }
+    if (type === "REAL") {
+      return String(Math.round(value * 1000) / 1000);
+    }
+    return String(Math.trunc(value));
+  }
+
+  function applyLiveHighlight() {
+    const running = Boolean(simLive.running);
+    document.body.classList.toggle("sim-live", running);
+    if (el.simLiveBadge) {
+      el.simLiveBadge.classList.toggle("hidden", !running);
+    }
+    if (!doc) {
+      return;
+    }
+
+    el.wires.querySelectorAll(".wire-path:not(.wire-preview)").forEach((path) => {
+      path.classList.remove("live-true", "live-false");
+      if (!running) {
+        return;
+      }
+      const wire = doc.wires[Number(path.dataset.index)];
+      if (!wire) {
+        return;
+      }
+      const from = doc.blocks.find((b) => b.id === wire.from.block);
+      if (!from) {
+        return;
+      }
+      const type = outputPortType(wire.from.block, wire.from.port);
+      if (type !== "BOOL") {
+        return;
+      }
+      const value = simLive.vars[sourcePortIrName(from, wire.from.port)];
+      path.classList.add(liveBool(value) ? "live-true" : "live-false");
+    });
+
+    el.blocks.querySelectorAll(".fbd-block").forEach((node) => {
+      node.classList.remove("live-true", "live-false");
+      const badge = node.querySelector(".live-value");
+      node.querySelectorAll(".port-out").forEach((pin) => pin.classList.remove("live-true", "live-false"));
+      const block = doc.blocks.find((b) => b.id === node.dataset.id);
+      if (!running || !block) {
+        if (badge) {
+          badge.textContent = "";
+          badge.classList.add("hidden");
+        }
+        return;
+      }
+
+      const t = String(block.type).toUpperCase();
+      if (t === "CALL") {
+        if (badge) {
+          badge.textContent = "";
+          badge.classList.add("hidden");
+        }
+        node.querySelectorAll(".port-out").forEach((pin) => {
+          const port = pin.dataset.port;
+          const type = outputPortType(block.id, port);
+          if (type !== "BOOL") {
+            return;
+          }
+          const value = simLive.vars[sourcePortIrName(block, port)];
+          pin.classList.add(liveBool(value) ? "live-true" : "live-false");
+        });
+        return;
+      }
+
+      const irName = sourcePortIrName(block, "Q");
+      const value = simLive.vars[irName];
+      let valueType = outputPortType(block.id, "Q");
+      if (t === "DI" || t === "DO") {
+        valueType = "BOOL";
+      } else if (t === "AI") {
+        valueType = "REAL";
+      } else if (t === "LOCAL") {
+        valueType = findPouVariable(docVariables(), block.params?.name)?.type || valueType;
+      }
+      if (valueType === "BOOL" && value !== undefined) {
+        if (liveBool(value)) {
+          node.classList.add("live-true");
+        }
+      }
+      if (badge) {
+        const text = value === undefined ? "" : formatLiveValue(value, valueType || "BOOL");
+        badge.textContent = text;
+        badge.classList.toggle("hidden", !text);
+      }
+    });
+  }
+
   function renderWires() {
     el.wires.innerHTML = "";
     if (!doc) {
@@ -601,6 +728,7 @@
       preview.style.pointerEvents = "none";
       el.wires.appendChild(preview);
     }
+    applyLiveHighlight();
   }
 
   function blockSubtitle(block) {
@@ -773,6 +901,10 @@
         div.appendChild(sub);
       }
 
+      const live = document.createElement("div");
+      live.className = "live-value hidden";
+      div.appendChild(live);
+
       div.addEventListener("mousedown", (ev) => {
         if (ev.button !== 0 || ev.target.classList.contains("port")) {
           return;
@@ -790,6 +922,7 @@
       el.blocks.appendChild(div);
     }
     highlightWirePorts();
+    applyLiveHighlight();
   }
 
   function highlightWirePorts() {
@@ -1928,6 +2061,9 @@
         renderProperties();
         renderBlocks();
       }
+    } else if (msg.type === "simLive") {
+      simLive = msg.payload || { running: false, vars: {} };
+      applyLiveHighlight();
     } else if (msg.type === "parseError") {
       el.parseError.textContent = msg.message;
       el.parseError.classList.remove("hidden");

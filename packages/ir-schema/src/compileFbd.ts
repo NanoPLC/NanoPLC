@@ -4,6 +4,7 @@ import type {
   CompileResult,
   FbdBlock,
   FbdSource,
+  FbdVariable,
   FbdWire,
   IoMap,
   IoMapEntry,
@@ -35,9 +36,8 @@ import {
   pouInterfaceInputs,
   pouInterfaceOutputs,
 } from "./pouVars";
-import type { FbdVariable } from "./types";
+import { fbdOutputVar, fbdSourcePortIrName, resolveIoSymbol } from "./fbdIrNames";
 
-const BLOCK_OUTPUT_PORT = "Q";
 const SUPPORTED_BLOCKS = new Set([
   "DI",
   "AI",
@@ -74,10 +74,6 @@ function diag(
 
 function blockById(blocks: FbdBlock[]): Map<string, FbdBlock> {
   return new Map(blocks.map((b) => [b.id, b]));
-}
-
-function outputVar(blockId: string): string {
-  return `__${blockId}_Q`;
 }
 
 function defaultConstValue(dataType: PlcPrimitiveType): boolean | number {
@@ -279,17 +275,6 @@ function parseChannel(params: FbdBlock["params"]): number | undefined {
   return Number.isFinite(n) && n >= 1 ? Math.trunc(n) : undefined;
 }
 
-function resolveIoSymbol(block: FbdBlock, kind: "DI" | "DO" | "AI"): string {
-  if (block.params?.symbol !== undefined && String(block.params.symbol).trim() !== "") {
-    return String(block.params.symbol);
-  }
-  const channel = parseChannel(block.params);
-  if (channel !== undefined) {
-    return `${kind}_${channel}`;
-  }
-  return block.id;
-}
-
 function resolveIoIndex(
   block: FbdBlock,
   kind: "DI" | "DO" | "AI",
@@ -414,13 +399,13 @@ function collectVariables(
       continue;
     } else if (t === "CONST") {
       variables.push({
-        name: outputVar(block.id),
+        name: fbdOutputVar(block.id),
         type: parseConstDataType(block.params),
         role: "internal",
       });
     } else {
       variables.push({
-        name: outputVar(block.id),
+        name: fbdOutputVar(block.id),
         type: outputTypes.get(block.id) ?? "BOOL",
         role: "internal",
       });
@@ -440,7 +425,7 @@ function emitScheduleStep(
   calleeVars?: Map<string, FbdVariable[]>
 ): ScheduleStep[] {
   const t = block.type.toUpperCase();
-  const out = outputVar(block.id);
+  const out = fbdOutputVar(block.id);
   const valueType = outputTypes.get(block.id);
 
   const numericStep = (
@@ -644,23 +629,7 @@ function wireValue(
   if (!block) {
     return "";
   }
-  const t = block.type.toUpperCase();
-  if (t === "DI") {
-    return resolveIoSymbol(block, "DI");
-  }
-  if (t === "AI") {
-    return resolveIoSymbol(block, "AI");
-  }
-  if (t === "LOCAL") {
-    return pouIrName(programId, String(block.params?.name ?? "").trim());
-  }
-  if (t === "CALL") {
-    return callPortIrName(blockId, port);
-  }
-  if (port.toUpperCase() === BLOCK_OUTPUT_PORT) {
-    return outputVar(blockId);
-  }
-  return outputVar(blockId);
+  return fbdSourcePortIrName(block, port, programId);
 }
 
 export function compileFbdToIr(

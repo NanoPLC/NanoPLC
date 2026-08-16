@@ -42,7 +42,11 @@ Device catalog and I/O templates live in [`packages/ir-schema/src/deviceCatalog.
 | **I/O** | Kind (Digital In / Analog In / Digital Out) → **module** → **channel** (same picker as FBD DI/DO/AI blocks) | DI toggle, AI REAL field, DO read-only |
 | **Variable** | FBD program → **IN / IN_OUT / OUT / VAR / TEMP** | BOOL toggle; numeric types as a number |
 
-Watches persist per project. The process image is sized from the **device I/O map**, so you can force channels that are not yet used on the canvas. **TEMP** resets at the start of each POU call; values the program writes each scan overwrite a manual edit on the next cycle. Stop with **NanoPLC: Stop simulation** (or the status-bar item). Canvas green-trace is not in v0.
+BOOL **TRUE / FALSE** buttons apply on the first click. Scan refresh updates labels in place (it does not rebuild the controls).
+
+Watches persist per project. The process image is sized from the **device I/O map**, so you can force channels that are not yet used on the canvas. **TEMP** resets at the start of each POU call; values the program writes each scan overwrite a manual edit on the next cycle. Stop with **NanoPLC: Stop simulation** (or the status-bar item).
+
+While simulation is running, open FBD diagrams show **green-trace**: BOOL wires that are `TRUE` light up, `FALSE` wires dim, and blocks show live values. The FBD toolbar shows **Simulation live**.
 
 UI refresh is capped by `nanoplc.simulatorRefreshMs` (default 50 ms).
 

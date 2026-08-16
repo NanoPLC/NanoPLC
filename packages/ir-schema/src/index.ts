@@ -5,6 +5,7 @@ export {
   PROJECT_SCHEMA_VERSION,
 } from "./constants";
 export { compileFbdToIr, compileProjectToIr } from "./compileFbd";
+export { fbdOutputVar, fbdSourcePortIrName, resolveIoSymbol } from "./fbdIrNames";
 export { inferFbdPortTypes } from "./fbdPortTypes";
 export type { FbdPortTypes, FbdPortContext } from "./fbdPortTypes";
 export {

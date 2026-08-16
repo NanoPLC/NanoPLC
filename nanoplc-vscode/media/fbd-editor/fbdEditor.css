@@ -429,6 +429,45 @@ body {
   opacity: 0.85;
 }
 
+body.sim-live .wire-path.live-true {
+  stroke: var(--vscode-testing-iconPassed, #3dd68c);
+  stroke-width: 3;
+  opacity: 1;
+}
+
+body.sim-live .wire-path.live-false {
+  stroke: var(--vscode-descriptionForeground);
+  stroke-width: 1.5;
+  opacity: 0.4;
+}
+
+body.sim-live .wire-path.live-true.selected {
+  stroke-width: 4;
+}
+
+.fbd-block.live-true {
+  box-shadow: 0 0 0 2px var(--vscode-testing-iconPassed, #3dd68c);
+}
+
+.port-out.live-true {
+  background: var(--vscode-testing-iconPassed, #3dd68c);
+  border-color: var(--vscode-testing-iconPassed, #3dd68c);
+}
+
+.live-value {
+  padding: 2px 10px 5px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--vscode-testing-iconPassed, #3dd68c);
+  border-top: 1px solid var(--vscode-panel-border);
+}
+
+#sim-live-badge {
+  color: var(--vscode-testing-iconPassed, #3dd68c);
+  font-weight: 600;
+}
+
 .wire-hit {
   fill: none;
   stroke: transparent;

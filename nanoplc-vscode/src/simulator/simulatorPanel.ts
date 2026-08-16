@@ -20,6 +20,7 @@ import {
   type PouCatalogItem,
 } from "../project/editorIoProfile";
 import { pickProjectLocation, PROJECT_FILENAME, readJsonFile } from "../project/projectPaths";
+import { publishSimSnapshot } from "./simLive";
 
 const VIEW_TYPE = "nanoplc.simulatorIo";
 const WATCHES_STATE_PREFIX = "nanoplc.simWatches:";
@@ -384,15 +385,13 @@ function handleWebviewMessage(msg: {
     const snap = activeSimulator.currentSnapshot();
     const current = snap.di[msg.index] ?? false;
     activeSimulator.setDi(msg.index, !current);
-    lastSnapJson = "";
-    postToPanel({ type: "snapshot", snap: activeSimulator.currentSnapshot() });
+    pushSnapshot(activeSimulator.currentSnapshot());
     return;
   }
   if (msg.type === "setAi" && typeof msg.index === "number") {
     const value = typeof msg.value === "number" && Number.isFinite(msg.value) ? msg.value : 0;
     activeSimulator.setAi(msg.index, value);
-    lastSnapJson = "";
-    postToPanel({ type: "snapshot", snap: activeSimulator.currentSnapshot() });
+    pushSnapshot(activeSimulator.currentSnapshot());
     return;
   }
   if (msg.type === "setVar" && typeof msg.programId === "string" && typeof msg.name === "string") {
@@ -400,8 +399,7 @@ function handleWebviewMessage(msg: {
       .find((p) => p.id === msg.programId)
       ?.variables.find((v) => v.name === msg.name);
     activeSimulator.setVar(pouIrName(msg.programId, msg.name), coerceVarValue(variable?.type, msg.value));
-    lastSnapJson = "";
-    postToPanel({ type: "snapshot", snap: activeSimulator.currentSnapshot() });
+    pushSnapshot(activeSimulator.currentSnapshot());
   }
 }
 
@@ -436,6 +434,12 @@ function ensurePanel(context: vscode.ExtensionContext): vscode.WebviewPanel {
 let lastSnapJson = "";
 let lastPanelUpdate = 0;
 
+function pushSnapshot(snap: SimulatorSnapshot): void {
+  lastSnapJson = "";
+  postToPanel({ type: "snapshot", snap });
+  publishSimSnapshot(true, snap);
+}
+
 function onSimulatorTick(snap: SimulatorSnapshot): void {
   statusBarItem?.show();
   if (statusBarItem) {
@@ -449,6 +453,7 @@ function onSimulatorTick(snap: SimulatorSnapshot): void {
     lastSnapJson = snapJson;
     lastPanelUpdate = now;
     postToPanel({ type: "snapshot", snap });
+    publishSimSnapshot(true, snap);
   }
 }
 
@@ -494,6 +499,7 @@ export async function startSimulation(context: vscode.ExtensionContext): Promise
 export async function stopSimulation(): Promise<void> {
   activeSimulator?.stop();
   activeSimulator = undefined;
+  publishSimSnapshot(false);
   if (statusBarItem) {
     statusBarItem.text = "$(debug-stop) NanoPLC sim stopped";
   }

@@ -289,6 +289,7 @@
     btn.textContent = formatBool(Boolean(value));
     btn.disabled = typeof index !== "number";
     btn.addEventListener("click", () => {
+      btn.textContent = formatBool(btn.textContent !== "TRUE");
       vscode.postMessage({ type: "toggleDi", index });
     });
     cell.appendChild(btn);
@@ -337,11 +338,13 @@
       btn.type = "button";
       btn.textContent = formatBool(Boolean(value));
       btn.addEventListener("click", () => {
+        const next = btn.textContent !== "TRUE";
+        btn.textContent = formatBool(next);
         vscode.postMessage({
           type: "setVar",
           programId: watch.programId,
           name: watch.name,
-          value: !value,
+          value: next,
         });
       });
       cell.appendChild(btn);
@@ -364,6 +367,10 @@
     cell.appendChild(input);
   }
 
+  function cellIsBusy(cell) {
+    return Boolean(cell.querySelector("input:focus") || cell.querySelector("button:active"));
+  }
+
   function updateIoValues() {
     for (const row of el.ioBody.querySelectorAll("tr[data-id]")) {
       const watch = watches.find((w) => w.id === row.dataset.id);
@@ -371,11 +378,28 @@
         continue;
       }
       const cell = row.querySelector(".value-cell");
-      if (!cell || cell.querySelector("input:focus")) {
+      if (!cell || cellIsBusy(cell)) {
         continue;
       }
       const found = findIoEntry(watch.ioKind, watch.moduleId, watch.channel);
-      fillIoValueCell(cell, watch, found);
+      const value = ioValue(watch);
+      if (watch.ioKind === "DO") {
+        cell.className = `value-cell ${value ? "on" : "off"}`;
+        cell.textContent = formatBool(Boolean(value));
+        continue;
+      }
+      if (watch.ioKind === "AI") {
+        const input = cell.querySelector("input.ai-value");
+        if (input) {
+          input.value = String(value);
+        }
+        continue;
+      }
+      const btn = cell.querySelector("button.di-toggle");
+      if (btn) {
+        btn.textContent = formatBool(Boolean(value));
+        btn.disabled = typeof found?.entry.index !== "number";
+      }
     }
   }
 
@@ -386,10 +410,23 @@
         continue;
       }
       const cell = row.querySelector(".value-cell");
-      if (!cell || cell.querySelector("input:focus")) {
+      if (!cell || cellIsBusy(cell)) {
         continue;
       }
-      fillVarValueCell(cell, watch, findVariable(watch.programId, watch.name));
+      const variable = findVariable(watch.programId, watch.name);
+      const type = variable?.type ?? "BOOL";
+      const value = varValue(watch);
+      if (type === "BOOL") {
+        const btn = cell.querySelector("button.di-toggle");
+        if (btn) {
+          btn.textContent = formatBool(Boolean(value));
+        }
+        continue;
+      }
+      const input = cell.querySelector("input.var-value");
+      if (input) {
+        input.value = String(value);
+      }
     }
   }
 

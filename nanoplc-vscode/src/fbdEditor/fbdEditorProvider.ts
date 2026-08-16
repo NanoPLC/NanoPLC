@@ -8,11 +8,9 @@ import {
   type NanoPlcProject,
 } from "@nanoplc/ir-schema";
 
-import {
-  loadEditorIoProfile,
-  loadProjectPouCatalog,
-  type EditorIoProfilePayload,
-} from "../project/editorIoProfile";
+import { loadEditorIoProfile, loadProjectPouCatalog } from "../project/editorIoProfile";
+import type { EditorIoProfilePayload } from "../project/editorIoProfile";
+import { subscribeSimLive } from "../simulator/simLive";
 
 import { FBD_BLOCK_CATALOG } from "./blockCatalog";
 import { ensureLayout } from "./layout";
@@ -269,7 +267,12 @@ export class FbdEditorProvider implements vscode.CustomTextEditorProvider {
     webviewPanel.webview.html = this.getHtml(webviewPanel.webview);
     postDocument();
 
+    const liveSub = subscribeSimLive((payload) => {
+      webviewPanel.webview.postMessage({ type: "simLive", payload });
+    });
+
     webviewPanel.onDidDispose(() => {
+      liveSub.dispose();
       changeDocumentSubscription.dispose();
       for (const w of watchers) {
         w.dispose();
@@ -310,6 +313,7 @@ export class FbdEditorProvider implements vscode.CustomTextEditorProvider {
       <button type="button" id="btn-compile" class="toolbar-btn">Compile</button>
       <button type="button" id="btn-build" class="toolbar-btn">Build firmware</button>
     </div>
+    <span id="sim-live-badge" class="hint hidden">Simulation live</span>
     <span id="wire-hint" class="hint hidden">Drag from one port to another to connect (or click output then input)</span>
     <span id="parse-error" class="error hidden"></span>
   </div>
