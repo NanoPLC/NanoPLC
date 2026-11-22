@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { CodegenIoContext } from "./codegen/codegenFirmware";
-import { compileProjectToIr } from "./compileFbd";
+import { compileTasksToIr } from "./compileFbd";
 import type { ModuleConfig } from "./moduleCatalog";
 import { parseModuleConfig, resolveProjectIoProfileFromConfigs, type ProjectIoProfile } from "./projectIo";
 import { resolveDeviceTree } from "./projectTreeDefaults";
@@ -83,8 +83,8 @@ export interface CompileProjectDirResult extends CompileResult {
 }
 
 /**
- * Compile the entry PROGRAM of the primary cyclic task of the project at `projectRoot`,
- * the same way the IDE's **Compile PLC program** does (without writing any files).
+ * Compile the Task Configuration of the project at `projectRoot` the same way the
+ * IDE's **Compile PLC program** does (without writing any files).
  */
 export function compileProjectDir(projectRoot: string): CompileProjectDirResult {
   let raw: unknown;
@@ -104,10 +104,9 @@ export function compileProjectDir(projectRoot: string): CompileProjectDirResult 
     return { ok: false, project, diagnostics: [...projectDiags, missing] };
   }
   const ioMap = loadProjectIoProfile(projectRoot, project).ioMap;
-  const result = compileProjectToIr(
+  const result = compileTasksToIr(
     project,
     loadProjectFbdSourcesFromDisk(projectRoot, project),
-    program.id,
     ioMap.entries.length > 0 ? ioMap : undefined
   );
   return {

@@ -4,7 +4,7 @@ export {
   IR_VERSION,
   PROJECT_SCHEMA_VERSION,
 } from "./constants";
-export { compileFbdToIr, compileProjectToIr } from "./compileFbd";
+export { compileFbdToIr, compileProjectToIr, compileTasksToIr } from "./compileFbd";
 export { fbdOutputVar, fbdSourcePortIrName, resolveIoSymbol } from "./fbdIrNames";
 export { inferFbdPortTypes } from "./fbdPortTypes";
 export type { FbdPortTypes, FbdPortContext } from "./fbdPortTypes";
@@ -39,6 +39,7 @@ export type {
   IoMap,
   IoMapEntry,
   IrIoImage,
+  IrTask,
   IrVariable,
   NanoPlcProgramRef,
   NanoPlcModuleRef,

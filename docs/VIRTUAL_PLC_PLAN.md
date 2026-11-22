@@ -222,15 +222,17 @@ Watchdog: register each PLC task with the ESP task WDT; log `task overrun` when 
 
 ### 5.8. Simulator mapping (target)
 
-One JS timer per **cyclic** task; freewheeling via queued microtasks with a yield; event tasks when the bound BOOL rises in the PI. v0 simulator still runs a **single** interval: the primary cyclic task’s `interval_ms`, executing that task’s entry PROGRAM (same limit as compile, §5.9).
+**Done (T1a):** `PlcSimulator` is a deterministic **virtual-time** scheduler over IR `tasks[]`. A cyclic task passes at every multiple of `interval_ms` (Δt = `interval_ms`); a freewheeling task passes every 1 ms (Δt = 1, modeling one RTOS tick). Passes due at the same instant run in priority order (0 first). `advance(ms)` runs every pass due within the window; `stepOnce()` advances by the primary interval; `start()` drives `advance` from one JS timer. Snapshots carry `scan_index` (primary passes) and `task_passes` per task id. Event tasks are not scheduled yet (T2) — compile warns `NP-0118`.
 
 **v0 watch panel:** the webview starts empty. The user adds **DI / DO / AI** with the same **module → local channel** picker as FBD I/O blocks, and adds PROGRAM **IN / IN_OUT / OUT / VAR / TEMP**. DI and AI are writable; DO is read-only; BOOL vars toggle, numeric vars use a field. Scan refresh updates watch values **in place** (BOOL TRUE/FALSE buttons are not recreated, so the first click is not lost). `PlcSimulator` can size the process image from the full device I/O map (`SimIoCapacity`), not only compiled `io_image`. Watches persist in VS Code `workspaceState` per project. **Green-trace:** while simulation runs, open FBD diagrams highlight BOOL wires (true = bright, false = dim), show live values on blocks, and display a **Simulation live** toolbar badge. Sticky force remains later work.
 
 ### 5.9. Compile / codegen — current vs target
 
-**Now (T0 + CALL):** compile and simulate the **entry PROGRAM** of the primary cyclic task, including FBD `CALL` into other PROGRAMS (`pou_schedules`). Extra **tasks** are stored and validated, with an explicit compile note. A task may bind only one program (`NP-0116`).
+**T0 + CALL (done):** FBD `CALL` into other PROGRAMS (`pou_schedules`). A task may bind only one program (`NP-0116`).
 
-**Next (T1):** one FreeRTOS / simulator task per PLC task, each running its entry PROGRAM. IR `tasks[]` each with `kind`, interval/event, `priority`, and that program’s `schedule`.
+**T1a (done):** `compileTasksToIr()` compiles every task’s entry PROGRAM (plus CALLs) into IR `tasks[]` (`kind`, interval/event, `priority`, `program`, `primary`, `schedule`); `schedule` stays the primary task’s. A PROGRAM reachable from several tasks warns `NP-0117` (shared state, no locking). The simulator runs all tasks (§5.8).
+
+**T1b (next):** one FreeRTOS task per PLC task, each running its entry PROGRAM (§5.7, §16.1). Until then firmware runs only the primary task.
 
 **Then (T2):** event tasks, watchdog fail-safe.
 
@@ -732,11 +734,11 @@ Section 5 is the **product contract**. This section is the **implementation sequ
 
 ### 33.2. T1 — Multi-task runtime
 
-1. IR entity `tasks[]`: each task has `kind`, `interval_ms` / `event`, `priority`, `program`, and that program’s `schedule`.
-2. Codegen: `nanoplc_generated_task_<id>(dt_ms)` + `nanoplc_generated_tasks()` table (§16.1).
-3. `nanoplc_runtime` creates one FreeRTOS task per PLC task (§5.7); stop hard-coding `nanoplc_runtime_init(10)` in `app_main`.
-4. Simulator: one timer (or event hook) per PLC task; TON Δt is per-task.
-5. Overrun / watchdog logs include **task id**.
+1. [x] IR entity `tasks[]`: each task has `kind`, `interval_ms` / `event`, `priority`, `program`, and that program’s `schedule` (`compileTasksToIr`, T1a).
+2. [ ] Codegen: `nanoplc_generated_task_<id>(dt_ms)` + `nanoplc_generated_tasks()` table (§16.1).
+3. [ ] `nanoplc_runtime` creates one FreeRTOS task per PLC task (§5.7); stop hard-coding `nanoplc_runtime_init(10)` in `app_main`.
+4. [x] Simulator: deterministic virtual-time scheduler over `tasks[]`; timer Δt is per-task (T1a).
+5. [ ] Overrun / watchdog logs include **task id**.
 
 ### 33.3. T2 — Event tasks and watchdog fail-safe
 
@@ -1045,3 +1047,4 @@ Unchanged: IR format lock, ordered graph compile, TS simulator, C codegen, onlin
 - **Block semantics + numeric parity (2026-11-22):** `docs/BLOCK_SEMANTICS.md`. Simulator wraps INT/DINT/UINT/WORD like C and rounds REAL to float32; C codegen avoids undefined behavior (DINT overflow via `uint32_t`, `INT_MIN / -1`, DINT `ROL`/`ROR` by 0, `SETBIT` bit 31). Checked 29 edge cases C ↔ TS with UBSan.
 - **Golden scenarios (2026-11-22):** `packages/ir-schema/golden/` (and_gate, blink_fbd, timers, rs_latch, numeric_wrap, call_counter) run in the TS simulator and in host-compiled generated C; CI runs `ir-schema` tests with a required C compiler. New example `examples/blink_fbd`.
 - **Firmware CI (2026-11-22):** `firmware-ci.yml` builds the stub and each example's generated code with ESP-IDF v5.3.3. `tools/codegen` gains `--project <dir>`. Project-from-disk loading (`compileProjectDir`, `buildCodegenIoContext`, …) moved into `packages/ir-schema/src/projectDisk.ts` and is shared by the extension, CLI, and golden tests.
+- **Multi-task IR + Virtual PLC (T1a, 2026-11-22):** `compileTasksToIr()` emits IR `tasks[]` for the whole Task Configuration (IDE compile and `compileProjectDir` use it). `PlcSimulator` schedules all cyclic / freewheeling tasks in deterministic virtual time (priority breaks ties; per-task Δt); snapshots add `task_passes`. Warnings `NP-0117` (PROGRAM shared between tasks) and `NP-0118` (event task not scheduled). Firmware multi-task is T1b.

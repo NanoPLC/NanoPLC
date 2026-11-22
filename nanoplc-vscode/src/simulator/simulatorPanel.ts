@@ -268,6 +268,7 @@ function postInit(): void {
   const snap = activeSimulator?.currentSnapshot() ?? {
     scan_index: 0,
     elapsed_ms: 0,
+    task_passes: {},
     vars: {},
     di: [],
     ai: [],
@@ -279,7 +280,7 @@ function postInit(): void {
     programs: activeContext.programs,
     watches: currentWatches(),
     snap,
-    scanPeriodMs: activeContext.ir.project.scan_period_ms,
+    scanPeriodMs: activeSimulator?.scanPeriodMs ?? activeContext.ir.project.scan_period_ms,
   });
 }
 

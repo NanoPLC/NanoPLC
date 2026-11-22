@@ -7,8 +7,8 @@
   let programs = [];
   /** @type {Array<any>} */
   let watches = [];
-  /** @type {{ scan_index: number, elapsed_ms: number, vars: Record<string, boolean|number>, di: boolean[], ai: number[], do: boolean[] }} */
-  let snap = { scan_index: 0, elapsed_ms: 0, vars: {}, di: [], ai: [], do: [] };
+  /** @type {{ scan_index: number, elapsed_ms: number, task_passes?: Record<string, number>, vars: Record<string, boolean|number>, di: boolean[], ai: number[], do: boolean[] }} */
+  let snap = { scan_index: 0, elapsed_ms: 0, task_passes: {}, vars: {}, di: [], ai: [], do: [] };
   let scanPeriodMs = 10;
 
   const el = {
@@ -446,7 +446,12 @@
   }
 
   function renderMeta() {
-    el.meta.textContent = `Scan #${snap.scan_index} · ${snap.elapsed_ms} ms elapsed · period ${scanPeriodMs} ms`;
+    let text = `Scan #${snap.scan_index} · ${snap.elapsed_ms} ms elapsed · period ${scanPeriodMs} ms`;
+    const passes = Object.entries(snap.task_passes || {});
+    if (passes.length > 1) {
+      text += ` · tasks: ${passes.map(([id, n]) => `${id} ${n}`).join(", ")}`;
+    }
+    el.meta.textContent = text;
   }
 
   function renderAll() {

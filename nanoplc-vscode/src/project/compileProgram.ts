@@ -7,7 +7,7 @@ import {
   buildIoMapFromCatalog,
   buildProjectDeviceFields,
   catalogLabel,
-  compileProjectToIr,
+  compileTasksToIr,
   defaultMainTask,
   DEVICE_CATALOG,
   entryProgram,
@@ -110,7 +110,7 @@ function loadProjectFbdSources(rootPath: string, project: NanoPlcProject): Map<s
     try {
       sources.set(prog.id, loadFbdRaw(rootPath, prog.source));
     } catch {
-      // compileProjectToIr reports a missing source.
+      // compileTasksToIr reports a missing source.
     }
   }
   return sources;
@@ -177,7 +177,7 @@ export function gateProjectFbd(rootPath: string, project: NanoPlcProject): Proje
   }
 
   const sources = loadProjectFbdSources(rootPath, project);
-  const result = compileProjectToIr(project, sources, program.id, ioMap);
+  const result = compileTasksToIr(project, sources, ioMap);
   publishCompileDiagnostics(rootPath, project, result.diagnostics);
 
   return {
@@ -260,7 +260,7 @@ export async function compileProjectAt(
   }
 
   const sources = loadProjectFbdSources(rootPath, project);
-  const result = compileProjectToIr(project, sources, program.id, ioMap);
+  const result = compileTasksToIr(project, sources, ioMap);
   publishCompileDiagnostics(rootPath, project, [...projectDiags, ...result.diagnostics]);
 
   if (!result.ok || !result.ir) {
@@ -363,7 +363,7 @@ function compileTaskLimitNote(project: NanoPlcProject): string | undefined {
   if (tasks.length <= 1) {
     return undefined;
   }
-  return "additional tasks are stored but not scheduled yet.";
+  return `${tasks.length} tasks: all run in the Virtual PLC; firmware runs only the primary task for now.`;
 }
 
 export async function compileActiveProject(options?: CompileProjectOptions): Promise<boolean> {

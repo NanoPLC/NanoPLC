@@ -344,6 +344,7 @@ export function createSimState(ir: PlcIr, capacity?: SimIoCapacity): SimState {
     rs: new Map(),
     scan_index: 0,
     elapsed_ms: 0,
+    task_passes: {},
   };
 }
 
@@ -352,6 +353,11 @@ export function runScan(state: SimState, ir: PlcIr, dt_ms: number): SimulatorSna
   state.scan_index += 1;
   state.elapsed_ms += dt_ms;
   return snapshot(state);
+}
+
+/** Run one pass of a task's schedule with that task's Δt (no clock or counter updates). */
+export function runTaskPass(state: SimState, ir: PlcIr, schedule: ScheduleStep[], dt_ms: number): void {
+  executeSteps(state, schedule, ir, dt_ms, []);
 }
 
 function executeSteps(
@@ -390,6 +396,7 @@ export function snapshot(state: SimState): SimulatorSnapshot {
   return {
     scan_index: state.scan_index,
     elapsed_ms: state.elapsed_ms,
+    task_passes: { ...state.task_passes },
     vars: { ...state.vars },
     di: [...state.di],
     ai: [...state.ai],

@@ -247,6 +247,31 @@ export interface PlcIr {
   schedule: ScheduleStep[];
   /** Callee PROGRAM schedules invoked by `call` ops in `schedule` (and nested calls). */
   pou_schedules?: { id: string; schedule: ScheduleStep[] }[];
+  /**
+   * Every task of the Task Configuration with its entry PROGRAM's schedule (T1).
+   * When present, runtimes schedule these; `schedule` remains the primary cyclic task's.
+   */
+  tasks?: IrTask[];
+}
+
+/** One PLC task in the compiled IR (`docs/VIRTUAL_PLC_PLAN.md` §5, §33.2). */
+export interface IrTask {
+  id: string;
+  name: string;
+  kind: PlcTaskKind;
+  /** 0 = highest … 31 = lowest. */
+  priority: number;
+  /** Cyclic interval (`cyclic` only). */
+  interval_ms?: number;
+  /** BOOL trigger symbol (`event` only; runtime in T2). */
+  event?: string;
+  /** Overrun limit in ms when the task watchdog is enabled. */
+  watchdog_ms?: number;
+  /** Entry PROGRAM id. */
+  program: string;
+  /** True for the primary cyclic task (its schedule is also `PlcIr.schedule`). */
+  primary?: boolean;
+  schedule: ScheduleStep[];
 }
 
 export interface CompileDiagnostic {

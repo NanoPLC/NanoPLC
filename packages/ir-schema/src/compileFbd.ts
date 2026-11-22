@@ -9,6 +9,7 @@ import type {
   IoMapEntry,
   IrVariable,
   NanoPlcProject,
+  NanoPlcTaskRef,
   PlcIr,
   PlcPrimitiveType,
   ScheduleStep,
@@ -24,7 +25,12 @@ import {
   type FbdPortContext,
 } from "./fbdPortTypes";
 import { PLC_PRIMITIVE_TYPES } from "./types";
-import { projectScanPeriodMs } from "./tasks";
+import {
+  primaryCyclicTask,
+  projectScanPeriodMs,
+  resolveTaskConfiguration,
+  taskEntryProgramId,
+} from "./tasks";
 import { validateFbdSource } from "./validate";
 import {
   callPortIrName,
@@ -992,16 +998,19 @@ function detectCallCycle(edges: Map<string, string[]>): string[] | undefined {
   return undefined;
 }
 
-/**
- * Compile the entry PROGRAM and every FBD PROGRAM it calls (transitively).
- * `sources` maps program id → FBD JSON.
- */
-export function compileProjectToIr(
+function callTargets(result: CompileResult | undefined): string[] {
+  return (result?.ir?.schedule ?? [])
+    .filter((s) => s.op === "call" && s.program)
+    .map((s) => s.program as string);
+}
+
+/** Compile `entries` and every FBD PROGRAM they call (transitively), then check call cycles. */
+function compileClosure(
   project: NanoPlcProject,
   sources: Map<string, unknown>,
-  entryProgramId: string,
+  entries: string[],
   ioMap?: IoMap
-): CompileResult {
+): { compiled: Map<string, CompileResult>; diagnostics: CompileDiagnostic[] } {
   const compiled = new Map<string, CompileResult>();
   const diagnostics: CompileDiagnostic[] = [];
   const programVars = new Map<string, FbdVariable[]>();
@@ -1010,7 +1019,7 @@ export function compileProjectToIr(
       raw && typeof raw === "object" ? (raw as { variables?: unknown }).variables : undefined;
     programVars.set(id, parsePouVariables(varsRaw).variables);
   }
-  const queue = [entryProgramId];
+  const queue = [...entries];
   const enqueued = new Set<string>();
 
   while (queue.length > 0) {
@@ -1042,41 +1051,35 @@ export function compileProjectToIr(
     for (const d of result.diagnostics) {
       diagnostics.push({ ...d, program_id: id });
     }
-    if (result.ir) {
-      for (const step of result.ir.schedule) {
-        if (step.op === "call" && step.program) {
-          queue.push(step.program);
-        }
-      }
-    }
+    queue.push(...callTargets(result));
   }
 
   const edges = new Map<string, string[]>();
   for (const [id, result] of compiled) {
-    edges.set(
-      id,
-      (result.ir?.schedule ?? [])
-        .filter((s) => s.op === "call" && s.program)
-        .map((s) => s.program as string)
-    );
+    edges.set(id, callTargets(result));
   }
   const cycle = detectCallCycle(edges);
   if (cycle) {
-    diagnostics.push(
-      diag("NP-0411", `Program call cycle: ${cycle.join(" → ")}.`)
-    );
+    diagnostics.push(diag("NP-0411", `Program call cycle: ${cycle.join(" → ")}.`));
   }
+  return { compiled, diagnostics };
+}
 
-  if (diagnostics.some((d) => d.severity === "error")) {
-    return { ok: false, diagnostics };
-  }
+interface AssembledIr {
+  ir: PlcIr;
+  /** Prefixed schedule of each compiled program. */
+  schedules: Map<string, ScheduleStep[]>;
+}
 
-  const entryResult = compiled.get(entryProgramId);
-  if (!entryResult?.ir) {
-    return { ok: false, diagnostics: [...diagnostics, diag("NP-0105", "Entry program failed to compile.")] };
-  }
-
+/** Merge compiled programs into one IR whose `schedule` is `entryProgramId`'s. */
+function assembleIr(
+  project: NanoPlcProject,
+  compiled: Map<string, CompileResult>,
+  entryProgramId: string,
+  pouIds: Set<string>
+): AssembledIr {
   const needsPrefix = compiled.size > 1;
+  const schedules = new Map<string, ScheduleStep[]>();
   const pou_schedules: { id: string; schedule: ScheduleStep[] }[] = [];
   const variables: IrVariable[] = [];
   const ioParts: PlcIr["io_image"][] = [];
@@ -1101,21 +1104,18 @@ export function compileProjectToIr(
         id: needsPrefix ? `${id}__${inst.id}` : inst.id,
       });
     }
-    if (id !== entryProgramId) {
-      pou_schedules.push({
-        id,
-        schedule: needsPrefix ? prefixSchedule(id, ir.schedule) : ir.schedule,
-      });
+    const schedule = needsPrefix ? prefixSchedule(id, ir.schedule) : ir.schedule;
+    schedules.set(id, schedule);
+    if (pouIds.has(id)) {
+      pou_schedules.push({ id, schedule });
     }
   }
 
-  const entryIr = entryResult.ir;
-  const schedule = needsPrefix ? prefixSchedule(entryProgramId, entryIr.schedule) : entryIr.schedule;
+  const entryIr = compiled.get(entryProgramId)!.ir!;
   const program = project.programs.find((p) => p.id === entryProgramId);
 
   return {
-    ok: true,
-    diagnostics,
+    schedules,
     ir: {
       ir_version: IR_VERSION,
       project: {
@@ -1128,8 +1128,114 @@ export function compileProjectToIr(
       io_image: mergeIoImage(ioParts),
       network: entryIr.network,
       instances,
-      schedule,
+      schedule: schedules.get(entryProgramId) ?? [],
       pou_schedules: pou_schedules.length > 0 ? pou_schedules : undefined,
     },
   };
 }
+
+/**
+ * Compile the entry PROGRAM and every FBD PROGRAM it calls (transitively).
+ * `sources` maps program id → FBD JSON.
+ */
+export function compileProjectToIr(
+  project: NanoPlcProject,
+  sources: Map<string, unknown>,
+  entryProgramId: string,
+  ioMap?: IoMap
+): CompileResult {
+  const { compiled, diagnostics } = compileClosure(project, sources, [entryProgramId], ioMap);
+  if (diagnostics.some((d) => d.severity === "error")) {
+    return { ok: false, diagnostics };
+  }
+  if (!compiled.get(entryProgramId)?.ir) {
+    return { ok: false, diagnostics: [...diagnostics, diag("NP-0105", "Entry program failed to compile.")] };
+  }
+  const callees = new Set([...compiled.keys()].filter((id) => id !== entryProgramId));
+  return { ok: true, diagnostics, ir: assembleIr(project, compiled, entryProgramId, callees).ir };
+}
+
+function reachablePrograms(entry: string, compiled: Map<string, CompileResult>): Set<string> {
+  const seen = new Set<string>();
+  const stack = [entry];
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    if (seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    stack.push(...callTargets(compiled.get(id)));
+  }
+  return seen;
+}
+
+/**
+ * Compile the whole Task Configuration (T1): every task's entry PROGRAM plus their CALLs.
+ * `ir.schedule` is the primary cyclic task's schedule; `ir.tasks` lists every task.
+ */
+export function compileTasksToIr(
+  project: NanoPlcProject,
+  sources: Map<string, unknown>,
+  ioMap?: IoMap
+): CompileResult {
+  const allTasks = resolveTaskConfiguration(project);
+  const primary = primaryCyclicTask(allTasks);
+  const tasks = allTasks
+    .map((task) => ({ task, program: taskEntryProgramId(task) }))
+    .filter((t): t is { task: NanoPlcTaskRef; program: string } => Boolean(t.program));
+  const primaryEntry = tasks.find((t) => t.task === primary) ?? tasks[0];
+  if (!primaryEntry) {
+    return { ok: false, diagnostics: [diag("NP-0105", "No task has an entry program.")] };
+  }
+
+  const entries = [...new Set(tasks.map((t) => t.program))];
+  const { compiled, diagnostics } = compileClosure(project, sources, entries, ioMap);
+  if (diagnostics.some((d) => d.severity === "error")) {
+    return { ok: false, diagnostics };
+  }
+
+  const called = new Set([...compiled.values()].flatMap((r) => callTargets(r)));
+  const { ir, schedules } = assembleIr(project, compiled, primaryEntry.program, called);
+
+  const tasksByProgram = new Map<string, string[]>();
+  for (const { task, program } of tasks) {
+    for (const id of reachablePrograms(program, compiled)) {
+      tasksByProgram.set(id, [...(tasksByProgram.get(id) ?? []), task.name]);
+    }
+  }
+  for (const [id, names] of tasksByProgram) {
+    if (names.length > 1) {
+      const name = project.programs.find((p) => p.id === id)?.name ?? id;
+      diagnostics.push({
+        code: "NP-0117",
+        message: `Program "${name}" runs in tasks ${names.join(", ")}. Its variables, timers, and latches are shared between them without locking.`,
+        severity: "warning",
+        program_id: id,
+      });
+    }
+  }
+  for (const { task } of tasks) {
+    if (task.kind === "event") {
+      diagnostics.push({
+        code: "NP-0118",
+        message: `Event task "${task.name}" is compiled but not scheduled yet (event tasks arrive with runtime T2).`,
+        severity: "warning",
+      });
+    }
+  }
+
+  ir.tasks = tasks.map(({ task, program }) => ({
+    id: task.id,
+    name: task.name,
+    kind: task.kind,
+    priority: task.priority,
+    interval_ms: task.kind === "cyclic" ? task.interval_ms : undefined,
+    event: task.kind === "event" ? task.event : undefined,
+    watchdog_ms: task.watchdog?.enabled ? task.watchdog.time_ms : undefined,
+    program,
+    primary: task === primaryEntry.task ? true : undefined,
+    schedule: schedules.get(program) ?? [],
+  }));
+  return { ok: true, diagnostics, ir };
+}
+

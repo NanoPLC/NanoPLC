@@ -59,7 +59,7 @@ Optional **`modules[]`** and **`drivers[]`** drive the Project tree (§3.2). Whe
 
 **`tasks[]`** is the CODESYS-style **Task Configuration** (`docs/VIRTUAL_PLC_PLAN.md` §5). Each task has `kind` (`cyclic` | `freewheeling` | `event`), `priority` (0 = highest … 31 = lowest), optional `interval_ms` / `event` / `watchdog`, and **`program`** — the single entry PROGRAM. Extra programs belong on other tasks, or are invoked with an FBD **`CALL`** block (`params.program`).
 
-When `tasks[]` is omitted, the IDE synthesizes **MainTask** from `scan.period_ms` and the first program. `scan.period_ms` remains a cache of the **primary cyclic** interval for IR `scan_period_ms` (compile T0). Compile currently runs the entry PROGRAM of that primary task. Legacy `pous[]` with one entry is still accepted.
+When `tasks[]` is omitted, the IDE synthesizes **MainTask** from `scan.period_ms` and the first program. `scan.period_ms` remains a cache of the **primary cyclic** interval for IR `scan_period_ms` (compile T0). Compile emits every task into IR `tasks`; the Virtual PLC runs all of them, firmware still runs only the primary task (until T1b). Legacy `pous[]` with one entry is still accepted.
 
 **Device catalog fields** on `device`:
 
@@ -120,8 +120,13 @@ Top-level entities:
 | `io_image` | Ordered DI / DO / AI index map for simulator and HAL |
 | `network` | Original FBD blocks and wires |
 | `instances` | FB instances (e.g. `TON`, `TOF`, `TP`, `RS`) |
-| `schedule` | **Ordered** execution steps of the entry PROGRAM (topological compile output) |
+| `schedule` | **Ordered** execution steps of the primary cyclic task's entry PROGRAM (topological compile output) |
 | `pou_schedules` | Callee PROGRAM schedules invoked by `call` ops (omitted when there are no CALLs) |
+| `tasks` | Every task of the Task Configuration: `id`, `name`, `kind`, `priority`, `interval_ms` / `event`, `watchdog_ms`, `program`, `primary`, and the entry PROGRAM's `schedule` |
+
+`tasks` is written by `compileTasksToIr()` (IDE compile). Older IR without `tasks` runs `schedule` as a single cyclic task. Names are prefixed per program (`<prog>__<var>`, `__<prog>_...`) whenever more than one program is compiled, so tasks never collide.
+
+**Virtual PLC scheduling** (deterministic virtual time): a cyclic task passes at every multiple of `interval_ms` with Δt = `interval_ms`; a freewheeling task passes every 1 ms with Δt = 1. Passes due at the same instant run in priority order (0 first). Event tasks are compiled but not scheduled yet. `scan_index` counts passes of the primary task; `task_passes` counts passes per task id.
 
 Example schedule fragments:
 
@@ -134,7 +139,7 @@ Example schedule fragments:
 
 Stable codes live in `packages/ir-schema` (e.g. `NP-0400` combinational cycle). The VS Code extension surfaces them in **Problems** when you run **NanoPLC: Compile PLC program**.
 
-Task configuration: `NP-0106` invalid task, `NP-0107` duplicate task id, `NP-0108` unknown program in a task, `NP-0109` cyclic task missing `interval_ms`, `NP-0110` priority out of 0..31, `NP-0112` event task without variable (warning), `NP-0113` no entry program (warning), `NP-0115` same PROGRAM bound to multiple tasks (warning), `NP-0116` more than one program on a task.
+Task configuration: `NP-0106` invalid task, `NP-0107` duplicate task id, `NP-0108` unknown program in a task, `NP-0109` cyclic task missing `interval_ms`, `NP-0110` priority out of 0..31, `NP-0112` event task without variable (warning), `NP-0113` no entry program (warning), `NP-0115` same PROGRAM bound to multiple tasks (warning), `NP-0116` more than one program on a task, `NP-0117` a PROGRAM is reachable from several tasks, so its state is shared without locking (warning), `NP-0118` event task compiled but not scheduled yet (warning).
 
 Program `CALL`: `NP-0410` self-call, `NP-0411` call cycle, `NP-0412` CALL with no program, `NP-0413` unknown program.
 
@@ -144,7 +149,7 @@ Timers: `NP-0220` invalid `pt_ms` on `TON` / `TOF` / `TP`.
 
 ## Implementation
 
-Types, validation, `compileFbdToIr()`, and `compileProjectToIr()` (entry PROGRAM plus transitive `CALL`s) live in **`packages/ir-schema/`**. The VS Code extension depends on this package via `file:../packages/ir-schema`.
+Types, validation, `compileFbdToIr()`, `compileProjectToIr()` (one entry PROGRAM plus transitive `CALL`s), and `compileTasksToIr()` (every task's entry PROGRAM plus their `CALL`s) live in **`packages/ir-schema/`**. The VS Code extension depends on this package via `file:../packages/ir-schema`.
 
 ### Simulator
 

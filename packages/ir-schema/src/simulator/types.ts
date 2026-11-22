@@ -14,8 +14,12 @@ export interface RsInstanceState {
 }
 
 export interface SimulatorSnapshot {
+  /** Passes of the primary cyclic task. */
   scan_index: number;
+  /** Virtual time in ms. */
   elapsed_ms: number;
+  /** Passes per task id (multi-task IR). */
+  task_passes: Record<string, number>;
   /** Named variables (DI symbols, internal wires, DO symbols). */
   vars: Record<string, boolean | number>;
   di: boolean[];
@@ -39,4 +43,5 @@ export interface SimState {
   rs: Map<string, RsInstanceState>;
   scan_index: number;
   elapsed_ms: number;
+  task_passes: Record<string, number>;
 }
