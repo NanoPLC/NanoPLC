@@ -43,6 +43,8 @@ test("codegenC emits a task function and task table for and_gate", () => {
     /\{\s*"main_task",\s*NANOPLC_TASK_CYCLIC,\s*1u,\s*10u,\s*0u,\s*NANOPLC_WATCHDOG_HOLD,\s*true,\s*NANOPLC_EVENT_NONE,\s*0u,\s*NULL,\s*npgen_task_main_task\s*\},/
   );
   assert.match(out.plc_program_c, /const nanoplc_task_desc_t \*nanoplc_generated_tasks\(size_t \*out_count\)/);
+  assert.match(out.plc_program_c, /nanoplc_generated_var_meta/);
+  assert.match(out.plc_program_c, /nanoplc_generated_peek_di/);
   assert.match(out.plc_program_c, /nanoplc_hal_read_di/);
   assert.match(out.plc_program_c, /nanoplc_hal_write_do/);
   assert.match(out.plc_program_c, /&&/);

@@ -67,6 +67,32 @@ void nanoplc_generated_io_bind(void);
 
 uint32_t nanoplc_generated_magic(void);
 
+/** PLC types for online debug var meta (`docs/DEBUG_PROTOCOL.md`). */
+typedef enum {
+    NANOPLC_VT_BOOL = 0,
+    NANOPLC_VT_INT = 1,
+    NANOPLC_VT_UINT = 2,
+    NANOPLC_VT_WORD = 3,
+    NANOPLC_VT_DINT = 4,
+    NANOPLC_VT_REAL = 5,
+} nanoplc_var_type_t;
+
+typedef struct {
+    const char *name;
+    nanoplc_var_type_t type;
+    /** Address of the generated static (`npgen_v_*`). */
+    const void *addr;
+} nanoplc_var_meta_t;
+
+const nanoplc_var_meta_t *nanoplc_generated_var_meta(size_t *out_count);
+
+size_t nanoplc_generated_di_count(void);
+size_t nanoplc_generated_do_count(void);
+size_t nanoplc_generated_ai_count(void);
+bool nanoplc_generated_peek_di(size_t index);
+bool nanoplc_generated_peek_do(size_t index);
+float nanoplc_generated_peek_ai(size_t index);
+
 #ifdef __cplusplus
 }
 #endif

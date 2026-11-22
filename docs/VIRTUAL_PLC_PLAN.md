@@ -368,8 +368,8 @@ _Current progress versus phases is summarized in §49._
 ### Phase 2 — Closer to metal
 
 - [x] Align timer / scan semantics with on-chip runtime (per-task Δt, typed wrap for LOCAL/CALL; intentional caveats in `BLOCK_SEMANTICS.md`).
-- [ ] Online debug (simple transport + variable map).
-- [ ] Migration plan to **shared C core** when parity demands it.
+- [x] Online debug (UART `#NP1` telemetry + var map; `docs/DEBUG_PROTOCOL.md`; **Attach online debug** command). Force/unforce later.
+- [x] Migration plan to **shared C core** when parity demands it (`docs/SHARED_C_CORE_MIGRATION.md`).
 
 ### Phase 3 — «Factory I/O lite»
 
@@ -651,10 +651,11 @@ MCU full replay unnecessary for MVP—same IR plus manual stimuli suffices early
 |-----|--------|
 | `docs/IR_SCHEMA.md` or JSON Schema | IR wire format + trivial sample |
 | `docs/BLOCK_SEMANTICS.md` | MVP IEC-like interpretations (**done**) |
-| `docs/DEBUG_PROTOCOL.md` | Framing/versioning/handshake samples |
+| `docs/DEBUG_PROTOCOL.md` | Framing/versioning (`#NP1` UART telemetry) — **done (v1)** |
 | `docs/TROUBLESHOOTING.md` | Expanded §44 |
 | `docs/BOOTSTRAP_TOOLCHAIN.md` | ESP-IDF bootstrap variants (offline/proxy/rollback) |
 | `docs/CONTRIBUTING.md` | build extension + firmware locally |
+| `docs/SHARED_C_CORE_MIGRATION.md` | Phase B shared C core boundaries / exit criteria |
 
 Keep `VIRTUAL_PLC_PLAN.md` roadmap-level—link outward for detail.
 
@@ -1001,7 +1002,7 @@ _Last reviewed: 2026-11-22._
 
 ### Phase 0 / later phases
 
-Unchanged: IR format lock, ordered graph compile, TS simulator, C codegen, online debug, virtual I/O—see §11.
+Phase 0–2 foundation items above are done for the MVP. Remaining later work: sticky force, ST language service, on-target golden, shared C core implementation, Factory I/O / fieldbuses (§11 Phases 3–4).
 
 ---
 
@@ -1046,3 +1047,4 @@ Unchanged: IR format lock, ordered graph compile, TS simulator, C codegen, onlin
 - **Multi-task firmware (T1b, 2026-11-22):** runtime ABI v2. Codegen emits one task function per PLC task and the `nanoplc_generated_tasks()` table; `nanoplc_runtime_init()` starts one pinned FreeRTOS task per cyclic / freewheeling task with priority mapping, per-task TWDT, and rate-limited overrun logs with the task id. Fixed: `app_main` no longer hard-codes 10 ms, and the RTOS tick is 1 kHz (was 100 Hz, so intervals were rounded down to 10 ms steps, and 5 ms ran every 10 ms). HAL I/O is mutex-protected. New example `examples/multitask`, golden `multitask`, CI builds it.
 - **Event tasks + watchdog fail-safe (T2, 2026-11-22):** runtime ABI v3. IR resolves `event_source` (DI index or BOOL var) and `watchdog_action`. Simulator and host-C golden run event tasks on rising edges; firmware polls every tick. `outputs_off` calls `nanoplc_hal_force_outputs_off()` (latch). Diagnostics `NP-0118` / `NP-0119` / `NP-0120`. Example `examples/event_task`, golden `event_task`.
 - **Phase 1 IDE close-out (2026-11-22):** gated ESP-IDF onboarding (activation + Build/Compile); FBD undo/redo + autosave; Phase 1 checklist items 1 and 5 marked done (ST remains grammar-only).
+- **Phase 2 close-out (2026-11-22):** LOCAL/CALL typed wrap parity; UART `#NP1` online debug (`DEBUG_PROTOCOL.md`, `nanoplc_debug`, **Attach online debug**); shared-C migration plan doc.

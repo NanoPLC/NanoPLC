@@ -129,6 +129,15 @@
         "icon": "$(output)"
       },
       {
+        "command": "nanoplc.attachOnlineDebug",
+        "title": "NanoPLC: Attach online debug (UART telemetry)",
+        "icon": "$(debug-alt)"
+      },
+      {
+        "command": "nanoplc.detachOnlineDebug",
+        "title": "NanoPLC: Detach online debug"
+      },
+      {
         "command": "nanoplc.firmwareFlashMonitor",
         "title": "NanoPLC: Flash and monitor (idf.py flash monitor)"
       },

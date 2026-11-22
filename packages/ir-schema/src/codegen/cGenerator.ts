@@ -328,6 +328,15 @@ const TASK_KIND_C: Record<IrTask["kind"], string> = {
   event: "NANOPLC_TASK_EVENT",
 };
 
+const VAR_TYPE_C: Record<PlcPrimitiveType, string> = {
+  BOOL: "NANOPLC_VT_BOOL",
+  INT: "NANOPLC_VT_INT",
+  UINT: "NANOPLC_VT_UINT",
+  WORD: "NANOPLC_VT_WORD",
+  DINT: "NANOPLC_VT_DINT",
+  REAL: "NANOPLC_VT_REAL",
+};
+
 function cString(text: string): string {
   return `"${text.replace(/[\\"]/g, (c) => `\\${c}`).replace(/[^\x20-\x7e]/g, "?")}"`;
 }
@@ -464,6 +473,10 @@ export function codegenC(ir: PlcIr, irSha256Hex: string, _ioMap?: IoMap): Codege
     })
     .join("\n");
 
+  const varMetaRows = typedVars
+    .map((v) => `    { ${cString(v.name)}, ${VAR_TYPE_C[v.type]}, &npgen_v_${cIdent(v.name)} },`)
+    .join("\n");
+
   const plc_program_c = `/* Auto-generated from IR v${IR_VERSION} — do not edit. */
 #include "nanoplc_generated.h"
 #include "nanoplc_hal.h"
@@ -488,6 +501,39 @@ const nanoplc_task_desc_t *nanoplc_generated_tasks(size_t *out_count)
 {
     *out_count = sizeof(npgen_tasks) / sizeof(npgen_tasks[0]);
     return npgen_tasks;
+}
+
+${
+  typedVars.length > 0
+    ? `static const nanoplc_var_meta_t npgen_var_meta[] = {\n${varMetaRows}\n};\n`
+    : ""
+}
+const nanoplc_var_meta_t *nanoplc_generated_var_meta(size_t *out_count)
+{
+    ${
+      typedVars.length > 0
+        ? `*out_count = sizeof(npgen_var_meta) / sizeof(npgen_var_meta[0]);\n    return npgen_var_meta;`
+        : `*out_count = 0;\n    return NULL;`
+    }
+}
+
+size_t nanoplc_generated_di_count(void) { return ${diCount}u; }
+size_t nanoplc_generated_do_count(void) { return ${doCount}u; }
+size_t nanoplc_generated_ai_count(void) { return ${aiCount}u; }
+
+bool nanoplc_generated_peek_di(size_t index)
+{
+    ${diCount > 0 ? `return index < ${diCount}u && npgen_di[index];` : "((void)index); return false;"}
+}
+
+bool nanoplc_generated_peek_do(size_t index)
+{
+    ${doCount > 0 ? `return index < ${doCount}u && npgen_do[index];` : "((void)index); return false;"}
+}
+
+float nanoplc_generated_peek_ai(size_t index)
+{
+    ${aiCount > 0 ? `return index < ${aiCount}u ? npgen_ai[index] : 0.0f;` : "((void)index); return 0.0f;"}
 }
 `;
 

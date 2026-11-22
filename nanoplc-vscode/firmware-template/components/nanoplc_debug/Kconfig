@@ -1,0 +1,10 @@
+menu "NanoPLC debug"
+
+    config NANOPLC_DEBUG_TELEMETRY
+        bool "Emit #NP1 UART telemetry snapshots"
+        default y
+        help
+            When enabled, a low-priority task prints online-debug frames
+            (docs/DEBUG_PROTOCOL.md) on the console UART for the VS Code IDE.
+
+endmenu

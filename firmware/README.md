@@ -51,6 +51,7 @@ idf.py flash monitor
 |------|------|
 | `main/` | `app_main` bootstraps `nanoplc_runtime_init` |
 | `components/nanoplc_runtime/` | One FreeRTOS task per PLC task, watchdog, overrun logs |
+| `components/nanoplc_debug/` | Optional UART `#NP1` telemetry (`docs/DEBUG_PROTOCOL.md`) |
 | `components/nanoplc_hal/` | GPIO process-image HAL (`nanoplc_hal_read_di` / `write_do`) |
 | `components/nanoplc_generated/` | Codegen output (`plc_program.c`, `io_hal_config.c`) |
 

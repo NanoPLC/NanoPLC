@@ -10,6 +10,7 @@ import * as taskCommands from "./project/taskCommands";
 import * as codegenFirmware from "./project/codegenFirmware";
 import * as scaffoldFirmware from "./project/scaffoldFirmware";
 import * as projectTree from "./project/projectTree";
+import * as onlineDebug from "./onlineDebug/onlineDebug";
 import * as simulatorPanel from "./simulator/simulatorPanel";
 import * as setupToolchain from "./setupToolchain";
 import {
@@ -46,6 +47,7 @@ export function activate(context: vscode.ExtensionContext): void {
     deviceTreeCommands.registerDeviceTreeCommands(context),
     taskCommands.registerTaskCommands(context),
     simulatorPanel.registerSimulator(context),
+    onlineDebug.registerOnlineDebug(context),
     codegenFirmware.registerCodegenFirmware(),
     scaffoldFirmware.registerInitFirmwareTree(),
     fbdEditor.registerFbdEditor(context)
@@ -54,4 +56,5 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export function deactivate(): void {
   simulatorPanel.disposeSimulator();
+  onlineDebug.disposeOnlineDebug();
 }

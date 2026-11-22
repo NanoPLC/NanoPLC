@@ -41,3 +41,36 @@ const nanoplc_task_desc_t *nanoplc_generated_tasks(size_t *out_count)
     *out_count = sizeof(npgen_tasks) / sizeof(npgen_tasks[0]);
     return npgen_tasks;
 }
+
+static const nanoplc_var_meta_t npgen_var_meta[] = {
+    { "__and1_Q", NANOPLC_VT_BOOL, &npgen_v___and1_Q },
+    { "DI_Enable", NANOPLC_VT_BOOL, &npgen_v_DI_Enable },
+    { "DI_Start", NANOPLC_VT_BOOL, &npgen_v_DI_Start },
+    { "DO_Lamp", NANOPLC_VT_BOOL, &npgen_v_DO_Lamp },
+};
+
+const nanoplc_var_meta_t *nanoplc_generated_var_meta(size_t *out_count)
+{
+    *out_count = sizeof(npgen_var_meta) / sizeof(npgen_var_meta[0]);
+    return npgen_var_meta;
+}
+
+size_t nanoplc_generated_di_count(void) { return 2u; }
+size_t nanoplc_generated_do_count(void) { return 1u; }
+size_t nanoplc_generated_ai_count(void) { return 0u; }
+
+bool nanoplc_generated_peek_di(size_t index)
+{
+    return index < 2u && npgen_di[index];
+}
+
+bool nanoplc_generated_peek_do(size_t index)
+{
+    return index < 1u && npgen_do[index];
+}
+
+float nanoplc_generated_peek_ai(size_t index)
+{
+    (void)index;
+    return 0.0f;
+}
