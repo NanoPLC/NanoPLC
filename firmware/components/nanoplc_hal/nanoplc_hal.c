@@ -2,6 +2,8 @@
 
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 #include <string.h>
 
@@ -16,6 +18,24 @@ static bool s_do_shadow[16];
 static nanoplc_hal_do_write_fn s_do_writers[NANOPLC_HAL_MAX_DO];
 static nanoplc_hal_di_read_fn s_di_readers[NANOPLC_HAL_MAX_DI];
 static nanoplc_hal_ai_read_fn s_ai_readers[NANOPLC_HAL_MAX_AI];
+
+/* PLC tasks preempt each other; expander drivers read-modify-write shared registers. */
+static StaticSemaphore_t s_lock_buf;
+static SemaphoreHandle_t s_lock;
+
+static void hal_lock(void)
+{
+    if (s_lock != NULL) {
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+    }
+}
+
+static void hal_unlock(void)
+{
+    if (s_lock != NULL) {
+        xSemaphoreGive(s_lock);
+    }
+}
 
 static const nanoplc_hal_di_entry_t *find_di(size_t index)
 {
@@ -46,6 +66,9 @@ static bool gpio_level(int gpio, bool active_high, bool logical_on)
 void nanoplc_hal_init(const nanoplc_hal_di_entry_t *di, size_t di_count,
                       const nanoplc_hal_do_entry_t *do_entries, size_t do_count)
 {
+    if (s_lock == NULL) {
+        s_lock = xSemaphoreCreateMutexStatic(&s_lock_buf);
+    }
     s_di_table = di;
     s_di_count = di_count;
     s_do_table = do_entries;
@@ -117,7 +140,7 @@ void nanoplc_hal_register_ai_reader(size_t index, nanoplc_hal_ai_read_fn fn)
     }
 }
 
-bool nanoplc_hal_read_di(size_t index)
+static bool read_di_unlocked(size_t index)
 {
     if (index < NANOPLC_HAL_MAX_DI && s_di_readers[index] != NULL) {
         return s_di_readers[index](index);
@@ -131,7 +154,15 @@ bool nanoplc_hal_read_di(size_t index)
     return e->active_high ? (raw != 0) : (raw == 0);
 }
 
-void nanoplc_hal_write_do(size_t index, bool value)
+bool nanoplc_hal_read_di(size_t index)
+{
+    hal_lock();
+    const bool value = read_di_unlocked(index);
+    hal_unlock();
+    return value;
+}
+
+static void write_do_unlocked(size_t index, bool value)
 {
     if (index < sizeof(s_do_shadow)) {
         s_do_shadow[index] = value;
@@ -148,10 +179,20 @@ void nanoplc_hal_write_do(size_t index, bool value)
     gpio_level(e->gpio, e->active_high, value);
 }
 
+void nanoplc_hal_write_do(size_t index, bool value)
+{
+    hal_lock();
+    write_do_unlocked(index, value);
+    hal_unlock();
+}
+
 float nanoplc_hal_read_ai(size_t index)
 {
+    float value = 0.0f;
+    hal_lock();
     if (index < NANOPLC_HAL_MAX_AI && s_ai_readers[index] != NULL) {
-        return s_ai_readers[index](index);
+        value = s_ai_readers[index](index);
     }
-    return 0.0f;
+    hal_unlock();
+    return value;
 }

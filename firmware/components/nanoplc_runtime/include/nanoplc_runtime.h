@@ -6,16 +6,20 @@
 extern "C" {
 #endif
 
-/** Must stay aligned with codegen expectations + build manifest (plan §29). */
-#define NANOPLC_RUNTIME_ABI_VERSION 1u
+/**
+ * Must stay aligned with codegen expectations + build manifest (plan §29).
+ * v2: per-task entry points via `nanoplc_generated_tasks()` (T1).
+ */
+#define NANOPLC_RUNTIME_ABI_VERSION 2u
 
 /**
- * Starts the PLC scan FreeRTOS task with the requested period in milliseconds.
- * When `period_ms` is zero a 10 ms default applies.
+ * Binds I/O and starts one FreeRTOS task per PLC task from the generated task table.
+ * PLC priority p maps to FreeRTOS priority `configMAX_PRIORITIES - 2 - p` (at least 1).
+ * All PLC tasks run on one core so priorities order them deterministically.
  */
-void nanoplc_runtime_init(uint32_t scan_period_ms);
+void nanoplc_runtime_init(void);
 
-/** Current PLC scan period in milliseconds (for generated timer blocks). */
+/** Interval of the primary cyclic task in milliseconds (0 when there is none). */
 uint32_t nanoplc_runtime_scan_period_ms(void);
 
 #ifdef __cplusplus

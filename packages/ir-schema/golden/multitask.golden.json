@@ -1,0 +1,77 @@
+{
+  "name": "multitask",
+  "description": "MainTask (10 ms, prio 1), Slow (30 ms, prio 2) and Bg (freewheeling, prio 20). Each counts its passes; Slow runs a TON with its own dt. Both MainTask and Slow drive DO_Lamp, so at coinciding passes (t = 30, 60, ...) the lower-priority Slow writes last.",
+  "tasks": [
+    { "id": "MainTask", "name": "MainTask", "kind": "cyclic", "priority": 1, "interval_ms": 10, "program": "fast" },
+    { "id": "Slow", "name": "Slow", "kind": "cyclic", "priority": 2, "interval_ms": 30, "program": "slow" },
+    { "id": "Bg", "name": "Bg", "kind": "freewheeling", "priority": 20, "program": "bg" }
+  ],
+  "programs": {
+    "fast": {
+      "variables": [{ "name": "Acc", "class": "VAR", "type": "DINT" }],
+      "blocks": [
+        { "id": "acc_r", "type": "LOCAL", "params": { "name": "Acc" } },
+        { "id": "one", "type": "CONST", "params": { "data_type": "DINT", "value": 1 } },
+        { "id": "add1", "type": "ADD" },
+        { "id": "acc_w", "type": "LOCAL", "params": { "name": "Acc" } },
+        { "id": "on", "type": "CONST", "params": { "data_type": "BOOL", "value": true } },
+        { "id": "do_lamp", "type": "DO", "params": { "channel": 1, "symbol": "DO_Lamp" } }
+      ],
+      "wires": [
+        { "from": { "block": "acc_r", "port": "Q" }, "to": { "block": "add1", "port": "IN1" } },
+        { "from": { "block": "one", "port": "Q" }, "to": { "block": "add1", "port": "IN2" } },
+        { "from": { "block": "add1", "port": "Q" }, "to": { "block": "acc_w", "port": "IN" } },
+        { "from": { "block": "on", "port": "Q" }, "to": { "block": "do_lamp", "port": "IN" } }
+      ]
+    },
+    "slow": {
+      "variables": [{ "name": "Acc", "class": "VAR", "type": "DINT" }],
+      "blocks": [
+        { "id": "acc_r", "type": "LOCAL", "params": { "name": "Acc" } },
+        { "id": "one", "type": "CONST", "params": { "data_type": "DINT", "value": 1 } },
+        { "id": "add1", "type": "ADD" },
+        { "id": "acc_w", "type": "LOCAL", "params": { "name": "Acc" } },
+        { "id": "off", "type": "CONST", "params": { "data_type": "BOOL", "value": false } },
+        { "id": "do_lamp", "type": "DO", "params": { "channel": 1, "symbol": "DO_Lamp" } },
+        { "id": "di_run", "type": "DI", "params": { "channel": 1, "symbol": "DI_Run" } },
+        { "id": "t1", "type": "TON", "params": { "pt_ms": 100 } },
+        { "id": "do_done", "type": "DO", "params": { "channel": 2, "symbol": "DO_Done" } }
+      ],
+      "wires": [
+        { "from": { "block": "acc_r", "port": "Q" }, "to": { "block": "add1", "port": "IN1" } },
+        { "from": { "block": "one", "port": "Q" }, "to": { "block": "add1", "port": "IN2" } },
+        { "from": { "block": "add1", "port": "Q" }, "to": { "block": "acc_w", "port": "IN" } },
+        { "from": { "block": "off", "port": "Q" }, "to": { "block": "do_lamp", "port": "IN" } },
+        { "from": { "block": "di_run", "port": "Q" }, "to": { "block": "t1", "port": "IN" } },
+        { "from": { "block": "t1", "port": "Q" }, "to": { "block": "do_done", "port": "IN" } }
+      ]
+    },
+    "bg": {
+      "variables": [{ "name": "Acc", "class": "VAR", "type": "DINT" }],
+      "blocks": [
+        { "id": "acc_r", "type": "LOCAL", "params": { "name": "Acc" } },
+        { "id": "one", "type": "CONST", "params": { "data_type": "DINT", "value": 1 } },
+        { "id": "add1", "type": "ADD" },
+        { "id": "acc_w", "type": "LOCAL", "params": { "name": "Acc" } }
+      ],
+      "wires": [
+        { "from": { "block": "acc_r", "port": "Q" }, "to": { "block": "add1", "port": "IN1" } },
+        { "from": { "block": "one", "port": "Q" }, "to": { "block": "add1", "port": "IN2" } },
+        { "from": { "block": "add1", "port": "Q" }, "to": { "block": "acc_w", "port": "IN" } }
+      ]
+    }
+  },
+  "steps": [
+    { "expect": { "fast__Acc": 1, "slow__Acc": 0, "bg__Acc": 10, "DO_Lamp": true } },
+    {
+      "set": { "DI_Run": true },
+      "scans": 2,
+      "expect": { "fast__Acc": 3, "slow__Acc": 1, "bg__Acc": 30, "DO_Lamp": false, "slow__t1.ET": 30, "DO_Done": false }
+    },
+    { "expect": { "fast__Acc": 4, "DO_Lamp": true } },
+    {
+      "scans": 8,
+      "expect": { "fast__Acc": 12, "slow__Acc": 4, "bg__Acc": 120, "DO_Lamp": false, "slow__t1.ET": 100, "DO_Done": true }
+    }
+  ]
+}

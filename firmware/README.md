@@ -1,6 +1,20 @@
 # NanoPLC firmware (ESP-IDF)
 
-Skeleton described in **`docs/VIRTUAL_PLC_PLAN.md` §14**: PLC scan loop in a dedicated FreeRTOS task, stub `nanoplc_generated_program_scan`, scan timing telemetry, and Task WDT membership.
+Runtime described in **`docs/VIRTUAL_PLC_PLAN.md` §5.7 and §14**: one FreeRTOS task per PLC task from the generated `nanoplc_generated_tasks()` table, overrun / watchdog logs per task id, and Task WDT membership.
+
+## Task runtime
+
+| PLC task kind | FreeRTOS loop | Δt passed to the task |
+|---------------|---------------|-----------------------|
+| cyclic | `xTaskDelayUntil(interval_ms)` | `interval_ms`; after a missed deadline, the real elapsed time (missed passes are skipped, not replayed) |
+| freewheeling | one pass, then `vTaskDelay(1)` | measured elapsed time since the previous pass |
+| event | not started yet (T2), logged at boot | — |
+
+- PLC priority `p` (0 = highest) → FreeRTOS priority `configMAX_PRIORITIES - 2 - p`, at least 1.
+- All PLC tasks are pinned to core 1 (core 0 with `CONFIG_FREERTOS_UNICORE`), so priorities order them deterministically and Wi-Fi stays on core 0.
+- `CONFIG_FREERTOS_HZ=1000` (`sdkconfig.defaults`): intervals are exact in milliseconds. An existing `sdkconfig` keeps its old tick rate; delete it (or run `idf.py menuconfig`) after upgrading. The runtime warns at boot when an interval is not a whole number of ticks.
+- `nanoplc_hal` serializes DI / DO / AI access with a mutex, because PLC tasks preempt each other and I2C expander drivers do read-modify-write on shared registers.
+- Overrun logs are rate-limited to one per second per task and report how many were suppressed.
 
 ## Requirements
 
@@ -36,8 +50,8 @@ idf.py flash monitor
 | Path | Role |
 |------|------|
 | `main/` | `app_main` bootstraps `nanoplc_runtime_init` |
-| `components/nanoplc_runtime/` | Scan cadence, watchdog, scan duration metrics |
+| `components/nanoplc_runtime/` | One FreeRTOS task per PLC task, watchdog, overrun logs |
 | `components/nanoplc_hal/` | GPIO process-image HAL (`nanoplc_hal_read_di` / `write_do`) |
 | `components/nanoplc_generated/` | Codegen output (`plc_program.c`, `io_hal_config.c`) |
 
-**`NANOPLC_RUNTIME_ABI_VERSION`** lives in `nanoplc_runtime.h`. **`nanoplc_generated_magic`** lives in `nanoplc_generated.h` / `plc_program.c`.
+**`NANOPLC_RUNTIME_ABI_VERSION`** (2: per-task entry points) lives in `nanoplc_runtime.h`. The task table type `nanoplc_task_desc_t` and **`nanoplc_generated_magic`** live in `nanoplc_generated.h` / `plc_program.c`.

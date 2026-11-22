@@ -216,9 +216,9 @@ Each PLC task becomes **one FreeRTOS task** (`np_<task id>`), high enough that W
 | freewheeling | loop + `vTaskDelay(1)` (or yield) after each pass |
 | event | wait on a notification / event bit set from the PI writer |
 
-`app_main` must **not** hard-code `nanoplc_runtime_init(10)`. Codegen/runtime reads `tasks[]` (until then, primary cyclic interval).
+**Done (T1b):** `nanoplc_runtime_init()` (no argument) reads `nanoplc_generated_tasks()` and creates `np_<task id>` per cyclic / freewheeling task. PLC priority `p` → FreeRTOS `configMAX_PRIORITIES - 2 - p` (min 1); all PLC tasks are pinned to one core (core 1 on dual-core). Tick rate is 1 kHz (`CONFIG_FREERTOS_HZ=1000`). Cyclic Δt is `interval_ms`; after a missed deadline the task resyncs and passes the real elapsed time. Freewheeling Δt is measured. Event tasks are logged and not started (T2). `nanoplc_hal` I/O calls are mutex-protected.
 
-Watchdog: register each PLC task with the ESP task WDT; log `task overrun` when elapsed > `interval_ms` (cyclic) or > `watchdog.time_ms`.
+Watchdog: each PLC task is registered with the ESP task WDT; `task <id> overrun` when a pass exceeds `interval_ms` (cyclic) or `watchdog.time_ms`, rate-limited to one log per second per task.
 
 ### 5.8. Simulator mapping (target)
 
@@ -232,7 +232,7 @@ Watchdog: register each PLC task with the ESP task WDT; log `task overrun` when 
 
 **T1a (done):** `compileTasksToIr()` compiles every task’s entry PROGRAM (plus CALLs) into IR `tasks[]` (`kind`, interval/event, `priority`, `program`, `primary`, `schedule`); `schedule` stays the primary task’s. A PROGRAM reachable from several tasks warns `NP-0117` (shared state, no locking). The simulator runs all tasks (§5.8).
 
-**T1b (next):** one FreeRTOS task per PLC task, each running its entry PROGRAM (§5.7, §16.1). Until then firmware runs only the primary task.
+**T1b (done):** one FreeRTOS task per PLC task, each running its entry PROGRAM (§5.7, §16.1).
 
 **Then (T2):** event tasks, watchdog fail-safe.
 
@@ -423,7 +423,7 @@ Checklist:
 
 1. [x] Create **`firmware/`** ESP-IDF project (root CMake + `main`).
 2. [x] **`firmware/sdkconfig.defaults`** for ESP32-S3 (`CONFIG_IDF_TARGET="esp32s3"`, clocking, UART log, minimals).
-3. [x] **`components/nanoplc_runtime/`** with `nanoplc_runtime_init` plus internal scan task calling stub `nanoplc_generated_program_scan`; WDT and scan overrun logging (see §41).
+3. [x] **`components/nanoplc_runtime/`** with `nanoplc_runtime_init` starting one FreeRTOS task per PLC task from `nanoplc_generated_tasks()`; WDT and per-task overrun logging (see §5.7, §41).
 4. [x] **`components/nanoplc_generated/`** stub (`plc_program.c` placeholder matching §16).
 5. [x] **`main/app_main.c`** — firmware boot hook calling `nanoplc_runtime_init`.
 6. [x] Local verify: `idf.py set-target esp32s3`, `idf.py build` (maintainer workflow); flash + monitor optional. CI build job (§7.5) **done**.
@@ -456,22 +456,14 @@ Split **fixed runtime** (never generated) vs **generated user logic**.
 ### 16.1. Stable names (example contract)
 
 - `nanoplc_runtime_*` live in `nanoplc_runtime`, never generated.
-- **v0 (until T2):** single user entry still used by the existing scan task:
+- **ABI v2 (T1, done):** one generated static function per PLC task plus a static table:
 
   ```c
-  void nanoplc_generated_program_scan(void);
+  static void npgen_task_main_task(uint32_t dt_ms);
+  const nanoplc_task_desc_t *nanoplc_generated_tasks(size_t *out_count);
   ```
 
-  Body is the **entry PROGRAM** of the primary cyclic task. Period comes from that task (`nanoplc_runtime_scan_period_ms`), not a magic `10` in `app_main` (fix when T1 lands).
-
-- **Target (T1):** one generated function per PLC task plus a static table:
-
-  ```c
-  void nanoplc_generated_task_main_task(uint32_t dt_ms);
-  const nanoplc_TaskDesc *nanoplc_generated_tasks(size_t *out_count);
-  ```
-
-  `nanoplc_TaskDesc`: `id`, `kind`, `priority`, `interval_ms`, `watchdog_ms`, function pointer.
+  `nanoplc_task_desc_t` (in `nanoplc_generated.h`): `id`, `kind`, `priority`, `interval_ms`, `watchdog_ms`, `primary`, `run`. POU functions take `dt_ms` from the calling task. The v1 entry `nanoplc_generated_program_scan()` is gone; IR without `tasks[]` generates a single `main_task`.
 
 - Optional introspection / debug:
 
@@ -735,10 +727,11 @@ Section 5 is the **product contract**. This section is the **implementation sequ
 ### 33.2. T1 — Multi-task runtime
 
 1. [x] IR entity `tasks[]`: each task has `kind`, `interval_ms` / `event`, `priority`, `program`, and that program’s `schedule` (`compileTasksToIr`, T1a).
-2. [ ] Codegen: `nanoplc_generated_task_<id>(dt_ms)` + `nanoplc_generated_tasks()` table (§16.1).
-3. [ ] `nanoplc_runtime` creates one FreeRTOS task per PLC task (§5.7); stop hard-coding `nanoplc_runtime_init(10)` in `app_main`.
+2. [x] Codegen: static `npgen_task_<id>(dt_ms)` per task + `nanoplc_generated_tasks()` table (§16.1); POU functions take `dt_ms` from the calling task (T1b).
+3. [x] `nanoplc_runtime` creates one FreeRTOS task per PLC task (§5.7); `app_main` calls `nanoplc_runtime_init()` without a hard-coded period (T1b).
 4. [x] Simulator: deterministic virtual-time scheduler over `tasks[]`; timer Δt is per-task (T1a).
-5. [ ] Overrun / watchdog logs include **task id**.
+5. [x] Overrun / watchdog logs include **task id** (T1b).
+6. [x] Golden C harness runs the generated task table with the same virtual-time scheduler as the simulator (`golden/multitask.golden.json`); firmware CI builds `examples/multitask`.
 
 ### 33.3. T2 — Event tasks and watchdog fail-safe
 
@@ -997,7 +990,7 @@ _Last reviewed: 2026-08-16._
 | ESP-IDF app + `main` + `nanoplc_runtime` + `nanoplc_generated` (§7.2, §14) | **Done** |
 | `sdkconfig.defaults` for ESP32-S3 (`CONFIG_IDF_TARGET="esp32s3"`) | **Done** |
 | `nanoplc_runtime` CMake: `esp_system` (IDF 5.3; replaces removed `esp_task_wdt` component) | **Done** |
-| PLC scan FreeRTOS task, WDT, overrun logging, stub `nanoplc_generated_program_scan` | **Done** (single cyclic task; T1 = one FreeRTOS task per PLC task, §33) |
+| PLC FreeRTOS tasks, WDT, overrun logging, `nanoplc_generated_tasks()` table | **Done** (one FreeRTOS task per PLC task since T1b, §33) |
 | Maintainer workflow `idf.py set-target esp32s3` + `idf.py build` | **Done** (see `firmware/README.md`) |
 | **StamPLC AW9523 driver** (`m5_aw9523` — onboard 8 DI / 4 relay DO @ I2C 0x59) | **Done** |
 | **StamPLC IO I2C driver** (`m5_stamplc_io` — expansion DO + analog voltage read) | **Done** |
@@ -1048,3 +1041,4 @@ Unchanged: IR format lock, ordered graph compile, TS simulator, C codegen, onlin
 - **Golden scenarios (2026-11-22):** `packages/ir-schema/golden/` (and_gate, blink_fbd, timers, rs_latch, numeric_wrap, call_counter) run in the TS simulator and in host-compiled generated C; CI runs `ir-schema` tests with a required C compiler. New example `examples/blink_fbd`.
 - **Firmware CI (2026-11-22):** `firmware-ci.yml` builds the stub and each example's generated code with ESP-IDF v5.3.3. `tools/codegen` gains `--project <dir>`. Project-from-disk loading (`compileProjectDir`, `buildCodegenIoContext`, …) moved into `packages/ir-schema/src/projectDisk.ts` and is shared by the extension, CLI, and golden tests.
 - **Multi-task IR + Virtual PLC (T1a, 2026-11-22):** `compileTasksToIr()` emits IR `tasks[]` for the whole Task Configuration (IDE compile and `compileProjectDir` use it). `PlcSimulator` schedules all cyclic / freewheeling tasks in deterministic virtual time (priority breaks ties; per-task Δt); snapshots add `task_passes`. Warnings `NP-0117` (PROGRAM shared between tasks) and `NP-0118` (event task not scheduled). Firmware multi-task is T1b.
+- **Multi-task firmware (T1b, 2026-11-22):** runtime ABI v2. Codegen emits one task function per PLC task and the `nanoplc_generated_tasks()` table; `nanoplc_runtime_init()` starts one pinned FreeRTOS task per cyclic / freewheeling task with priority mapping, per-task TWDT, and rate-limited overrun logs with the task id. Fixed: `app_main` no longer hard-codes 10 ms, and the RTOS tick is 1 kHz (was 100 Hz, so intervals were rounded down to 10 ms steps, and 5 ms ran every 10 ms). HAL I/O is mutex-protected. New example `examples/multitask`, golden `multitask`, CI builds it.

@@ -1,34 +1,15 @@
+import { irPrimaryPeriodMs, irTaskList, irTaskPeriodMs } from "../irTasks";
 import type { IrTask, PlcIr } from "../types";
 import { createSimState, runTaskPass, snapshot } from "./executeScan";
 import type { SimIoCapacity, SimState, SimulatorSnapshot } from "./types";
 
-/** Virtual period of a freewheeling task: one pass per 1 ms RTOS tick. */
-export const FREEWHEEL_PERIOD_MS = 1;
+export { FREEWHEEL_PERIOD_MS } from "../irTasks";
 
 interface SimTask {
   task: IrTask;
   period_ms: number;
   next_due_ms: number;
   last_run_ms?: number;
-}
-
-/** IR without `tasks[]` (T0) runs `schedule` as one cyclic task. */
-function irTasks(ir: PlcIr, primaryPeriod: number): IrTask[] {
-  if (ir.tasks && ir.tasks.length > 0) {
-    return ir.tasks;
-  }
-  return [
-    {
-      id: "main_task",
-      name: "MainTask",
-      kind: "cyclic",
-      priority: 1,
-      interval_ms: primaryPeriod,
-      program: ir.project.program,
-      primary: true,
-      schedule: ir.schedule,
-    },
-  ];
 }
 
 /**
@@ -54,31 +35,18 @@ export class PlcSimulator {
 
   /** Interval of the primary cyclic task (one `stepOnce`). */
   get scanPeriodMs(): number {
-    const primary = this.primaryTask();
-    if (primary?.kind === "cyclic" && primary.interval_ms && primary.interval_ms > 0) {
-      return primary.interval_ms;
-    }
-    return this.ir.project.scan_period_ms > 0 ? this.ir.project.scan_period_ms : 10;
+    return irPrimaryPeriodMs(this.ir);
   }
 
   get running(): boolean {
     return this.timer !== undefined;
   }
 
-  private primaryTask(): IrTask | undefined {
-    const tasks = this.ir.tasks ?? [];
-    return tasks.find((t) => t.primary) ?? tasks[0];
-  }
-
   private createTasks(): SimTask[] {
-    const legacyPeriod = this.ir.project.scan_period_ms > 0 ? this.ir.project.scan_period_ms : 10;
-    return irTasks(this.ir, legacyPeriod)
+    return irTaskList(this.ir)
       .filter((task) => task.kind !== "event")
       .map((task) => {
-        const period =
-          task.kind === "cyclic" && task.interval_ms && task.interval_ms > 0
-            ? task.interval_ms
-            : FREEWHEEL_PERIOD_MS;
+        const period = irTaskPeriodMs(task);
         return { task, period_ms: period, next_due_ms: period };
       });
   }

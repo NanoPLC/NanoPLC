@@ -8,11 +8,13 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { codegenC, collectTypedVars, cTimerName, cTypeFor, cVarName } from "../codegen/cGenerator";
-import { compileProjectToIr } from "../compileFbd";
+import { compileProjectToIr, compileTasksToIr } from "../compileFbd";
+import { irPrimaryPeriodMs } from "../irTasks";
+import { defaultMainTask } from "../tasks";
 import { compileProjectDir, loadProjectFbdSourcesFromDisk, loadProjectIoProfile } from "../projectDisk";
 import { FBD_SOURCE_SCHEMA_VERSION, IO_MAP_SCHEMA_VERSION, PROJECT_SCHEMA_VERSION } from "../constants";
 import { PlcSimulator } from "../simulator/PlcSimulator";
-import type { IoMap, NanoPlcProject, PlcIr, PlcPrimitiveType } from "../types";
+import type { IoMap, NanoPlcProject, NanoPlcTaskRef, PlcIr, PlcPrimitiveType } from "../types";
 
 export type GoldenValue = boolean | number;
 
@@ -36,6 +38,8 @@ export interface GoldenScenario {
   entry?: string;
   /** Scan period in ms for inline programs (default 10). */
   period_ms?: number;
+  /** Task Configuration for inline programs (default: one MainTask running `entry`). A step's scan is one primary interval. */
+  tasks?: NanoPlcTaskRef[];
   steps: GoldenStep[];
 }
 
@@ -86,14 +90,21 @@ export function compileGoldenScenario(scenario: GoldenScenario, examplesDir: str
       device: { board: "esp32-s3", idf_target: "esp32s3" },
       scan: { period_ms: scenario.period_ms ?? 10 },
       programs: ids.map((id) => ({ id, name: id, source: `src/${id}.fbd.json`, language: "fbd" })),
+      tasks: scenario.tasks ?? [defaultMainTask(scenario.period_ms ?? 10, entry ?? "main")],
     };
     for (const id of ids) {
       sources.set(id, { schema_version: FBD_SOURCE_SCHEMA_VERSION, name: id, ...(scenario.programs![id] as object) });
     }
     ioMap = { schema_version: IO_MAP_SCHEMA_VERSION, entries: [] };
+    const tasksResult = compileTasksToIr(project, sources, ioMap);
+    if (!tasksResult.ok || !tasksResult.ir) {
+      const msg = tasksResult.diagnostics.map((d) => `${d.code} ${d.message}`).join("; ");
+      throw new Error(`Golden scenario "${scenario.name}" does not compile: ${msg}`);
+    }
+    return tasksResult.ir;
   }
 
-  const result = compileProjectToIr(project, sources, entry ?? "main", ioMap);
+  const result = compileProjectToIr(project, sources, entry!, ioMap);
   if (!result.ok || !result.ir) {
     const msg = result.diagnostics.map((d) => `${d.code} ${d.message}`).join("; ");
     throw new Error(`Golden scenario "${scenario.name}" does not compile: ${msg}`);
@@ -180,13 +191,10 @@ export function goldenCHarness(ir: PlcIr, scenario: GoldenScenario): string {
   const types = new Map(collectTypedVars(ir).map((v) => [v.name, v.type]));
   const body = scenario.steps.flatMap((step) => [
     ...Object.entries(step.set ?? {}).map(([k, v]) => cAssign(k, v, ir, types)),
-    `    for (int i = 0; i < ${step.scans ?? 1}; i++) {`,
-    "        nanoplc_generated_program_scan();",
-    "    }",
+    `    h_advance(${step.scans ?? 1}u * ${irPrimaryPeriodMs(ir)}u);`,
     ...Object.keys(step.expect).map((k) => cPrint(k, types)),
     `    printf("\\n");`,
   ]);
-  const period = ir.project.scan_period_ms > 0 ? ir.project.scan_period_ms : 10;
   return `#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -206,13 +214,58 @@ void nanoplc_hal_write_do(size_t index, bool value)
         h_do[index] = value;
     }
 }
-uint32_t nanoplc_runtime_scan_period_ms(void) { return ${period}u; }
 
 #include "plc_program.c"
+
+/* Same virtual-time scheduler as PlcSimulator.advance(). */
+#define H_TASKS_MAX 16
+static const nanoplc_task_desc_t *h_tasks;
+static size_t h_count;
+static uint32_t h_now;
+static uint32_t h_due[H_TASKS_MAX];
+static uint32_t h_last[H_TASKS_MAX];
+
+static uint32_t h_period(const nanoplc_task_desc_t *t)
+{
+    return (t->kind == NANOPLC_TASK_CYCLIC && t->interval_ms > 0u) ? t->interval_ms : 1u;
+}
+
+static void h_advance(uint32_t ms)
+{
+    const uint32_t target = h_now + ms;
+    for (;;) {
+        size_t best = h_count;
+        for (size_t i = 0; i < h_count; i++) {
+            if (h_tasks[i].kind == NANOPLC_TASK_EVENT || h_due[i] > target) {
+                continue;
+            }
+            if (best == h_count || h_due[i] < h_due[best] ||
+                (h_due[i] == h_due[best] && h_tasks[i].priority < h_tasks[best].priority)) {
+                best = i;
+            }
+        }
+        if (best == h_count) {
+            break;
+        }
+        const nanoplc_task_desc_t *t = &h_tasks[best];
+        const uint32_t now = h_due[best];
+        t->run(t->kind == NANOPLC_TASK_CYCLIC ? h_period(t) : now - h_last[best]);
+        h_last[best] = now;
+        h_due[best] = now + h_period(t);
+    }
+    h_now = target;
+}
 
 int main(void)
 {
     (void)h_do;
+    h_tasks = nanoplc_generated_tasks(&h_count);
+    if (h_count > H_TASKS_MAX) {
+        return 3;
+    }
+    for (size_t i = 0; i < h_count; i++) {
+        h_due[i] = h_period(&h_tasks[i]);
+    }
 ${body.join("\n")}
     return 0;
 }

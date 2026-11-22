@@ -31,13 +31,18 @@ const fbd: FbdSource = {
   ],
 };
 
-test("codegenC emits scan function for and_gate", () => {
+test("codegenC emits a task function and task table for and_gate", () => {
   const compiled = compileFbdToIr(project, fbd, "main");
   assert.ok(compiled.ir);
   const irJson = JSON.stringify(compiled.ir);
   const hash = createHash("sha256").update(irJson).digest("hex");
   const out = codegenC(compiled.ir, hash);
-  assert.match(out.plc_program_c, /nanoplc_generated_program_scan/);
+  assert.match(out.plc_program_c, /static void npgen_task_main_task\(uint32_t npgen_dt_ms\)/);
+  assert.match(
+    out.plc_program_c,
+    /\{ "main_task", NANOPLC_TASK_CYCLIC, 1u, 10u, 0u, true, npgen_task_main_task \},/
+  );
+  assert.match(out.plc_program_c, /const nanoplc_task_desc_t \*nanoplc_generated_tasks\(size_t \*out_count\)/);
   assert.match(out.plc_program_c, /nanoplc_hal_read_di/);
   assert.match(out.plc_program_c, /nanoplc_hal_write_do/);
   assert.match(out.plc_program_c, /&&/);
@@ -130,7 +135,7 @@ test("codegenC emits pou function for CALL", () => {
   const hash = createHash("sha256").update(JSON.stringify(compiled.ir)).digest("hex");
   const out = codegenC(compiled.ir, hash);
   assert.match(out.plc_program_c, /npgen_pou_aux/);
-  assert.match(out.plc_program_c, /static void npgen_pou_aux\(void\)/);
+  assert.match(out.plc_program_c, /static void npgen_pou_aux\(uint32_t npgen_dt_ms\)/);
   assert.doesNotMatch(out.plc_program_c, /npgen_scan_dt_ms/);
 });
 
@@ -170,7 +175,7 @@ test("codegenC copies CALL IN and OUT variables", () => {
   const hash = createHash("sha256").update(JSON.stringify(compiled.ir)).digest("hex");
   const out = codegenC(compiled.ir, hash);
   assert.match(out.plc_program_c, /npgen_v_aux__Enable/);
-  assert.match(out.plc_program_c, /npgen_pou_aux\(\);/);
+  assert.match(out.plc_program_c, /npgen_pou_aux\(npgen_dt_ms\);/);
 });
 
 test("codegenC emits scan dt only when TON is present", () => {
@@ -191,10 +196,10 @@ test("codegenC emits scan dt only when TON is present", () => {
   assert.ok(compiled.ir);
   const hash = createHash("sha256").update(JSON.stringify(compiled.ir)).digest("hex");
   const out = codegenC(compiled.ir, hash);
-  assert.match(out.plc_program_c, /const uint32_t npgen_scan_dt_ms = nanoplc_runtime_scan_period_ms\(\);/);
+  assert.doesNotMatch(out.plc_program_c, /nanoplc_runtime_scan_period_ms/);
   assert.match(
     out.plc_program_c,
-    /npgen_tmr_ton1\.et_ms = npgen_et_advance\(npgen_tmr_ton1\.et_ms, npgen_scan_dt_ms, 500u\);/
+    /npgen_tmr_ton1\.et_ms = npgen_et_advance\(npgen_tmr_ton1\.et_ms, npgen_dt_ms, 500u\);/
   );
   assert.doesNotMatch(out.plc_program_c, /NPGEN_SCAN_DT_MS/);
 });

@@ -48,10 +48,11 @@ There is no retain memory in v0. Every reset or power cycle is a cold start.
 
 Timers advance by the **Δt of the task pass that executes them**:
 
-- Firmware: `nanoplc_runtime_scan_period_ms()`, the nominal interval of the primary cyclic task. The measured elapsed time is not used yet, so an overrunning pass still counts as one nominal interval.
-- Simulator: `project.scan_period_ms` of the IR, also nominal. Wall-clock jitter of the host has no effect on timer values.
+- Cyclic task: its nominal `interval_ms`. On firmware, after a missed deadline the next pass gets the real elapsed time instead (missed passes are skipped, not replayed).
+- Freewheeling task: the elapsed time since its previous pass. The simulator runs it every virtual millisecond (Δt = 1); firmware measures it.
+- Event task: not scheduled yet (T2).
 
-Both sides therefore see the same timer values after the same number of passes.
+Each task passes its Δt down to the PROGRAMs it CALLs, so a callee's timers advance with the calling task. The simulator uses virtual time, so host wall-clock jitter has no effect on timer values. As long as firmware meets its deadlines, both sides see the same timer values after the same passes.
 
 ## 2. Data types
 

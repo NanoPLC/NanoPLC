@@ -68,6 +68,11 @@ export function patchExistingFirmwareTree(firmwareRoot: string): string[] {
       fs.writeFileSync(sdkDefaults, text, "utf8");
       patches.push("sdkconfig.defaults: default target esp32s3");
     }
+    if (!/^CONFIG_FREERTOS_HZ=/m.test(text)) {
+      text = `${text.replace(/\s*$/, "\n")}\n# 1 ms RTOS tick so PLC task intervals are not rounded down to 10 ms steps.\nCONFIG_FREERTOS_HZ=1000\n`;
+      fs.writeFileSync(sdkDefaults, text, "utf8");
+      patches.push("sdkconfig.defaults: CONFIG_FREERTOS_HZ=1000 (delete sdkconfig to apply)");
+    }
   }
 
   const template = resolveFirmwareTemplateRoot();
@@ -93,10 +98,16 @@ export function patchExistingFirmwareTree(firmwareRoot: string): string[] {
       patches.push("added m5_stamplc_ac component");
     }
 
+    // Runtime ABI files must match the generated code (ABI v2: per-task entry points).
     for (const rel of [
       path.join("components", "nanoplc_hal", "nanoplc_hal.c"),
+      path.join("components", "nanoplc_hal", "CMakeLists.txt"),
       path.join("components", "nanoplc_hal", "include", "nanoplc_hal.h"),
       path.join("components", "nanoplc_generated", "CMakeLists.txt"),
+      path.join("components", "nanoplc_generated", "include", "nanoplc_generated.h"),
+      path.join("components", "nanoplc_runtime", "nanoplc_runtime.c"),
+      path.join("components", "nanoplc_runtime", "include", "nanoplc_runtime.h"),
+      path.join("main", "app_main.c"),
     ]) {
       const from = path.join(template, rel);
       const to = path.join(firmwareRoot, rel);

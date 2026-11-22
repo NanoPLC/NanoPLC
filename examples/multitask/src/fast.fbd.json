@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "name": "Fast",
+  "blocks": [
+    { "id": "di_stop", "type": "DI", "params": { "channel": 1, "symbol": "DI_Stop" } },
+    { "id": "do_alarm", "type": "DO", "params": { "channel": 2, "symbol": "DO_Alarm" } }
+  ],
+  "wires": [
+    { "from": { "block": "di_stop", "port": "Q" }, "to": { "block": "do_alarm", "port": "IN" } }
+  ],
+  "layout": {
+    "di_stop": { "x": 48, "y": 88 },
+    "do_alarm": { "x": 300, "y": 88 }
+  }
+}

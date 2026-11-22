@@ -1,6 +1,7 @@
-import type { PlcIr, PlcPrimitiveType, ScheduleStep } from "../types";
+import type { IrTask, PlcIr, PlcPrimitiveType, ScheduleStep } from "../types";
 import type { IoMap } from "../types";
 import { IR_VERSION } from "../constants";
+import { irTaskList } from "../irTasks";
 import { pouIrName } from "../pouVars";
 import { codegenIoHalConfig, type CodegenFirmwareOutput, type CodegenIoContext } from "./codegenFirmware";
 
@@ -298,7 +299,7 @@ function line(step: ScheduleStep, dtExpr: string): string[] {
         const dest = pouIrName(step.program ?? "pou", port);
         lines.push(`    ${varRef(dest)} = ${varRef(src)};`);
       }
-      lines.push(`    npgen_pou_${id}();`);
+      lines.push(`    npgen_pou_${id}(${dtExpr});`);
       for (const [port, dest] of Object.entries(step.call_out ?? {})) {
         const src = pouIrName(step.program ?? "pou", port);
         lines.push(`    ${varRef(dest)} = ${varRef(src)};`);
@@ -311,8 +312,29 @@ function line(step: ScheduleStep, dtExpr: string): string[] {
 }
 
 function allSteps(ir: PlcIr): ScheduleStep[] {
+  const tasks = irTaskList(ir).flatMap((t) => t.schedule);
   const extra = ir.pou_schedules?.flatMap((p) => p.schedule) ?? [];
-  return [...ir.schedule, ...extra];
+  return [...tasks, ...extra];
+}
+
+/** C name of the static function that runs one pass of a PLC task. */
+export function cTaskFnName(taskId: string): string {
+  return `npgen_task_${cIdent(taskId)}`;
+}
+
+const TASK_KIND_C: Record<IrTask["kind"], string> = {
+  cyclic: "NANOPLC_TASK_CYCLIC",
+  freewheeling: "NANOPLC_TASK_FREEWHEELING",
+  event: "NANOPLC_TASK_EVENT",
+};
+
+function cString(text: string): string {
+  return `"${text.replace(/[\\"]/g, (c) => `\\${c}`).replace(/[^\x20-\x7e]/g, "?")}"`;
+}
+
+function cFunction(signature: string, steps: ScheduleStep[], dtExpr: string): string {
+  const body = steps.flatMap((step) => line(step, dtExpr));
+  return [signature, "{", `    (void)${dtExpr};`, ...body, "}"].join("\n");
 }
 
 /** Every variable `plc_program.c` declares, with its PLC type. */
@@ -391,8 +413,9 @@ export function codegenC(ir: PlcIr, irSha256Hex: string, _ioMap?: IoMap): Codege
   const timers = timerBlocks(ir);
   const rss = rsBlocks(ir);
   const magic = computeIrMagic(ir, irSha256Hex);
-  const dtExpr = "npgen_scan_dt_ms";
+  const dtExpr = "npgen_dt_ms";
   const needMath = usesMathLib(ir);
+  const tasks = irTaskList(ir);
 
   const varDecls = typedVars
     .map((v) => {
@@ -416,46 +439,43 @@ export function codegenC(ir: PlcIr, irSha256Hex: string, _ioMap?: IoMap): Codege
   const rsStructs = rss.map((r) => `static struct { bool q; } npgen_rs_${r.id};`).join("\n");
 
   const pous = ir.pou_schedules ?? [];
-  const pouProtos = pous
-    .map((p) => `static void npgen_pou_${cIdent(p.id)}(void);`)
-    .join("\n");
-  const pouFns = pous
-    .map((p) => {
-      const pouBody = p.schedule.flatMap((step) => line(step, dtExpr)).join("\n");
-      return `static void npgen_pou_${cIdent(p.id)}(void)\n{\n${pouBody}\n}`;
-    })
+  const pouSig = (id: string) => `static void npgen_pou_${cIdent(id)}(uint32_t ${dtExpr})`;
+  const pouProtos = pous.map((p) => `${pouSig(p.id)};`).join("\n");
+  const pouFns = pous.map((p) => cFunction(pouSig(p.id), p.schedule, dtExpr)).join("\n\n");
+  const taskFns = tasks
+    .map((t) => cFunction(`static void ${cTaskFnName(t.id)}(uint32_t ${dtExpr})`, t.schedule, dtExpr))
     .join("\n\n");
-  const body = ir.schedule.flatMap((step) => line(step, dtExpr)).join("\n");
-  const needsDt = timers.length > 0;
-  const dtDecl = needsDt && pous.length > 0 ? "static uint32_t npgen_scan_dt_ms;\n" : "";
-  const scanDt = !needsDt
-    ? ""
-    : pous.length > 0
-      ? "    npgen_scan_dt_ms = nanoplc_runtime_scan_period_ms();\n\n"
-      : "    const uint32_t npgen_scan_dt_ms = nanoplc_runtime_scan_period_ms();\n\n";
-  const scanPeriodProto = needsDt
-    ? `/* Provided by nanoplc_runtime — forward declare to avoid CMake cycle (generated ↔ runtime). */
-uint32_t nanoplc_runtime_scan_period_ms(void);
-
-`
-    : "";
+  const taskRows = tasks
+    .map(
+      (t) =>
+        `    { ${cString(t.id)}, ${TASK_KIND_C[t.kind]}, ${t.priority}u, ${t.kind === "cyclic" ? (t.interval_ms ?? 0) : 0}u, ${t.watchdog_ms ?? 0}u, ${t.primary ? "true" : "false"}, ${cTaskFnName(t.id)} },`
+    )
+    .join("\n");
 
   const plc_program_c = `/* Auto-generated from IR v${IR_VERSION} — do not edit. */
 #include "nanoplc_generated.h"
 #include "nanoplc_hal.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 ${needMath ? "#include <math.h>\n" : ""}
-${scanPeriodProto}${diCount > 0 ? `static bool npgen_di[${diCount}];\n` : ""}${aiCount > 0 ? `static float npgen_ai[${aiCount}];\n` : ""}${doCount > 0 ? `static bool npgen_do[${doCount}];\n` : ""}${varDecls ? `${varDecls}\n` : ""}${timerStructs ? `${timerStructs}\n` : ""}${rsStructs ? `${rsStructs}\n` : ""}${dtDecl}${pouProtos ? `${pouProtos}\n` : ""}
+${diCount > 0 ? `static bool npgen_di[${diCount}];\n` : ""}${aiCount > 0 ? `static float npgen_ai[${aiCount}];\n` : ""}${doCount > 0 ? `static bool npgen_do[${doCount}];\n` : ""}${varDecls ? `${varDecls}\n` : ""}${timerStructs ? `${timerStructs}\n` : ""}${rsStructs ? `${rsStructs}\n` : ""}${pouProtos ? `${pouProtos}\n` : ""}
 uint32_t nanoplc_generated_magic(void)
 {
     return 0x${magic.toString(16).padStart(8, "0")}u;
 }
 ${pouFns ? `\n${pouFns}\n` : ""}
-void nanoplc_generated_program_scan(void)
+${taskFns}
+
+static const nanoplc_task_desc_t npgen_tasks[] = {
+${taskRows}
+};
+
+const nanoplc_task_desc_t *nanoplc_generated_tasks(size_t *out_count)
 {
-${scanDt}${body}
+    *out_count = sizeof(npgen_tasks) / sizeof(npgen_tasks[0]);
+    return npgen_tasks;
 }
 `;
 

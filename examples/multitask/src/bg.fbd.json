@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "name": "Background",
+  "variables": [
+    { "name": "Passes", "class": "VAR", "type": "DINT", "initial": 0 }
+  ],
+  "blocks": [
+    { "id": "passes_r", "type": "LOCAL", "params": { "name": "Passes" } },
+    { "id": "one", "type": "CONST", "params": { "data_type": "DINT", "value": 1 } },
+    { "id": "add1", "type": "ADD" },
+    { "id": "passes_w", "type": "LOCAL", "params": { "name": "Passes" } }
+  ],
+  "wires": [
+    { "from": { "block": "passes_r", "port": "Q" }, "to": { "block": "add1", "port": "IN1" } },
+    { "from": { "block": "one", "port": "Q" }, "to": { "block": "add1", "port": "IN2" } },
+    { "from": { "block": "add1", "port": "Q" }, "to": { "block": "passes_w", "port": "IN" } }
+  ],
+  "layout": {
+    "passes_r": { "x": 48, "y": 48 },
+    "one": { "x": 48, "y": 150 },
+    "add1": { "x": 260, "y": 88 },
+    "passes_w": { "x": 470, "y": 88 }
+  }
+}

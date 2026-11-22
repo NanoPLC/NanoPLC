@@ -363,7 +363,10 @@ function compileTaskLimitNote(project: NanoPlcProject): string | undefined {
   if (tasks.length <= 1) {
     return undefined;
   }
-  return `${tasks.length} tasks: all run in the Virtual PLC; firmware runs only the primary task for now.`;
+  const events = tasks.filter((t) => t.kind === "event").length;
+  return events > 0
+    ? `${tasks.length} tasks; event tasks are not scheduled yet.`
+    : `${tasks.length} tasks.`;
 }
 
 export async function compileActiveProject(options?: CompileProjectOptions): Promise<boolean> {

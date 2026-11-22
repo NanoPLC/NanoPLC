@@ -5,6 +5,7 @@ export {
   PROJECT_SCHEMA_VERSION,
 } from "./constants";
 export { compileFbdToIr, compileProjectToIr, compileTasksToIr } from "./compileFbd";
+export { FREEWHEEL_PERIOD_MS, irPrimaryPeriodMs, irPrimaryTask, irTaskList, irTaskPeriodMs } from "./irTasks";
 export { fbdOutputVar, fbdSourcePortIrName, resolveIoSymbol } from "./fbdIrNames";
 export { inferFbdPortTypes } from "./fbdPortTypes";
 export type { FbdPortTypes, FbdPortContext } from "./fbdPortTypes";

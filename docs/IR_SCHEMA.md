@@ -59,7 +59,7 @@ Optional **`modules[]`** and **`drivers[]`** drive the Project tree (§3.2). Whe
 
 **`tasks[]`** is the CODESYS-style **Task Configuration** (`docs/VIRTUAL_PLC_PLAN.md` §5). Each task has `kind` (`cyclic` | `freewheeling` | `event`), `priority` (0 = highest … 31 = lowest), optional `interval_ms` / `event` / `watchdog`, and **`program`** — the single entry PROGRAM. Extra programs belong on other tasks, or are invoked with an FBD **`CALL`** block (`params.program`).
 
-When `tasks[]` is omitted, the IDE synthesizes **MainTask** from `scan.period_ms` and the first program. `scan.period_ms` remains a cache of the **primary cyclic** interval for IR `scan_period_ms` (compile T0). Compile emits every task into IR `tasks`; the Virtual PLC runs all of them, firmware still runs only the primary task (until T1b). Legacy `pous[]` with one entry is still accepted.
+When `tasks[]` is omitted, the IDE synthesizes **MainTask** from `scan.period_ms` and the first program. `scan.period_ms` remains a cache of the **primary cyclic** interval for IR `scan_period_ms` (compile T0). Compile emits every task into IR `tasks`; the Virtual PLC and the firmware (one FreeRTOS task per PLC task) run all of them; event tasks are not scheduled yet. Legacy `pous[]` with one entry is still accepted.
 
 **Device catalog fields** on `device`:
 

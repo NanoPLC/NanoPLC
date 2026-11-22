@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "name": "multitask",
+  "device": {
+    "board": "esp32-s3",
+    "idf_target": "esp32s3"
+  },
+  "scan": {
+    "period_ms": 10
+  },
+  "modules": [
+    {
+      "id": "gpio1",
+      "name": "Onboard GPIO (digital)",
+      "type": "gpio_digital_io",
+      "config": "src/io-map.json"
+    }
+  ],
+  "drivers": [
+    {
+      "id": "hal_gpio",
+      "name": "GPIO process image (nanoplc_hal)",
+      "type": "nanoplc_hal",
+      "binds": "gpio1"
+    }
+  ],
+  "programs": [
+    { "id": "fast", "name": "Fast", "source": "src/fast.fbd.json", "language": "fbd" },
+    { "id": "blink", "name": "Blink", "source": "src/blink.fbd.json", "language": "fbd" },
+    { "id": "bg", "name": "Background", "source": "src/bg.fbd.json", "language": "fbd" }
+  ],
+  "tasks": [
+    {
+      "id": "main_task",
+      "name": "MainTask",
+      "kind": "cyclic",
+      "priority": 1,
+      "interval_ms": 10,
+      "watchdog": { "enabled": true, "time_ms": 50 },
+      "program": "fast"
+    },
+    {
+      "id": "slow_task",
+      "name": "SlowTask",
+      "kind": "cyclic",
+      "priority": 5,
+      "interval_ms": 100,
+      "watchdog": { "enabled": true, "time_ms": 500 },
+      "program": "blink"
+    },
+    {
+      "id": "bg_task",
+      "name": "BackgroundTask",
+      "kind": "freewheeling",
+      "priority": 20,
+      "program": "bg"
+    }
+  ],
+  "firmware_root": "../../firmware"
+}

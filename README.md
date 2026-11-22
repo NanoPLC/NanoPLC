@@ -13,6 +13,7 @@ Lightweight **PLC IDE** for VS Code / Cursor: **FBD** editing, **Virtual PLC** s
 | [`firmware/`](firmware/) | Reference ESP-IDF app (`nanoplc_runtime`, `nanoplc_hal`, `nanoplc_generated`) |
 | [`examples/and_gate/`](examples/and_gate/) | Minimal FBD + IR regression example |
 | [`examples/blink_fbd/`](examples/blink_fbd/) | TON + RS blinker with VAR feedback |
+| [`examples/multitask/`](examples/multitask/) | Three PLC tasks (10 ms, 100 ms, freewheeling), one PROGRAM each |
 | [`tools/codegen/`](tools/codegen/) | CLI: IR JSON → generated C |
 | [`docs/`](docs/) | Architecture, IR format, toolchain bootstrap |
 

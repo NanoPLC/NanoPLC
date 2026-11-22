@@ -9,7 +9,7 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "NanoPLC firmware boot (%s)", CONFIG_IDF_TARGET);
 
-    nanoplc_runtime_init(10);
+    nanoplc_runtime_init();
 
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(5000));
