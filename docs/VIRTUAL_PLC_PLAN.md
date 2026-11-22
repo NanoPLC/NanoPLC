@@ -361,7 +361,7 @@ Mitigate simulator/MCU mismatch: tight IR spec + tests + (later) shared C runtim
 2. [x] **JS/TS Virtual PLC** + **Run Simulation** (watch list: add DI/DO/AI by module/channel and POU vars; scan loop; **green-trace** on the FBD canvas).
 3. [x] **C codegen** from IR → `firmware/components/nanoplc_generated/` (auto on compile; CLI `tools/codegen`).
 4. [x] **ESP-IDF** skeleton under `firmware/` with working `idf.py build`; **manual** CLI flash/monitor. **Done:** NanoPLC IDE commands for Build/Flash/Monitor (§7.4); **per-project firmware scaffold** + **build on compile** (§7.4 item 3).
-5. [x] **NanoPLC: Setup toolchain** flow installs pinned ESP-IDF via bundled bootstrap (`install.bat` / `install.sh`); settings keys §18 wired. Optional on Windows: command **NanoPLC: Add ESP-IDF export to PowerShell profile(s)** for `export.ps1`. **Todo:** gated first-build onboarding (§48) and coupling to the Espressif extension (§48.4).
+5. [x] **NanoPLC: Setup toolchain** flow installs pinned ESP-IDF via bundled bootstrap (`install.bat` / `install.sh`); settings keys §18 wired. Optional on Windows: command **NanoPLC: Add ESP-IDF export to PowerShell profile(s)** for `export.ps1`. **Gated onboarding (§48):** activation soft-prompt + modal Setup / Open Settings when Build/Compile needs IDF and the export script is missing. Espressif extension coupling (§48.4) remains optional / not required.
 
 _Current progress versus phases is summarized in §49._
 

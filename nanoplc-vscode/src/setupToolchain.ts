@@ -4,6 +4,8 @@ import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
 
+import { clearToolchainOnboardingDismiss } from "./toolchainOnboarding";
+
 const SETTINGS = {
   distRoot: "nanoplc-idf.distRoot",
   idfRelease: "nanoplc-idf.idfRelease",
@@ -77,6 +79,8 @@ export function registerSetupToolchain(
     term.show();
 
     const q = (p: string) => `"${p.replace(/"/g, '\\"')}"`;
+
+    void clearToolchainOnboardingDismiss();
 
     if (process.platform === "win32") {
       const cmd =

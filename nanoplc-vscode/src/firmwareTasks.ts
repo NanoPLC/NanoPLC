@@ -23,6 +23,7 @@ import {
   flushPendingFbdDocumentEdits,
   saveDirtyFbdDocuments,
 } from "./fbdEditor/fbdEditorProvider";
+import { ensureToolchainReady } from "./toolchainOnboarding";
 
 const OUTPUT_CHANNEL = "NanoPLC Firmware";
 
@@ -34,24 +35,6 @@ interface FirmwareContext {
 
 function output(): vscode.OutputChannel {
   return vscode.window.createOutputChannel(OUTPUT_CHANNEL);
-}
-
-async function ensureExportScript(): Promise<boolean> {
-  const exportScript = resolveExportScriptPath();
-  if (fs.existsSync(exportScript)) {
-    return true;
-  }
-
-  const setup = "Setup ESP-IDF toolchain";
-  const choice = await vscode.window.showWarningMessage(
-    `NanoPLC: ESP-IDF export script not found at ${exportScript}. Run toolchain setup or set nanoplc-idf.idfSetupScript.`,
-    setup,
-    "Cancel"
-  );
-  if (choice === setup) {
-    await vscode.commands.executeCommand("nanoplc.setupToolchain");
-  }
-  return false;
 }
 
 async function resolveFirmwareContext(useProject: boolean): Promise<FirmwareContext | undefined> {
@@ -80,7 +63,7 @@ async function resolveFirmwareContext(useProject: boolean): Promise<FirmwareCont
       }
     }
 
-    if (!(await ensureExportScript())) {
+    if (!(await ensureToolchainReady())) {
       return undefined;
     }
 
@@ -95,7 +78,7 @@ async function resolveFirmwareContext(useProject: boolean): Promise<FirmwareCont
     return undefined;
   }
 
-  if (!(await ensureExportScript())) {
+  if (!(await ensureToolchainReady())) {
     return undefined;
   }
 

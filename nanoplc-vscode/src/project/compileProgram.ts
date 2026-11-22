@@ -33,6 +33,8 @@ import {
   flushPendingFbdDocumentEdits,
   saveDirtyFbdDocuments,
 } from "../fbdEditor/fbdEditorProvider";
+import { ensureToolchainReady } from "../toolchainOnboarding";
+import { ensureToolchainReady } from "../toolchainOnboarding";
 
 const DIAG_COLLECTION = "nanoplc";
 let diagnosticCollection: vscode.DiagnosticCollection | undefined;
@@ -300,6 +302,12 @@ export async function compileProjectAt(
   if (shouldBuildFirmware && codegenResult.ok) {
     // When buildFirmware is undefined, tryBuildFirmwareAfterCompile still respects the setting.
     firmwareBuildResult = tryBuildFirmwareAfterCompile(rootPath, project);
+    if (firmwareBuildResult.needsToolchain) {
+      const ready = await ensureToolchainReady();
+      if (ready) {
+        firmwareBuildResult = tryBuildFirmwareAfterCompile(rootPath, project);
+      }
+    }
   }
 
   const manifest: Record<string, unknown> = {

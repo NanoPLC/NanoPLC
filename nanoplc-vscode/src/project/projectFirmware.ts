@@ -87,7 +87,15 @@ export function runIdfPipelineInTerminal(
 export function tryBuildFirmwareAfterCompile(
   projectRoot: string,
   project: NanoPlcProject
-): { ok: boolean; message: string; idfSteps?: string[]; firmwareRoot?: string; idfTarget?: string } {
+): {
+  ok: boolean;
+  message: string;
+  idfSteps?: string[];
+  firmwareRoot?: string;
+  idfTarget?: string;
+  /** True when the export script is missing — caller should run gated onboarding. */
+  needsToolchain?: boolean;
+} {
   const enabled = vscode.workspace
     .getConfiguration("nanoplc")
     .get<boolean>("buildFirmwareOnCompile", true);
@@ -118,7 +126,8 @@ export function tryBuildFirmwareAfterCompile(
   if (!fs.existsSync(exportScript)) {
     return {
       ok: false,
-      message: `ESP-IDF export script not found at ${exportScript}. Run NanoPLC: Setup ESP-IDF toolchain.`,
+      message: `ESP-IDF export script not found at ${exportScript}. Run NanoPLC: Setup ESP-IDF toolchain or set nanoplc-idf.idfSetupScript.`,
+      needsToolchain: true,
     };
   }
 

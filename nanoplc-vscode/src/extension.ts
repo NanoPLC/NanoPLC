@@ -12,11 +12,17 @@ import * as scaffoldFirmware from "./project/scaffoldFirmware";
 import * as projectTree from "./project/projectTree";
 import * as simulatorPanel from "./simulator/simulatorPanel";
 import * as setupToolchain from "./setupToolchain";
+import {
+  maybePromptToolchainOnActivate,
+  setToolchainOnboardingContext,
+} from "./toolchainOnboarding";
 
 const CONFIG_SECTION = "nanoplc";
 
 export function activate(context: vscode.ExtensionContext): void {
   scaffoldFirmware.setExtensionPathForFirmware(context.extensionPath);
+  setToolchainOnboardingContext(context);
+  maybePromptToolchainOnActivate(context);
 
   const disposable = vscode.commands.registerCommand("nanoplc.showTargetInfo", () => {
     const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
