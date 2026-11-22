@@ -1,0 +1,37 @@
+{
+  "name": "timers",
+  "description": "TON / TOF / TP with PT = 30 ms on one input (docs/BLOCK_SEMANTICS.md §4).",
+  "programs": {
+    "main": {
+      "blocks": [
+        { "id": "di1", "type": "DI", "params": { "channel": 1, "symbol": "DI_In" } },
+        { "id": "ton1", "type": "TON", "params": { "pt_ms": 30 } },
+        { "id": "tof1", "type": "TOF", "params": { "pt_ms": 30 } },
+        { "id": "tp1", "type": "TP", "params": { "pt_ms": 30 } },
+        { "id": "do1", "type": "DO", "params": { "channel": 1, "symbol": "DO_Ton" } },
+        { "id": "do2", "type": "DO", "params": { "channel": 2, "symbol": "DO_Tof" } },
+        { "id": "do3", "type": "DO", "params": { "channel": 3, "symbol": "DO_Tp" } }
+      ],
+      "wires": [
+        { "from": { "block": "di1", "port": "Q" }, "to": { "block": "ton1", "port": "IN" } },
+        { "from": { "block": "di1", "port": "Q" }, "to": { "block": "tof1", "port": "IN" } },
+        { "from": { "block": "di1", "port": "Q" }, "to": { "block": "tp1", "port": "IN" } },
+        { "from": { "block": "ton1", "port": "Q" }, "to": { "block": "do1", "port": "IN" } },
+        { "from": { "block": "tof1", "port": "Q" }, "to": { "block": "do2", "port": "IN" } },
+        { "from": { "block": "tp1", "port": "Q" }, "to": { "block": "do3", "port": "IN" } }
+      ]
+    }
+  },
+  "steps": [
+    { "expect": { "DO_Ton": false, "DO_Tof": false, "DO_Tp": false } },
+    { "set": { "DI_In": true }, "expect": { "DO_Ton": false, "DO_Tof": true, "DO_Tp": true, "ton1.ET": 10 } },
+    { "expect": { "DO_Ton": false, "DO_Tp": true, "tp1.ET": 20 } },
+    { "expect": { "DO_Ton": true, "DO_Tp": false, "ton1.ET": 30 } },
+    { "scans": 5, "expect": { "DO_Ton": true, "DO_Tp": false, "ton1.ET": 30, "tp1.ET": 30 } },
+    { "set": { "DI_In": false }, "expect": { "DO_Ton": false, "DO_Tof": true, "tof1.ET": 10, "tp1.ET": 0 } },
+    { "scans": 2, "expect": { "DO_Tof": false, "tof1.ET": 30 } },
+    { "set": { "DI_In": true }, "expect": { "DO_Tof": true, "DO_Tp": true, "tof1.ET": 0 } },
+    { "set": { "DI_In": false }, "expect": { "DO_Tp": true, "DO_Tof": true } },
+    { "set": { "DI_In": true }, "expect": { "DO_Tp": false, "tp1.ET": 30 } }
+  ]
+}

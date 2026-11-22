@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "entries": [
+    { "symbol": "DO_Lamp", "kind": "DO", "index": 0, "gpio": 2, "active_high": true }
+  ]
+}

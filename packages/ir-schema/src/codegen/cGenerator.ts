@@ -18,7 +18,17 @@ function cIdent(name: string): string {
   return safe;
 }
 
-function cTypeFor(type: PlcPrimitiveType): string {
+/** C identifier of an IR variable in `plc_program.c`. */
+export function cVarName(name: string): string {
+  return `npgen_v_${cIdent(name)}`;
+}
+
+/** C identifier of a TON / TOF / TP state struct in `plc_program.c`. */
+export function cTimerName(blockId: string): string {
+  return `npgen_tmr_${cIdent(blockId)}`;
+}
+
+export function cTypeFor(type: PlcPrimitiveType): string {
   switch (type) {
     case "BOOL":
       return "bool";
@@ -61,7 +71,7 @@ function varRef(name: string | undefined): string {
   if (!name) {
     return "false";
   }
-  return `npgen_v_${cIdent(name)}`;
+  return cVarName(name);
 }
 
 function bitMask(type: PlcPrimitiveType): number {
@@ -148,7 +158,7 @@ const TIMER_OPS = new Set<ScheduleStep["op"]>(["ton", "tof", "tp"]);
 
 /** Mirrors `executeTimer` in the TS simulator (docs/BLOCK_SEMANTICS.md). */
 function timerLines(step: ScheduleStep, dtExpr: string): string[] {
-  const s = `npgen_tmr_${cIdent(step.block_id ?? step.op)}`;
+  const s = cTimerName(step.block_id ?? step.op);
   const pt = `${step.pt_ms ?? 1000}u`;
   const out = varRef(step.out);
   const inn = varRef(step.in1);
@@ -305,7 +315,8 @@ function allSteps(ir: PlcIr): ScheduleStep[] {
   return [...ir.schedule, ...extra];
 }
 
-function collectTypedVars(ir: PlcIr): { name: string; type: PlcPrimitiveType; initial?: boolean | number }[] {
+/** Every variable `plc_program.c` declares, with its PLC type. */
+export function collectTypedVars(ir: PlcIr): { name: string; type: PlcPrimitiveType; initial?: boolean | number }[] {
   const byName = new Map<string, { type: PlcPrimitiveType; initial?: boolean | number }>();
   for (const v of ir.variables) {
     byName.set(v.name, { type: v.type, initial: v.initial });

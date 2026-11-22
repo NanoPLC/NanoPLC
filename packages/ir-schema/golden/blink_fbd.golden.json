@@ -1,0 +1,13 @@
+{
+  "name": "blink_fbd",
+  "description": "examples/blink_fbd at 10 ms: lamp off for 50 scans, on for 50, off for 50.",
+  "example": "blink_fbd",
+  "steps": [
+    { "scans": 49, "expect": { "DO_Lamp": false, "main__LampOn": false, "ton_off.ET": 490 } },
+    { "expect": { "DO_Lamp": true, "main__LampOn": true } },
+    { "scans": 49, "expect": { "DO_Lamp": true, "ton_on.ET": 490, "ton_off.ET": 0 } },
+    { "expect": { "DO_Lamp": false, "main__LampOn": false } },
+    { "scans": 49, "expect": { "DO_Lamp": false } },
+    { "expect": { "DO_Lamp": true } }
+  ]
+}

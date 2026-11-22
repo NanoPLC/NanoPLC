@@ -11,12 +11,14 @@ on:
       - "nanoplc-vscode/**"
       - "packages/ir-schema/**"
       - "firmware/**"
+      - "examples/**"
       - ".github/workflows/vscode-extension-*.yml"
   pull_request:
     paths:
       - "nanoplc-vscode/**"
       - "packages/ir-schema/**"
       - "firmware/**"
+      - "examples/**"
       - ".github/workflows/vscode-extension-*.yml"
 
 concurrency:
@@ -46,6 +48,12 @@ jobs:
       - name: Install @nanoplc/ir-schema dependencies
         working-directory: packages/ir-schema
         run: npm ci
+
+      - name: Test @nanoplc/ir-schema (unit + golden, simulator and host C)
+        working-directory: packages/ir-schema
+        env:
+          NANOPLC_REQUIRE_CC: "1"
+        run: npm run compile && npm test
 
       - name: Install extension dependencies
         run: npm ci

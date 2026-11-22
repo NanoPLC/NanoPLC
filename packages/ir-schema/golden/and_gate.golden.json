@@ -1,0 +1,11 @@
+{
+  "name": "and_gate",
+  "description": "examples/and_gate: DO_Lamp = DI_Start AND DI_Enable.",
+  "example": "and_gate",
+  "steps": [
+    { "expect": { "DO_Lamp": false } },
+    { "set": { "DI_Start": true }, "expect": { "DO_Lamp": false } },
+    { "set": { "DI_Enable": true }, "expect": { "DO_Lamp": true } },
+    { "set": { "DI_Start": false }, "expect": { "DO_Lamp": false } }
+  ]
+}

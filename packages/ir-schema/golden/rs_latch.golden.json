@@ -1,0 +1,27 @@
+{
+  "name": "rs_latch",
+  "description": "Reset-dominant RS latch: start/stop push buttons.",
+  "programs": {
+    "main": {
+      "blocks": [
+        { "id": "di_start", "type": "DI", "params": { "channel": 1, "symbol": "DI_Start" } },
+        { "id": "di_stop", "type": "DI", "params": { "channel": 2, "symbol": "DI_Stop" } },
+        { "id": "rs1", "type": "RS" },
+        { "id": "do_motor", "type": "DO", "params": { "channel": 1, "symbol": "DO_Motor" } }
+      ],
+      "wires": [
+        { "from": { "block": "di_start", "port": "Q" }, "to": { "block": "rs1", "port": "SET" } },
+        { "from": { "block": "di_stop", "port": "Q" }, "to": { "block": "rs1", "port": "RESET1" } },
+        { "from": { "block": "rs1", "port": "Q" }, "to": { "block": "do_motor", "port": "IN" } }
+      ]
+    }
+  },
+  "steps": [
+    { "expect": { "DO_Motor": false } },
+    { "set": { "DI_Start": true }, "expect": { "DO_Motor": true } },
+    { "set": { "DI_Start": false }, "scans": 3, "expect": { "DO_Motor": true } },
+    { "set": { "DI_Start": true, "DI_Stop": true }, "expect": { "DO_Motor": false } },
+    { "set": { "DI_Stop": false }, "expect": { "DO_Motor": true } },
+    { "set": { "DI_Start": false, "DI_Stop": true }, "expect": { "DO_Motor": false } }
+  ]
+}

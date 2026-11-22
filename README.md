@@ -12,6 +12,7 @@ Lightweight **PLC IDE** for VS Code / Cursor: **FBD** editing, **Virtual PLC** s
 | [`packages/ir-schema/`](packages/ir-schema/) | IR schema, FBD compiler, C codegen, device catalog, `PlcSimulator` |
 | [`firmware/`](firmware/) | Reference ESP-IDF app (`nanoplc_runtime`, `nanoplc_hal`, `nanoplc_generated`) |
 | [`examples/and_gate/`](examples/and_gate/) | Minimal FBD + IR regression example |
+| [`examples/blink_fbd/`](examples/blink_fbd/) | TON + RS blinker with VAR feedback |
 | [`tools/codegen/`](tools/codegen/) | CLI: IR JSON → generated C |
 | [`docs/`](docs/) | Architecture, IR format, toolchain bootstrap |
 
@@ -132,8 +133,11 @@ Install the VSIX → **Developer: Reload Window**. Details: [`nanoplc-vscode/REA
 ```bash
 cd packages/ir-schema
 npm install   # skip if already done for extension build
+npm run compile
 npm test
 ```
+
+`npm test` also runs the **golden scenarios** in `packages/ir-schema/golden/*.golden.json`. Each scenario replays an input trace in the TS simulator and in the generated C, built for the host with `cc` / `gcc` / `clang` (override with `NANOPLC_CC`). When no C compiler is found, the C half is skipped. CI sets `NANOPLC_REQUIRE_CC=1`, so there a missing compiler fails the run.
 
 ## License
 

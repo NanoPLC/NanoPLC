@@ -318,8 +318,8 @@ firmware/                          ← ESP-IDF app root
 
 ## 8. Aligning simulator and firmware
 
-1. For a given IR program, maintain **golden scenarios**: after N scans, specific variable/output values are expected.
-2. Run them in the TS simulator for regression; later, the same scenarios on C (host tests or shared core).
+1. For a given IR program, maintain **golden scenarios**: after N scans, specific variable/output values are expected. **Done (v0):** `packages/ir-schema/golden/*.golden.json` (`set` inputs/vars → run `scans` → `expect` values, including timer `<id>.ET`).
+2. Run them in the TS simulator for regression; later, the same scenarios on C (host tests or shared core). **Done (v0):** `golden.test.ts` runs every scenario in `PlcSimulator` **and** in the generated `plc_program.c`, built for the host with stub HAL, `-Wall -Wextra -Werror` and UBSan when available. CI requires a C compiler (`NANOPLC_REQUIRE_CC=1`).
 
 ---
 
@@ -532,7 +532,7 @@ Build/flash failures should log the active **`idf.py --version`** or env-derived
 ## 19. Testing
 
 - Snapshots: **IR → JSON** fixtures for editor IR compiler regression.
-- **Golden tests**: simulator harness (§8).
+- **Golden tests**: simulator + host-C harness (§8) — **done (v0)**, run in CI.
 - Firmware **CI builds** without flash.
 - Fuzz/debug-decode malformed packets once a debug protocol lands.
 
@@ -759,8 +759,8 @@ Siemens OB numbering, IEC 61131-3 certification, preemptive locking of the whole
 
 | Example | Behaviour |
 |---------|-----------|
-| `blink_fbd` | Blink driven by `TON` |
-| `and_gate` | Dual inputs into output plus golden asserts |
+| `blink_fbd` | Blink driven by `TON` + `RS` with VAR feedback (**done**, golden) |
+| `and_gate` | Dual inputs into output plus golden asserts (**done**, golden) |
 | `debounce_rs` | RS latch once library ships |
 
 Each packs diagram sources and `ir.json`; ship generated `*.c` only for offline demos—otherwise regenerate from docs or scripts.
@@ -786,7 +786,7 @@ Golden IR programmes must behave the same:
 | `schedule` traversal | honours ordered steps | codegen matches |
 | TON extremes (PT=0, reset IN) | spec documented (`BLOCK_SEMANTICS.md` §4) | MCU matches documented rules |
 | Integer overflow / REAL precision | wraps, float32 (`BLOCK_SEMANTICS.md` §2) | same, no C undefined behavior |
-| Post-scan snapshots | asserts | MCU golden harness or emulator |
+| Post-scan snapshots | asserts | MCU golden harness or emulator (**host-C golden harness done**; on-target run later) |
 
 Mismatch blocks coordinated **IDE + codegen + firmware** releases unless recorded as deliberate platform caveat.
 
@@ -1041,3 +1041,4 @@ Unchanged: IR format lock, ordered graph compile, TS simulator, C codegen, onlin
 - **Watch BOOL toggles (2026-08-16):** simulator watch panel updates DI/AI/var values in place on each scan so TRUE/FALSE buttons respond on the first click.
 - **TOF / TP timers (2026-11-22):** IR ops `tof` / `tp`, simulator, C codegen (`npgen_tmr_<id>` + `npgen_et_advance`), FBD palette; TON ET now saturates at PT in the simulator too (was unbounded, C was clamped); `NP-0220` invalid PT.
 - **Block semantics + numeric parity (2026-11-22):** `docs/BLOCK_SEMANTICS.md`. Simulator wraps INT/DINT/UINT/WORD like C and rounds REAL to float32; C codegen avoids undefined behavior (DINT overflow via `uint32_t`, `INT_MIN / -1`, DINT `ROL`/`ROR` by 0, `SETBIT` bit 31). Checked 29 edge cases C ↔ TS with UBSan.
+- **Golden scenarios (2026-11-22):** `packages/ir-schema/golden/` (and_gate, blink_fbd, timers, rs_latch, numeric_wrap, call_counter) run in the TS simulator and in host-compiled generated C; CI runs `ir-schema` tests with a required C compiler. New example `examples/blink_fbd`.

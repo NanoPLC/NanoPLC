@@ -1,0 +1,47 @@
+{
+  "name": "call_counter",
+  "description": "Main CALLs Counter: IN drives a DO inside the callee, VAR Acc counts scans and wraps, OUT Count is copied back.",
+  "programs": {
+    "main": {
+      "variables": [{ "name": "Total", "class": "VAR", "type": "INT" }],
+      "blocks": [
+        { "id": "di_en", "type": "DI", "params": { "channel": 1, "symbol": "DI_Enable" } },
+        { "id": "call1", "type": "CALL", "params": { "program": "counter" } },
+        { "id": "total", "type": "LOCAL", "params": { "name": "Total" } }
+      ],
+      "wires": [
+        { "from": { "block": "di_en", "port": "Q" }, "to": { "block": "call1", "port": "Enable" } },
+        { "from": { "block": "call1", "port": "Count" }, "to": { "block": "total", "port": "IN" } }
+      ]
+    },
+    "counter": {
+      "variables": [
+        { "name": "Enable", "class": "IN", "type": "BOOL" },
+        { "name": "Count", "class": "OUT", "type": "INT" },
+        { "name": "Acc", "class": "VAR", "type": "INT" },
+        { "name": "Step", "class": "TEMP", "type": "INT", "initial": 0 }
+      ],
+      "blocks": [
+        { "id": "en", "type": "LOCAL", "params": { "name": "Enable" } },
+        { "id": "acc_r", "type": "LOCAL", "params": { "name": "Acc" } },
+        { "id": "one", "type": "CONST", "params": { "data_type": "INT", "value": 1 } },
+        { "id": "do_run", "type": "DO", "params": { "channel": 1, "symbol": "DO_Running" } },
+        { "id": "add1", "type": "ADD" },
+        { "id": "acc_w", "type": "LOCAL", "params": { "name": "Acc" } },
+        { "id": "count_w", "type": "LOCAL", "params": { "name": "Count" } }
+      ],
+      "wires": [
+        { "from": { "block": "en", "port": "Q" }, "to": { "block": "do_run", "port": "IN" } },
+        { "from": { "block": "acc_r", "port": "Q" }, "to": { "block": "add1", "port": "IN1" } },
+        { "from": { "block": "one", "port": "Q" }, "to": { "block": "add1", "port": "IN2" } },
+        { "from": { "block": "add1", "port": "Q" }, "to": { "block": "acc_w", "port": "IN" } },
+        { "from": { "block": "add1", "port": "Q" }, "to": { "block": "count_w", "port": "IN" } }
+      ]
+    }
+  },
+  "steps": [
+    { "expect": { "DO_Running": false, "counter__Acc": 1, "main__Total": 1 } },
+    { "set": { "DI_Enable": true }, "scans": 4, "expect": { "DO_Running": true, "counter__Acc": 5, "main__Total": 5 } },
+    { "set": { "counter__Acc": 32766 }, "scans": 2, "expect": { "counter__Acc": -32768, "main__Total": -32768 } }
+  ]
+}

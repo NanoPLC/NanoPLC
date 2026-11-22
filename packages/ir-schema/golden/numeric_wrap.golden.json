@@ -1,0 +1,55 @@
+{
+  "name": "numeric_wrap",
+  "description": "Integer wrap, division edge cases, and float32 REAL (docs/BLOCK_SEMANTICS.md §2).",
+  "programs": {
+    "main": {
+      "blocks": [
+        { "id": "i_max", "type": "CONST", "params": { "data_type": "INT", "value": 32767 } },
+        { "id": "i_min", "type": "CONST", "params": { "data_type": "INT", "value": -32768 } },
+        { "id": "i_one", "type": "CONST", "params": { "data_type": "INT", "value": 1 } },
+        { "id": "i_neg1", "type": "CONST", "params": { "data_type": "INT", "value": -1 } },
+        { "id": "i_zero", "type": "CONST", "params": { "data_type": "INT", "value": 0 } },
+        { "id": "d_big", "type": "CONST", "params": { "data_type": "DINT", "value": 123456789 } },
+        { "id": "d_big2", "type": "CONST", "params": { "data_type": "DINT", "value": 987654321 } },
+        { "id": "r_a", "type": "CONST", "params": { "data_type": "REAL", "value": 0.1 } },
+        { "id": "r_b", "type": "CONST", "params": { "data_type": "REAL", "value": 0.2 } },
+        { "id": "add_ovf", "type": "ADD" },
+        { "id": "div_min", "type": "DIV" },
+        { "id": "div_zero", "type": "DIV" },
+        { "id": "mul_dint", "type": "MUL" },
+        { "id": "add_real", "type": "ADD" },
+        { "id": "ror_int", "type": "ROR" },
+        { "id": "rol_zero", "type": "ROL" }
+      ],
+      "wires": [
+        { "from": { "block": "i_max", "port": "Q" }, "to": { "block": "add_ovf", "port": "IN1" } },
+        { "from": { "block": "i_one", "port": "Q" }, "to": { "block": "add_ovf", "port": "IN2" } },
+        { "from": { "block": "i_min", "port": "Q" }, "to": { "block": "div_min", "port": "IN1" } },
+        { "from": { "block": "i_neg1", "port": "Q" }, "to": { "block": "div_min", "port": "IN2" } },
+        { "from": { "block": "i_max", "port": "Q" }, "to": { "block": "div_zero", "port": "IN1" } },
+        { "from": { "block": "i_zero", "port": "Q" }, "to": { "block": "div_zero", "port": "IN2" } },
+        { "from": { "block": "d_big", "port": "Q" }, "to": { "block": "mul_dint", "port": "IN1" } },
+        { "from": { "block": "d_big2", "port": "Q" }, "to": { "block": "mul_dint", "port": "IN2" } },
+        { "from": { "block": "r_a", "port": "Q" }, "to": { "block": "add_real", "port": "IN1" } },
+        { "from": { "block": "r_b", "port": "Q" }, "to": { "block": "add_real", "port": "IN2" } },
+        { "from": { "block": "i_one", "port": "Q" }, "to": { "block": "ror_int", "port": "IN" } },
+        { "from": { "block": "i_one", "port": "Q" }, "to": { "block": "ror_int", "port": "N" } },
+        { "from": { "block": "d_big", "port": "Q" }, "to": { "block": "rol_zero", "port": "IN" } },
+        { "from": { "block": "i_zero", "port": "Q" }, "to": { "block": "rol_zero", "port": "N" } }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "expect": {
+        "__add_ovf_Q": -32768,
+        "__div_min_Q": -32768,
+        "__div_zero_Q": 0,
+        "__mul_dint_Q": -67153019,
+        "__add_real_Q": 0.30000001192092896,
+        "__ror_int_Q": -32768,
+        "__rol_zero_Q": 123456789
+      }
+    }
+  ]
+}
