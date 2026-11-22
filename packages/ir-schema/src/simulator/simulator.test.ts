@@ -263,6 +263,23 @@ test("bit ops keep the IN width and sign", () => {
   }
 });
 
+test("LOCAL write wraps UINT into INT like C", () => {
+  const fbd: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    variables: [{ name: "Acc", class: "VAR", type: "INT" }],
+    blocks: [
+      { id: "c1", type: "CONST", params: { data_type: "UINT", value: 40000 } },
+      { id: "w", type: "LOCAL", params: { name: "Acc" } },
+    ],
+    wires: [{ from: { block: "c1", port: "Q" }, to: { block: "w", port: "IN" } }],
+  };
+  const compiled = compileFbdToIr(baseProject, fbd, "main");
+  assert.ok(compiled.ok && compiled.ir, compiled.diagnostics.map((d) => d.message).join("; "));
+  // 40000 as uint16 stored into int16_t → −25536
+  assert.equal(new PlcSimulator(compiled.ir).stepOnce().vars["main__Acc"], -25536);
+});
+
 test("simulator CALL copies IN to callee and OUT back to caller", () => {
   const project: NanoPlcProject = {
     ...baseProject,

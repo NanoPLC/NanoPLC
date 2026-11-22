@@ -367,7 +367,7 @@ _Current progress versus phases is summarized in §49._
 
 ### Phase 2 — Closer to metal
 
-- [ ] Align timer / scan semantics with on-chip runtime.
+- [x] Align timer / scan semantics with on-chip runtime (per-task Δt, typed wrap for LOCAL/CALL; intentional caveats in `BLOCK_SEMANTICS.md`).
 - [ ] Online debug (simple transport + variable map).
 - [ ] Migration plan to **shared C core** when parity demands it.
 
@@ -781,7 +781,7 @@ Golden IR programmes must behave the same:
 
 | Check | TS simulator | MCU firmware |
 |-------|---------------|---------------|
-| Scan cadence versus timer deltas | deterministic tick clock | scheduler-bound |
+| Scan cadence versus timer deltas | deterministic virtual clock (nominal / 1 ms freewheel) | scheduler-bound; cyclic miss → measured Δt |
 | `schedule` traversal | honours ordered steps | codegen matches |
 | TON extremes (PT=0, reset IN) | spec documented (`BLOCK_SEMANTICS.md` §4) | MCU matches documented rules |
 | Integer overflow / REAL precision | wraps, float32 (`BLOCK_SEMANTICS.md` §2) | same, no C undefined behavior |

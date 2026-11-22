@@ -183,17 +183,23 @@ Rules from §2.2 and §2.3 apply.
 
 Each DI / AI / DO symbol may be used by one block per program (`NP-0213`). Tasks share one process image, without locking between tasks (`VIRTUAL_PLC_PLAN.md` §5.5).
 
-## Known gaps
+## Known gaps / intentional caveats
 
-These differences between the simulator and the MCU are known and tracked:
+Closed: `LOCAL` write and CALL copies now wrap into the destination PLC type the same way C typed storage does (e.g. UINT 40000 → INT −25536).
 
-| Gap | Simulator | MCU |
-|-----|-----------|-----|
-| `LOCAL` write / CALL copy from `UINT` / `WORD` into an `INT` variable | Copies the raw value (40000) | Wraps (−25536) |
-| Overrunning pass | Nominal Δt (no overrun possible) | Nominal Δt, with a `scan overrun` log |
+These differences are intentional platform caveats (not bugs):
+
+| Topic | Simulator | MCU |
+|-------|-----------|-----|
+| Cyclic overrun | Always advances by nominal `interval_ms` (virtual time cannot overrun) | After a missed deadline, Δt is the **measured** elapsed time; rate-limited overrun / watchdog logs (§5.7) |
+| Freewheeling period | Exactly 1 ms virtual tick | Measured elapsed; minimum one RTOS tick delay |
+| Event latency | Rising edge at the virtual instant DI/var changes | Polled every RTOS tick (up to ~1 ms delay) |
+| `POW` / `SQRT` | JS `Math` then `Math.fround` | `powf` / `sqrtf` (ULP may differ by 1) |
+
+On-target golden runs against real silicon remain future work (`VIRTUAL_PLC_PLAN.md` §36).
 
 ## Change log
 
 | IR version | Change |
 |------------|--------|
-| 1 | Initial semantics. TOF and TP added; TON `ET` saturates at PT in the simulator (C already did); integer wrap and float32 REAL in the simulator. |
+| 1 | Initial semantics. TOF and TP added; TON `ET` saturates at PT in the simulator (C already did); integer wrap and float32 REAL in the simulator. LOCAL/CALL typed copies match C wrap. |

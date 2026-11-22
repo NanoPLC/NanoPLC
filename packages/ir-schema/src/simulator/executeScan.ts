@@ -46,7 +46,33 @@ function writeNumeric(
   if (!name) {
     return;
   }
-  state.vars[name] = type === "REAL" ? Math.fround(value) : value;
+  state.vars[name] = toInt(value, type ?? "DINT");
+}
+
+function varType(ir: PlcIr, name: string | undefined): PlcPrimitiveType | undefined {
+  if (!name) {
+    return undefined;
+  }
+  return ir.variables.find((v) => v.name === name)?.type;
+}
+
+/** Assign a value into a named var, wrapping/casting like C typed storage. */
+function assignVar(
+  state: SimState,
+  ir: PlcIr,
+  dest: string | undefined,
+  value: boolean | number | undefined
+): void {
+  if (!dest) {
+    return;
+  }
+  const type = varType(ir, dest) ?? (typeof value === "boolean" ? "BOOL" : "DINT");
+  if (type === "BOOL") {
+    writeBool(state, dest, value === true || value === 1);
+    return;
+  }
+  const n = typeof value === "number" ? value : value === true ? 1 : value === false ? 0 : 0;
+  writeNumeric(state, dest, n, type);
 }
 
 function bitMask(type: PlcPrimitiveType | undefined): number {
@@ -212,7 +238,12 @@ function executeBitSet(state: SimState, step: ScheduleStep, set: boolean): void 
   writeNumeric(state, step.out, toInt(result, t), t);
 }
 
-export function executeScheduleStep(state: SimState, step: ScheduleStep, dt_ms: number): void {
+export function executeScheduleStep(
+  state: SimState,
+  step: ScheduleStep,
+  dt_ms: number,
+  ir?: PlcIr
+): void {
   switch (step.op) {
     case "read_di": {
       const idx = step.index ?? 0;
@@ -271,7 +302,19 @@ export function executeScheduleStep(state: SimState, step: ScheduleStep, dt_ms: 
     }
     case "move":
       if (step.out && step.in1) {
-        state.vars[step.out] = state.vars[step.in1] ?? false;
+        const destType =
+          (ir ? varType(ir, step.out) : undefined) ?? step.value_type ?? "BOOL";
+        const raw = state.vars[step.in1];
+        if (destType === "BOOL") {
+          writeBool(state, step.out, raw === true || raw === 1);
+        } else {
+          writeNumeric(
+            state,
+            step.out,
+            typeof raw === "number" ? raw : raw === true ? 1 : 0,
+            destType
+          );
+        }
       }
       break;
     case "add":
@@ -383,16 +426,16 @@ function executeSteps(
       }
       for (const [port, src] of Object.entries(step.call_in ?? {})) {
         const dest = pouIrName(target, port);
-        state.vars[dest] = state.vars[src] ?? false;
+        assignVar(state, ir, dest, state.vars[src]);
       }
       executeSteps(state, pou.schedule, ir, dt_ms, [...callStack, target]);
       for (const [port, dest] of Object.entries(step.call_out ?? {})) {
         const src = pouIrName(target, port);
-        state.vars[dest] = state.vars[src] ?? false;
+        assignVar(state, ir, dest, state.vars[src]);
       }
       continue;
     }
-    executeScheduleStep(state, step, dt_ms);
+    executeScheduleStep(state, step, dt_ms, ir);
   }
 }
 
