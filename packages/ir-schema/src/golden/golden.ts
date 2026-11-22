@@ -206,12 +206,24 @@ static bool h_di[NANOPLC_HAL_MAX_DI];
 static float h_ai[NANOPLC_HAL_MAX_AI];
 static bool h_do[NANOPLC_HAL_MAX_DO];
 
+static bool h_failsafe_outputs_off;
+
 bool nanoplc_hal_read_di(size_t index) { return index < NANOPLC_HAL_MAX_DI && h_di[index]; }
 float nanoplc_hal_read_ai(size_t index) { return index < NANOPLC_HAL_MAX_AI ? h_ai[index] : 0.0f; }
 void nanoplc_hal_write_do(size_t index, bool value)
 {
+    if (h_failsafe_outputs_off) {
+        return;
+    }
     if (index < NANOPLC_HAL_MAX_DO) {
         h_do[index] = value;
+    }
+}
+void nanoplc_hal_force_outputs_off(void)
+{
+    h_failsafe_outputs_off = true;
+    for (size_t i = 0; i < NANOPLC_HAL_MAX_DO; i++) {
+        h_do[i] = false;
     }
 }
 
@@ -219,24 +231,53 @@ void nanoplc_hal_write_do(size_t index, bool value)
 
 /* Same virtual-time scheduler as PlcSimulator.advance(). */
 #define H_TASKS_MAX 16
+#define H_DUE_NEVER 0xffffffffu
 static const nanoplc_task_desc_t *h_tasks;
 static size_t h_count;
 static uint32_t h_now;
 static uint32_t h_due[H_TASKS_MAX];
 static uint32_t h_last[H_TASKS_MAX];
+static bool h_event_prev[H_TASKS_MAX];
+static bool h_event_ran[H_TASKS_MAX];
 
 static uint32_t h_period(const nanoplc_task_desc_t *t)
 {
     return (t->kind == NANOPLC_TASK_CYCLIC && t->interval_ms > 0u) ? t->interval_ms : 1u;
 }
 
+static bool h_event_level(const nanoplc_task_desc_t *t)
+{
+    if (t->event_kind == NANOPLC_EVENT_DI) {
+        return nanoplc_hal_read_di(t->event_di_index);
+    }
+    if (t->event_kind == NANOPLC_EVENT_VAR && t->event_var != NULL) {
+        return *t->event_var;
+    }
+    return false;
+}
+
+static void h_sample_events(uint32_t now)
+{
+    for (size_t i = 0; i < h_count; i++) {
+        if (h_tasks[i].kind != NANOPLC_TASK_EVENT) {
+            continue;
+        }
+        const bool cur = h_event_level(&h_tasks[i]);
+        if (cur && !h_event_prev[i]) {
+            h_due[i] = now;
+        }
+        h_event_prev[i] = cur;
+    }
+}
+
 static void h_advance(uint32_t ms)
 {
     const uint32_t target = h_now + ms;
+    h_sample_events(h_now);
     for (;;) {
         size_t best = h_count;
         for (size_t i = 0; i < h_count; i++) {
-            if (h_tasks[i].kind == NANOPLC_TASK_EVENT || h_due[i] > target) {
+            if (h_due[i] > target) {
                 continue;
             }
             if (best == h_count || h_due[i] < h_due[best] ||
@@ -249,9 +290,23 @@ static void h_advance(uint32_t ms)
         }
         const nanoplc_task_desc_t *t = &h_tasks[best];
         const uint32_t now = h_due[best];
-        t->run(t->kind == NANOPLC_TASK_CYCLIC ? h_period(t) : now - h_last[best]);
+        uint32_t dt;
+        if (t->kind == NANOPLC_TASK_CYCLIC) {
+            dt = h_period(t);
+        } else if (t->kind == NANOPLC_TASK_EVENT) {
+            dt = h_event_ran[best] ? (now - h_last[best]) : 0u;
+        } else {
+            dt = now - h_last[best];
+        }
+        t->run(dt);
         h_last[best] = now;
-        h_due[best] = now + h_period(t);
+        if (t->kind == NANOPLC_TASK_EVENT) {
+            h_due[best] = H_DUE_NEVER;
+            h_event_ran[best] = true;
+        } else {
+            h_due[best] = now + h_period(t);
+        }
+        h_sample_events(now);
     }
     h_now = target;
 }
@@ -264,7 +319,15 @@ int main(void)
         return 3;
     }
     for (size_t i = 0; i < h_count; i++) {
-        h_due[i] = h_period(&h_tasks[i]);
+        if (h_tasks[i].kind == NANOPLC_TASK_EVENT) {
+            h_due[i] = H_DUE_NEVER;
+            h_event_prev[i] = h_event_level(&h_tasks[i]);
+            h_event_ran[i] = false;
+            h_last[i] = 0;
+        } else {
+            h_due[i] = h_period(&h_tasks[i]);
+            h_last[i] = 0;
+        }
     }
 ${body.join("\n")}
     return 0;

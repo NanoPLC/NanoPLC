@@ -14,10 +14,11 @@ static size_t s_di_count;
 static const nanoplc_hal_do_entry_t *s_do_table;
 static size_t s_do_count;
 
-static bool s_do_shadow[16];
+static bool s_do_shadow[NANOPLC_HAL_MAX_DO];
 static nanoplc_hal_do_write_fn s_do_writers[NANOPLC_HAL_MAX_DO];
 static nanoplc_hal_di_read_fn s_di_readers[NANOPLC_HAL_MAX_DI];
 static nanoplc_hal_ai_read_fn s_ai_readers[NANOPLC_HAL_MAX_AI];
+static bool s_failsafe_outputs_off;
 
 /* PLC tasks preempt each other; expander drivers read-modify-write shared registers. */
 static StaticSemaphore_t s_lock_buf;
@@ -77,6 +78,7 @@ void nanoplc_hal_init(const nanoplc_hal_di_entry_t *di, size_t di_count,
     memset(s_do_writers, 0, sizeof(s_do_writers));
     memset(s_di_readers, 0, sizeof(s_di_readers));
     memset(s_ai_readers, 0, sizeof(s_ai_readers));
+    s_failsafe_outputs_off = false;
 
     for (size_t i = 0; i < di_count; i++) {
         const nanoplc_hal_di_entry_t *e = &di[i];
@@ -164,7 +166,7 @@ bool nanoplc_hal_read_di(size_t index)
 
 static void write_do_unlocked(size_t index, bool value)
 {
-    if (index < sizeof(s_do_shadow)) {
+    if (index < NANOPLC_HAL_MAX_DO) {
         s_do_shadow[index] = value;
     }
 
@@ -182,8 +184,28 @@ static void write_do_unlocked(size_t index, bool value)
 void nanoplc_hal_write_do(size_t index, bool value)
 {
     hal_lock();
+    if (s_failsafe_outputs_off) {
+        hal_unlock();
+        return;
+    }
     write_do_unlocked(index, value);
     hal_unlock();
+}
+
+void nanoplc_hal_force_outputs_off(void)
+{
+    hal_lock();
+    s_failsafe_outputs_off = true;
+    for (size_t i = 0; i < s_do_count; i++) {
+        write_do_unlocked(s_do_table[i].index, false);
+    }
+    for (size_t i = 0; i < NANOPLC_HAL_MAX_DO; i++) {
+        if (s_do_writers[i] != NULL) {
+            write_do_unlocked(i, false);
+        }
+    }
+    hal_unlock();
+    ESP_LOGW(TAG, "fail-safe: all digital outputs forced OFF");
 }
 
 float nanoplc_hal_read_ai(size_t index)

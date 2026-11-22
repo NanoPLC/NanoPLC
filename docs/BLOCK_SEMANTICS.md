@@ -50,7 +50,7 @@ Timers advance by the **Δt of the task pass that executes them**:
 
 - Cyclic task: its nominal `interval_ms`. On firmware, after a missed deadline the next pass gets the real elapsed time instead (missed passes are skipped, not replayed).
 - Freewheeling task: the elapsed time since its previous pass. The simulator runs it every virtual millisecond (Δt = 1); firmware measures it.
-- Event task: not scheduled yet (T2).
+- Event task: rising edge of DI or BOOL var; Δt = 0 on the first edge, then elapsed since the previous run of that task.
 
 Each task passes its Δt down to the PROGRAMs it CALLs, so a callee's timers advance with the calling task. The simulator uses virtual time, so host wall-clock jitter has no effect on timer values. As long as firmware meets its deadlines, both sides see the same timer values after the same passes.
 

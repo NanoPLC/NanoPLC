@@ -67,7 +67,7 @@ async function promptTaskKind(current?: PlcTaskKind): Promise<PlcTaskKind | unde
       },
       {
         label: "Event",
-        description: "Rising edge of a BOOL variable (runtime later)",
+        description: "Rising edge of a DI or BOOL variable",
         taskKind: "event" as const,
       },
     ],
@@ -149,7 +149,32 @@ async function promptWatchdog(task: NanoPlcTaskRef): Promise<NanoPlcTaskRef["wat
   if (!value) {
     return undefined;
   }
-  return { enabled: true, time_ms: Number.parseInt(value.trim(), 10) };
+  const action = await vscode.window.showQuickPick(
+    [
+      {
+        label: "Hold last outputs",
+        description: "Log the overrun; DO values stay as they are",
+        on_timeout: "hold" as const,
+      },
+      {
+        label: "Force outputs OFF",
+        description: "Latch every DO to OFF until reboot",
+        on_timeout: "outputs_off" as const,
+      },
+    ],
+    {
+      placeHolder: "Watchdog timeout action",
+      title: `Watchdog action — ${task.name}`,
+    }
+  );
+  if (!action) {
+    return undefined;
+  }
+  return {
+    enabled: true,
+    time_ms: Number.parseInt(value.trim(), 10),
+    on_timeout: action.on_timeout,
+  };
 }
 
 async function configureTaskFields(task: NanoPlcTaskRef): Promise<NanoPlcTaskRef | undefined> {
@@ -178,9 +203,9 @@ async function configureTaskFields(task: NanoPlcTaskRef): Promise<NanoPlcTaskRef
     event = undefined;
   } else if (kind === "event") {
     const ev = await vscode.window.showInputBox({
-      prompt: "Event variable (BOOL symbol, rising edge)",
+      prompt: "Event trigger (DI symbol or Program.Var BOOL, rising edge)",
       value: event ?? "",
-      placeHolder: "e.g. StartPulse",
+      placeHolder: "e.g. DI_Start or Main.Pulse",
     });
     if (ev === undefined) {
       return undefined;

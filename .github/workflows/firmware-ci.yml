@@ -33,7 +33,7 @@ jobs:
       fail-fast: false
       matrix:
         # "stub" builds firmware/ as committed; other entries are examples/<name>.
-        app: [stub, and_gate, blink_fbd, multitask]
+        app: [stub, and_gate, blink_fbd, multitask, event_task]
 
     steps:
       - name: Checkout

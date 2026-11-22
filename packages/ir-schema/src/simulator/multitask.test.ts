@@ -152,8 +152,59 @@ test("freewheeling task passes every virtual millisecond with dt = 1", () => {
   assert.equal(snap.scan_index, 0);
 });
 
-test("event tasks compile with NP-0118 and do not run", () => {
-  const ev: NanoPlcTaskRef = { id: "Ev", name: "Ev", kind: "event", priority: 3, event: "DI_Start", program: "ev" };
+test("event task runs on rising edge of a DI", () => {
+  const withDi: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    variables: [{ name: "Acc", class: "VAR", type: "DINT" }],
+    blocks: [
+      { id: "di", type: "DI", params: { channel: 1, symbol: "DI_Start" } },
+      { id: "acc_r", type: "LOCAL", params: { name: "Acc" } },
+      { id: "one", type: "CONST", params: { data_type: "DINT", value: 1 } },
+      { id: "add1", type: "ADD" },
+      { id: "acc_w", type: "LOCAL", params: { name: "Acc" } },
+    ],
+    wires: [
+      { from: { block: "acc_r", port: "Q" }, to: { block: "add1", port: "IN1" } },
+      { from: { block: "one", port: "Q" }, to: { block: "add1", port: "IN2" } },
+      { from: { block: "add1", port: "Q" }, to: { block: "acc_w", port: "IN" } },
+    ],
+  };
+  const ev: NanoPlcTaskRef = {
+    id: "Ev",
+    name: "Ev",
+    kind: "event",
+    priority: 0,
+    event: "DI_Start",
+    program: "ev",
+  };
+  const result = compileTasksToIr(
+    project([cyclic("MainTask", "main", 10, 1), ev], ["main", "ev"]),
+    new Map<string, unknown>([
+      ["main", withDi],
+      ["ev", counterFbd("Ev")],
+    ])
+  );
+  assert.ok(result.ok && result.ir, JSON.stringify(result.diagnostics));
+  assert.deepEqual(result.ir.tasks?.find((t) => t.id === "Ev")?.event_source, {
+    kind: "di",
+    index: 0,
+  });
+  const sim = new PlcSimulator(result.ir);
+  assert.equal(sim.advance(30).vars["ev__Acc"], 0);
+  sim.setDiBySymbol("DI_Start", true);
+  const afterRise = sim.advance(0);
+  assert.equal(afterRise.vars["ev__Acc"], 1);
+  assert.equal(afterRise.task_passes["Ev"], 1);
+  assert.equal(sim.advance(20).vars["ev__Acc"], 1, "level stays high: no second edge");
+  sim.setDiBySymbol("DI_Start", false);
+  sim.advance(10);
+  sim.setDiBySymbol("DI_Start", true);
+  assert.equal(sim.advance(0).vars["ev__Acc"], 2);
+});
+
+test("event task with empty trigger warns NP-0118 and does not run", () => {
+  const ev: NanoPlcTaskRef = { id: "Ev", name: "Ev", kind: "event", priority: 3, program: "ev" };
   const result = compileTasksToIr(
     project([cyclic("MainTask", "main", 10, 1), ev], ["main", "ev"]),
     new Map<string, unknown>([
@@ -163,10 +214,35 @@ test("event tasks compile with NP-0118 and do not run", () => {
   );
   assert.ok(result.ir);
   assert.ok(result.diagnostics.some((d) => d.code === "NP-0118" && d.severity === "warning"));
-  const snap = new PlcSimulator(result.ir).advance(50);
-  assert.equal(snap.vars["main__Acc"], 5);
-  assert.equal(snap.vars["ev__Acc"], 0);
-  assert.equal(snap.task_passes["Ev"], undefined);
+  assert.equal(new PlcSimulator(result.ir).advance(50).task_passes["Ev"], undefined);
+});
+
+test("watchdog outputs_off latches DO after tripWatchdog", () => {
+  const result = compileTasksToIr(
+    project(
+      [
+        {
+          id: "MainTask",
+          name: "MainTask",
+          kind: "cyclic",
+          priority: 1,
+          interval_ms: 10,
+          program: "main",
+          watchdog: { enabled: true, time_ms: 50, on_timeout: "outputs_off" },
+        },
+      ],
+      ["main"]
+    ),
+    new Map<string, unknown>([["main", driveDoFbd("Main", true)]])
+  );
+  assert.ok(result.ok && result.ir, JSON.stringify(result.diagnostics));
+  assert.equal(result.ir.tasks?.[0].watchdog_action, "outputs_off");
+  const sim = new PlcSimulator(result.ir);
+  assert.equal(sim.stepOnce().do[0], true);
+  const tripped = sim.tripWatchdog("MainTask");
+  assert.equal(tripped.do[0], false);
+  assert.equal(tripped.failsafe_outputs_off, true);
+  assert.equal(sim.stepOnce().do[0], false, "DO writes ignored while latched");
 });
 
 test("a program called from two tasks warns NP-0117 and is a single POU", () => {

@@ -1,0 +1,46 @@
+{
+  "name": "event_task",
+  "description": "MainTask cyclic counter plus Ev on rising edge of DI_Start. Ev increments only on edges.",
+  "tasks": [
+    { "id": "MainTask", "name": "MainTask", "kind": "cyclic", "priority": 1, "interval_ms": 10, "program": "main" },
+    { "id": "Ev", "name": "Ev", "kind": "event", "priority": 0, "event": "DI_Start", "program": "ev" }
+  ],
+  "programs": {
+    "main": {
+      "variables": [{ "name": "Acc", "class": "VAR", "type": "DINT" }],
+      "blocks": [
+        { "id": "di", "type": "DI", "params": { "channel": 1, "symbol": "DI_Start" } },
+        { "id": "acc_r", "type": "LOCAL", "params": { "name": "Acc" } },
+        { "id": "one", "type": "CONST", "params": { "data_type": "DINT", "value": 1 } },
+        { "id": "add1", "type": "ADD" },
+        { "id": "acc_w", "type": "LOCAL", "params": { "name": "Acc" } }
+      ],
+      "wires": [
+        { "from": { "block": "acc_r", "port": "Q" }, "to": { "block": "add1", "port": "IN1" } },
+        { "from": { "block": "one", "port": "Q" }, "to": { "block": "add1", "port": "IN2" } },
+        { "from": { "block": "add1", "port": "Q" }, "to": { "block": "acc_w", "port": "IN" } }
+      ]
+    },
+    "ev": {
+      "variables": [{ "name": "Acc", "class": "VAR", "type": "DINT" }],
+      "blocks": [
+        { "id": "acc_r", "type": "LOCAL", "params": { "name": "Acc" } },
+        { "id": "one", "type": "CONST", "params": { "data_type": "DINT", "value": 1 } },
+        { "id": "add1", "type": "ADD" },
+        { "id": "acc_w", "type": "LOCAL", "params": { "name": "Acc" } }
+      ],
+      "wires": [
+        { "from": { "block": "acc_r", "port": "Q" }, "to": { "block": "add1", "port": "IN1" } },
+        { "from": { "block": "one", "port": "Q" }, "to": { "block": "add1", "port": "IN2" } },
+        { "from": { "block": "add1", "port": "Q" }, "to": { "block": "acc_w", "port": "IN" } }
+      ]
+    }
+  },
+  "steps": [
+    { "expect": { "main__Acc": 1, "ev__Acc": 0 } },
+    { "set": { "DI_Start": true }, "expect": { "main__Acc": 2, "ev__Acc": 1 } },
+    { "expect": { "main__Acc": 3, "ev__Acc": 1 } },
+    { "set": { "DI_Start": false }, "expect": { "main__Acc": 4, "ev__Acc": 1 } },
+    { "set": { "DI_Start": true }, "expect": { "main__Acc": 5, "ev__Acc": 2 } }
+  ]
+}

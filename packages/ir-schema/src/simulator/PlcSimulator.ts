@@ -1,5 +1,5 @@
 import { irPrimaryPeriodMs, irTaskList, irTaskPeriodMs } from "../irTasks";
-import type { IrTask, PlcIr } from "../types";
+import type { IrEventSource, IrTask, PlcIr } from "../types";
 import { createSimState, runTaskPass, snapshot } from "./executeScan";
 import type { SimIoCapacity, SimState, SimulatorSnapshot } from "./types";
 
@@ -7,16 +7,20 @@ export { FREEWHEEL_PERIOD_MS } from "../irTasks";
 
 interface SimTask {
   task: IrTask;
+  /** Cyclic / freewheel period; unused for event tasks. */
   period_ms: number;
+  /** Next due virtual time; `Infinity` while an event task waits for an edge. */
   next_due_ms: number;
   last_run_ms?: number;
+  /** Previous sample of the event trigger (event tasks only). */
+  event_prev?: boolean;
 }
 
 /**
  * Deterministic Virtual PLC. Tasks run in virtual time: a cyclic task passes at
- * every multiple of `interval_ms`, a freewheeling task every `FREEWHEEL_PERIOD_MS`.
- * Passes due at the same instant run in priority order (0 first). Event tasks
- * are not scheduled yet (T2).
+ * every multiple of `interval_ms`, a freewheeling task every `FREEWHEEL_PERIOD_MS`,
+ * an event task on each rising edge of its BOOL trigger (DI or VAR).
+ * Passes due at the same instant run in priority order (0 first).
  */
 export class PlcSimulator {
   private readonly ir: PlcIr;
@@ -43,12 +47,43 @@ export class PlcSimulator {
   }
 
   private createTasks(): SimTask[] {
-    return irTaskList(this.ir)
-      .filter((task) => task.kind !== "event")
-      .map((task) => {
-        const period = irTaskPeriodMs(task);
-        return { task, period_ms: period, next_due_ms: period };
-      });
+    return irTaskList(this.ir).map((task) => {
+      if (task.kind === "event") {
+        return {
+          task,
+          period_ms: 0,
+          next_due_ms: Number.POSITIVE_INFINITY,
+          event_prev: this.readEventLevel(task.event_source),
+        };
+      }
+      const period = irTaskPeriodMs(task);
+      return { task, period_ms: period, next_due_ms: period };
+    });
+  }
+
+  private readEventLevel(source: IrEventSource | undefined): boolean {
+    if (!source) {
+      return false;
+    }
+    if (source.kind === "di") {
+      return this.state.di[source.index] === true;
+    }
+    const v = this.state.vars[source.name];
+    return v === true || v === 1;
+  }
+
+  /** Queue event tasks whose trigger rose at virtual time `now`. */
+  private sampleEventEdges(now: number): void {
+    for (const t of this.tasks) {
+      if (t.task.kind !== "event" || !t.task.event_source) {
+        continue;
+      }
+      const cur = this.readEventLevel(t.task.event_source);
+      if (cur && !t.event_prev) {
+        t.next_due_ms = now;
+      }
+      t.event_prev = cur;
+    }
   }
 
   reset(): void {
@@ -87,9 +122,30 @@ export class PlcSimulator {
     }
   }
 
+  /**
+   * Simulate a watchdog timeout for `taskId`. When the task's IR action is
+   * `outputs_off`, force every DO OFF and latch (same as firmware fail-safe).
+   */
+  tripWatchdog(taskId: string): SimulatorSnapshot {
+    const task = irTaskList(this.ir).find((t) => t.id === taskId);
+    if (task?.watchdog_action === "outputs_off") {
+      this.state.failsafe_outputs_off = true;
+      for (let i = 0; i < this.state.do.length; i++) {
+        this.state.do[i] = false;
+      }
+      for (const d of this.ir.io_image.do) {
+        if (d.symbol) {
+          this.state.vars[d.symbol] = false;
+        }
+      }
+    }
+    return snapshot(this.state);
+  }
+
   /** Advance virtual time by `ms`, running every task pass that falls due. */
   advance(ms: number): SimulatorSnapshot {
     const target = this.state.elapsed_ms + Math.max(0, ms);
+    this.sampleEventEdges(this.state.elapsed_ms);
     for (;;) {
       let next: SimTask | undefined;
       for (const t of this.tasks) {
@@ -108,15 +164,28 @@ export class PlcSimulator {
         break;
       }
       const now = next.next_due_ms;
-      const dt = next.task.kind === "cyclic" ? next.period_ms : now - (next.last_run_ms ?? 0);
+      let dt: number;
+      if (next.task.kind === "cyclic") {
+        dt = next.period_ms;
+      } else if (next.task.kind === "event") {
+        dt = next.last_run_ms === undefined ? 0 : now - next.last_run_ms;
+      } else {
+        dt = now - (next.last_run_ms ?? 0);
+      }
       this.state.elapsed_ms = now;
       runTaskPass(this.state, this.ir, next.task.schedule, dt);
       next.last_run_ms = now;
-      next.next_due_ms = now + next.period_ms;
+      if (next.task.kind === "event") {
+        next.next_due_ms = Number.POSITIVE_INFINITY;
+      } else {
+        next.next_due_ms = now + next.period_ms;
+      }
       this.state.task_passes[next.task.id] = (this.state.task_passes[next.task.id] ?? 0) + 1;
-      if (next.task.primary || this.tasks.length === 1) {
+      const nonEventCount = this.tasks.filter((x) => x.task.kind !== "event").length;
+      if (next.task.primary || (next.task.kind !== "event" && nonEventCount === 1)) {
         this.state.scan_index += 1;
       }
+      this.sampleEventEdges(now);
     }
     this.state.elapsed_ms = target;
     return snapshot(this.state);

@@ -117,6 +117,17 @@ function validateTasks(rawTasks: unknown[], rawPrograms: unknown[]): CompileDiag
         diag("NP-0112", `Event task "${t.id}" has no event variable yet.`, "warning")
       );
     }
+    if (t.watchdog?.enabled) {
+      if (typeof t.watchdog.time_ms !== "number" || !(t.watchdog.time_ms > 0)) {
+        diagnostics.push(diag("NP-0120", `Task "${t.id}" watchdog requires time_ms > 0.`));
+      }
+      const action = t.watchdog.on_timeout;
+      if (action !== undefined && action !== "hold" && action !== "outputs_off") {
+        diagnostics.push(
+          diag("NP-0120", `Task "${t.id}" watchdog on_timeout must be hold or outputs_off.`)
+        );
+      }
+    }
 
     const fromField = typeof t.program === "string" ? t.program.trim() : "";
     const pous = Array.isArray(t.pous) ? t.pous : undefined;

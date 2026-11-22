@@ -44,6 +44,12 @@ bool nanoplc_hal_read_di(size_t index);
 
 void nanoplc_hal_write_do(size_t index, bool value);
 
+/**
+ * Watchdog fail-safe: force every mapped DO OFF and ignore further writes
+ * until the next reboot (docs/VIRTUAL_PLC_PLAN.md §33.3).
+ */
+void nanoplc_hal_force_outputs_off(void);
+
 /** Read analog process-image value (REAL). Returns 0.0 when unmapped. */
 float nanoplc_hal_read_ai(size_t index);
 

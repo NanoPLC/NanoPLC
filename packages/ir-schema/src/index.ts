@@ -40,6 +40,7 @@ export type {
   IoMap,
   IoMapEntry,
   IrIoImage,
+  IrEventSource,
   IrTask,
   IrVariable,
   NanoPlcProgramRef,
@@ -53,6 +54,7 @@ export type {
   PlcPrimitiveType,
   PlcTaskKind,
   PlcVarClass,
+  WatchdogAction,
   ScheduleOp,
   ScheduleStep,
 } from "./types";

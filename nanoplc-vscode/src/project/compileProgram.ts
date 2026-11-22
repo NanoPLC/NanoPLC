@@ -363,10 +363,7 @@ function compileTaskLimitNote(project: NanoPlcProject): string | undefined {
   if (tasks.length <= 1) {
     return undefined;
   }
-  const events = tasks.filter((t) => t.kind === "event").length;
-  return events > 0
-    ? `${tasks.length} tasks; event tasks are not scheduled yet.`
-    : `${tasks.length} tasks.`;
+  return `${tasks.length} tasks.`;
 }
 
 export async function compileActiveProject(options?: CompileProjectOptions): Promise<boolean> {

@@ -1,5 +1,6 @@
 #include "nanoplc_runtime.h"
 #include "nanoplc_generated.h"
+#include "nanoplc_hal.h"
 #include "esp_log.h"
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
@@ -44,6 +45,17 @@ static uint32_t ticks_to_ms(TickType_t ticks)
 
 #define NP_OVERRUN_LOG_INTERVAL_US 1000000
 
+static bool read_event_level(const nanoplc_task_desc_t *t)
+{
+    if (t->event_kind == NANOPLC_EVENT_DI) {
+        return nanoplc_hal_read_di(t->event_di_index);
+    }
+    if (t->event_kind == NANOPLC_EVENT_VAR && t->event_var != NULL) {
+        return *t->event_var;
+    }
+    return false;
+}
+
 /** Logs at most once per second per task; `*suppressed` counts the overruns not logged. */
 static void check_overrun(const nanoplc_task_desc_t *t, int64_t start_us, int64_t end_us, int64_t *last_log_us,
                           uint32_t *suppressed)
@@ -55,6 +67,10 @@ static void check_overrun(const nanoplc_task_desc_t *t, int64_t start_us, int64_
     const bool over_watchdog = watchdog_us != 0 && elapsed_us > watchdog_us;
     if (!over_interval && !over_watchdog) {
         return;
+    }
+    if (over_watchdog && t->watchdog_action == NANOPLC_WATCHDOG_OUTPUTS_OFF) {
+        nanoplc_hal_force_outputs_off();
+        ESP_LOGE(TAG, "task %s: watchdog fail-safe — outputs forced OFF", t->id);
     }
     if (*last_log_us != 0 && end_us - *last_log_us < NP_OVERRUN_LOG_INTERVAL_US) {
         (*suppressed)++;
@@ -115,6 +131,43 @@ static void plc_task(void *arg)
     }
 }
 
+/** Event task: poll every RTOS tick; run on rising edge of DI or BOOL var (§5.7 T2). */
+static void plc_event_task(void *arg)
+{
+    const nanoplc_task_desc_t *t = (const nanoplc_task_desc_t *)arg;
+
+    esp_err_t twdt_res = esp_task_wdt_add(NULL);
+    if (twdt_res != ESP_OK) {
+        ESP_LOGW(TAG, "task %s: esp_task_wdt_add failed (%s)", t->id, esp_err_to_name(twdt_res));
+    }
+
+    bool prev = read_event_level(t);
+    int64_t last_run_us = esp_timer_get_time();
+    bool first_edge = true;
+    int64_t last_log_us = 0;
+    uint32_t suppressed = 0;
+
+    for (;;) {
+        esp_task_wdt_reset();
+
+        const bool cur = read_event_level(t);
+        if (cur && !prev) {
+            const int64_t t0_us = esp_timer_get_time();
+            uint32_t dt_ms = 0;
+            if (!first_edge) {
+                dt_ms = take_elapsed_ms(t0_us, &last_run_us);
+            } else {
+                last_run_us = t0_us;
+                first_edge = false;
+            }
+            t->run(dt_ms);
+            check_overrun(t, t0_us, esp_timer_get_time(), &last_log_us, &suppressed);
+        }
+        prev = cur;
+        vTaskDelay(1);
+    }
+}
+
 void nanoplc_runtime_init(void)
 {
     size_t count = 0;
@@ -135,8 +188,10 @@ void nanoplc_runtime_init(void)
 
     for (size_t i = 0; i < count; i++) {
         const nanoplc_task_desc_t *t = &tasks[i];
-        if (t->kind == NANOPLC_TASK_EVENT) {
-            ESP_LOGW(TAG, "task %s: event tasks are not supported yet, not started", t->id);
+        if (t->kind == NANOPLC_TASK_EVENT &&
+            (t->event_kind == NANOPLC_EVENT_NONE ||
+             (t->event_kind == NANOPLC_EVENT_VAR && t->event_var == NULL))) {
+            ESP_LOGW(TAG, "task %s: event task has no trigger, not started", t->id);
             continue;
         }
         if (t->kind == NANOPLC_TASK_CYCLIC && ((t->interval_ms * configTICK_RATE_HZ) % 1000u) != 0u) {
@@ -147,15 +202,21 @@ void nanoplc_runtime_init(void)
         char name[configMAX_TASK_NAME_LEN];
         snprintf(name, sizeof(name), "np_%s", t->id);
         const UBaseType_t prio = freertos_priority(t->priority);
+        TaskFunction_t entry = (t->kind == NANOPLC_TASK_EVENT) ? plc_event_task : plc_task;
         const BaseType_t status =
-            xTaskCreatePinnedToCore(plc_task, name, NP_TASK_STACK, (void *)t, prio, NULL, NP_PLC_CORE);
+            xTaskCreatePinnedToCore(entry, name, NP_TASK_STACK, (void *)t, prio, NULL, NP_PLC_CORE);
         if (status != pdPASS) {
             ESP_LOGE(TAG, "task %s: xTaskCreate failed", t->id);
             continue;
         }
-        ESP_LOGI(TAG, "task %s: %s, %" PRIu32 " ms, PLC prio %u -> RTOS prio %u, core %d", t->id,
-                 t->kind == NANOPLC_TASK_CYCLIC ? "cyclic" : "freewheeling", t->interval_ms,
-                 (unsigned)t->priority, (unsigned)prio, NP_PLC_CORE);
+        if (t->kind == NANOPLC_TASK_EVENT) {
+            ESP_LOGI(TAG, "task %s: event, PLC prio %u -> RTOS prio %u, core %d", t->id, (unsigned)t->priority,
+                     (unsigned)prio, NP_PLC_CORE);
+        } else {
+            ESP_LOGI(TAG, "task %s: %s, %" PRIu32 " ms, PLC prio %u -> RTOS prio %u, core %d", t->id,
+                     t->kind == NANOPLC_TASK_CYCLIC ? "cyclic" : "freewheeling", t->interval_ms,
+                     (unsigned)t->priority, (unsigned)prio, NP_PLC_CORE);
+        }
     }
 }
 

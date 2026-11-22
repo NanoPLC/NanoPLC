@@ -7,6 +7,7 @@ import type {
   FbdWire,
   IoMap,
   IoMapEntry,
+  IrEventSource,
   IrVariable,
   NanoPlcProject,
   NanoPlcTaskRef,
@@ -1214,14 +1215,29 @@ export function compileTasksToIr(
       });
     }
   }
+  const eventSources = new Map<NanoPlcTaskRef, IrEventSource>();
   for (const { task } of tasks) {
-    if (task.kind === "event") {
+    if (task.kind !== "event") {
+      continue;
+    }
+    const name = task.event?.trim() ?? "";
+    if (!name) {
       diagnostics.push({
         code: "NP-0118",
-        message: `Event task "${task.name}" is compiled but not scheduled yet (event tasks arrive with runtime T2).`,
+        message: `Event task "${task.name}" has no event variable, so it never runs.`,
         severity: "warning",
       });
+      continue;
     }
+    const resolved = resolveEventSource(name, ir, project, ioMap);
+    if (typeof resolved === "string") {
+      diagnostics.push({ code: "NP-0119", message: `Event task "${task.name}": ${resolved}`, severity: "error" });
+    } else {
+      eventSources.set(task, resolved);
+    }
+  }
+  if (diagnostics.some((d) => d.severity === "error")) {
+    return { ok: false, diagnostics };
   }
 
   ir.tasks = tasks.map(({ task, program }) => ({
@@ -1231,11 +1247,50 @@ export function compileTasksToIr(
     priority: task.priority,
     interval_ms: task.kind === "cyclic" ? task.interval_ms : undefined,
     event: task.kind === "event" ? task.event : undefined,
+    event_source: eventSources.get(task),
     watchdog_ms: task.watchdog?.enabled ? task.watchdog.time_ms : undefined,
+    watchdog_action:
+      task.watchdog?.enabled && task.watchdog.on_timeout === "outputs_off" ? "outputs_off" : undefined,
     program,
     primary: task === primaryEntry.task ? true : undefined,
     schedule: schedules.get(program) ?? [],
   }));
   return { ok: true, diagnostics, ir };
+}
+
+/**
+ * Resolve an event task trigger: a DI symbol (also one no program reads, which is then
+ * added to the process image), a BOOL IR variable, or `Program.Var`. Returns an error text.
+ */
+function resolveEventSource(
+  name: string,
+  ir: PlcIr,
+  project: NanoPlcProject,
+  ioMap?: IoMap
+): IrEventSource | string {
+  const di = ir.io_image.di.find((d) => d.symbol === name);
+  if (di) {
+    return { kind: "di", index: di.index };
+  }
+  let varName = name;
+  const dot = name.indexOf(".");
+  if (dot > 0) {
+    const progKey = name.slice(0, dot);
+    const prog = project.programs.find((p) => p.id === progKey || p.name === progKey);
+    if (!prog) {
+      return `unknown program "${progKey}" in "${name}".`;
+    }
+    varName = pouIrName(prog.id, name.slice(dot + 1));
+  }
+  const v = ir.variables.find((x) => x.name === varName);
+  if (v) {
+    return v.type === "BOOL" ? { kind: "var", name: v.name } : `"${name}" is ${v.type}, not BOOL.`;
+  }
+  const mapped = ioMap?.entries.find((e) => e.kind === "DI" && e.symbol === name);
+  if (mapped) {
+    ir.io_image.di.push({ symbol: mapped.symbol, index: mapped.index });
+    return { kind: "di", index: mapped.index };
+  }
+  return `event variable "${name}" is not a DI symbol, a BOOL program variable, or Program.Var.`;
 }
 

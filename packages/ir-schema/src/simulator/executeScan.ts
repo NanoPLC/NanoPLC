@@ -228,6 +228,9 @@ export function executeScheduleStep(state: SimState, step: ScheduleStep, dt_ms: 
       break;
     }
     case "write_do": {
+      if (state.failsafe_outputs_off) {
+        break;
+      }
       const value = readBool(state, step.in1);
       const idx = step.index ?? 0;
       state.do[idx] = value;
@@ -345,6 +348,7 @@ export function createSimState(ir: PlcIr, capacity?: SimIoCapacity): SimState {
     scan_index: 0,
     elapsed_ms: 0,
     task_passes: {},
+    failsafe_outputs_off: false,
   };
 }
 
@@ -401,5 +405,6 @@ export function snapshot(state: SimState): SimulatorSnapshot {
     di: [...state.di],
     ai: [...state.ai],
     do: [...state.do],
+    failsafe_outputs_off: state.failsafe_outputs_off || undefined,
   };
 }

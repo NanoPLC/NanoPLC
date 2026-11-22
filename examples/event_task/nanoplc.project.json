@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "name": "event_task",
+  "device": {
+    "board": "esp32-s3",
+    "idf_target": "esp32s3"
+  },
+  "scan": {
+    "period_ms": 10
+  },
+  "modules": [
+    {
+      "id": "gpio1",
+      "name": "Onboard GPIO (digital)",
+      "type": "gpio_digital_io",
+      "config": "src/io-map.json"
+    }
+  ],
+  "drivers": [
+    {
+      "id": "hal_gpio",
+      "name": "GPIO process image (nanoplc_hal)",
+      "type": "nanoplc_hal",
+      "binds": "gpio1"
+    }
+  ],
+  "programs": [
+    { "id": "main", "name": "Main", "source": "src/main.fbd.json", "language": "fbd" },
+    { "id": "ev", "name": "OnStart", "source": "src/ev.fbd.json", "language": "fbd" }
+  ],
+  "tasks": [
+    {
+      "id": "main_task",
+      "name": "MainTask",
+      "kind": "cyclic",
+      "priority": 1,
+      "interval_ms": 10,
+      "watchdog": { "enabled": true, "time_ms": 50, "on_timeout": "hold" },
+      "program": "main"
+    },
+    {
+      "id": "ev_task",
+      "name": "StartTask",
+      "kind": "event",
+      "priority": 0,
+      "event": "DI_Start",
+      "watchdog": { "enabled": true, "time_ms": 100, "on_timeout": "outputs_off" },
+      "program": "ev"
+    }
+  ],
+  "firmware_root": "../../firmware"
+}

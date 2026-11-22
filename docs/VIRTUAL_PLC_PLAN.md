@@ -162,7 +162,7 @@ A task must not list a stack of POUs. Extra programs get their own task, or are 
 |------|----------------|----------|
 | `cyclic` | Cyclic | Run every `interval_ms` using delay-until (not a busy loop). Default for MainTask. |
 | `freewheeling` | Freewheeling | After a pass finishes, start the next as soon as the scheduler allows (minimum 1 RTOS tick). No interval. |
-| `event` | Event | Rising edge of a BOOL `event` symbol. **Persisted in the IDE; runtime later (§33 T3).** |
+| `event` | Event | Rising edge of a BOOL `event` symbol (DI or `Program.Var`). **Done (T2).** |
 
 Not in v0: Status tasks, external/interrupt tasks, Siemens-style hardware OBs.
 
@@ -177,7 +177,7 @@ Stored on `nanoplc.project.json` → `tasks[]` (`NanoPlcTaskRef` in `packages/ir
 | `priority` | **0 = highest**, 31 = lowest (CODESYS-like). Maps to a FreeRTOS priority band in firmware. |
 | `interval_ms` | Required for `cyclic` |
 | `event` | BOOL symbol for `event` tasks |
-| `watchdog.enabled` / `watchdog.time_ms` | If a pass exceeds the timeout, log (v0) / fail-safe outputs (later) |
+| `watchdog.enabled` / `watchdog.time_ms` / `watchdog.on_timeout` | If a pass exceeds the timeout: log; `on_timeout` is `hold` (default) or `outputs_off` (latch DO OFF until reboot) |
 | `program` | Entry PROGRAM id. **Exactly one** per task. |
 
 Legacy `pous[]` with a single `{ "program": "…" }` is still read; the IDE rewrites it to `program` on save.
@@ -216,13 +216,13 @@ Each PLC task becomes **one FreeRTOS task** (`np_<task id>`), high enough that W
 | freewheeling | loop + `vTaskDelay(1)` (or yield) after each pass |
 | event | wait on a notification / event bit set from the PI writer |
 
-**Done (T1b):** `nanoplc_runtime_init()` (no argument) reads `nanoplc_generated_tasks()` and creates `np_<task id>` per cyclic / freewheeling task. PLC priority `p` → FreeRTOS `configMAX_PRIORITIES - 2 - p` (min 1); all PLC tasks are pinned to one core (core 1 on dual-core). Tick rate is 1 kHz (`CONFIG_FREERTOS_HZ=1000`). Cyclic Δt is `interval_ms`; after a missed deadline the task resyncs and passes the real elapsed time. Freewheeling Δt is measured. Event tasks are logged and not started (T2). `nanoplc_hal` I/O calls are mutex-protected.
+**Done (T1b + T2):** `nanoplc_runtime_init()` (no argument) reads `nanoplc_generated_tasks()` and creates `np_<task id>` per cyclic / freewheeling / event task. PLC priority `p` → FreeRTOS `configMAX_PRIORITIES - 2 - p` (min 1); all PLC tasks are pinned to one core (core 1 on dual-core). Tick rate is 1 kHz (`CONFIG_FREERTOS_HZ=1000`). Cyclic Δt is `interval_ms`; after a missed deadline the task resyncs and passes the real elapsed time. Freewheeling Δt is measured. Event tasks poll every RTOS tick and run on a rising edge of a DI or BOOL var (Δt = 0 on the first edge, then elapsed since the previous run). `nanoplc_hal` I/O calls are mutex-protected.
 
-Watchdog: each PLC task is registered with the ESP task WDT; `task <id> overrun` when a pass exceeds `interval_ms` (cyclic) or `watchdog.time_ms`, rate-limited to one log per second per task.
+Watchdog: each PLC task is registered with the ESP task WDT; `task <id> overrun` when a pass exceeds `interval_ms` (cyclic) or `watchdog.time_ms`, rate-limited to one log per second per task. When `watchdog_action` is `outputs_off`, a watchdog trip calls `nanoplc_hal_force_outputs_off()` (latch until reboot).
 
 ### 5.8. Simulator mapping (target)
 
-**Done (T1a):** `PlcSimulator` is a deterministic **virtual-time** scheduler over IR `tasks[]`. A cyclic task passes at every multiple of `interval_ms` (Δt = `interval_ms`); a freewheeling task passes every 1 ms (Δt = 1, modeling one RTOS tick). Passes due at the same instant run in priority order (0 first). `advance(ms)` runs every pass due within the window; `stepOnce()` advances by the primary interval; `start()` drives `advance` from one JS timer. Snapshots carry `scan_index` (primary passes) and `task_passes` per task id. Event tasks are not scheduled yet (T2) — compile warns `NP-0118`.
+**Done (T1a + T2):** `PlcSimulator` is a deterministic **virtual-time** scheduler over IR `tasks[]`. A cyclic task passes at every multiple of `interval_ms` (Δt = `interval_ms`); a freewheeling task passes every 1 ms (Δt = 1, modeling one RTOS tick); an event task runs on each rising edge of its `event_source` (Δt = 0 on the first edge). Passes due at the same instant run in priority order (0 first). `advance(ms)` runs every pass due within the window; `stepOnce()` advances by the primary interval; `start()` drives `advance` from one JS timer. Snapshots carry `scan_index` (primary passes) and `task_passes` per task id. Empty event → warning `NP-0118`; unresolved event → error `NP-0119`. `tripWatchdog(taskId)` models `outputs_off` fail-safe in the simulator.
 
 **v0 watch panel:** the webview starts empty. The user adds **DI / DO / AI** with the same **module → local channel** picker as FBD I/O blocks, and adds PROGRAM **IN / IN_OUT / OUT / VAR / TEMP**. DI and AI are writable; DO is read-only; BOOL vars toggle, numeric vars use a field. Scan refresh updates watch values **in place** (BOOL TRUE/FALSE buttons are not recreated, so the first click is not lost). `PlcSimulator` can size the process image from the full device I/O map (`SimIoCapacity`), not only compiled `io_image`. Watches persist in VS Code `workspaceState` per project. **Green-trace:** while simulation runs, open FBD diagrams highlight BOOL wires (true = bright, false = dim), show live values on blocks, and display a **Simulation live** toolbar badge. Sticky force remains later work.
 
@@ -234,7 +234,7 @@ Watchdog: each PLC task is registered with the ESP task WDT; `task <id> overrun`
 
 **T1b (done):** one FreeRTOS task per PLC task, each running its entry PROGRAM (§5.7, §16.1).
 
-**Then (T2):** event tasks, watchdog fail-safe.
+**T2 (done):** event tasks + watchdog fail-safe (`hold` / `outputs_off`).
 
 **Later (T3 remainder):** FB libraries. PROGRAM-from-PROGRAM `CALL` in FBD is already in v0.
 
@@ -463,7 +463,7 @@ Split **fixed runtime** (never generated) vs **generated user logic**.
   const nanoplc_task_desc_t *nanoplc_generated_tasks(size_t *out_count);
   ```
 
-  `nanoplc_task_desc_t` (in `nanoplc_generated.h`): `id`, `kind`, `priority`, `interval_ms`, `watchdog_ms`, `primary`, `run`. POU functions take `dt_ms` from the calling task. The v1 entry `nanoplc_generated_program_scan()` is gone; IR without `tasks[]` generates a single `main_task`.
+  `nanoplc_task_desc_t` (in `nanoplc_generated.h`, **ABI v3**): `id`, `kind`, `priority`, `interval_ms`, `watchdog_ms`, `watchdog_action`, `primary`, `event_kind`, `event_di_index`, `event_var`, `run`. POU functions take `dt_ms` from the calling task. The v1 entry `nanoplc_generated_program_scan()` is gone; IR without `tasks[]` generates a single `main_task`.
 
 - Optional introspection / debug:
 
@@ -735,8 +735,8 @@ Section 5 is the **product contract**. This section is the **implementation sequ
 
 ### 33.3. T2 — Event tasks and watchdog fail-safe
 
-1. Event tasks: rising edge of a BOOL in the process image (or a dedicated event bit).
-2. Watchdog timeout → configurable fail-safe (hold last / force outputs OFF).
+1. [x] Event tasks: rising edge of a BOOL DI or IR variable (`event_source` in IR; simulator + FreeRTOS poll). Empty event → `NP-0118`; bad symbol → `NP-0119`.
+2. [x] Watchdog timeout → `hold` (default) or `outputs_off` (`nanoplc_hal_force_outputs_off`, simulator `tripWatchdog`). Runtime ABI **v3**.
 
 ### 33.4. T3 — PROGRAM calls PROGRAM, libraries
 
@@ -758,6 +758,8 @@ Siemens OB numbering, IEC 61131-3 certification, preemptive locking of the whole
 |---------|-----------|
 | `blink_fbd` | Blink driven by `TON` + `RS` with VAR feedback (**done**, golden) |
 | `and_gate` | Dual inputs into output plus golden asserts (**done**, golden) |
+| `multitask` | Cyclic + freewheeling tasks (**done**, golden) |
+| `event_task` | Event task on `DI_Start` rising edge (**done**, golden) |
 | `debounce_rs` | RS latch once library ships |
 
 Each packs diagram sources and `ir.json`; ship generated `*.c` only for offline demos—otherwise regenerate from docs or scripts.
@@ -949,7 +951,7 @@ Expert users bypass wizards entirely by pointing NanoPLC JSON settings at vendor
 
 Rolling record of **what exists in-tree** versus this roadmap—update after meaningful merges.
 
-_Last reviewed: 2026-08-16._
+_Last reviewed: 2026-11-22._
 
 ### Repository and documentation
 
@@ -990,7 +992,7 @@ _Last reviewed: 2026-08-16._
 | ESP-IDF app + `main` + `nanoplc_runtime` + `nanoplc_generated` (§7.2, §14) | **Done** |
 | `sdkconfig.defaults` for ESP32-S3 (`CONFIG_IDF_TARGET="esp32s3"`) | **Done** |
 | `nanoplc_runtime` CMake: `esp_system` (IDF 5.3; replaces removed `esp_task_wdt` component) | **Done** |
-| PLC FreeRTOS tasks, WDT, overrun logging, `nanoplc_generated_tasks()` table | **Done** (one FreeRTOS task per PLC task since T1b, §33) |
+| PLC FreeRTOS tasks, WDT, overrun logging, `nanoplc_generated_tasks()` table | **Done** (one FreeRTOS task per PLC task since T1b; event + watchdog fail-safe since T2 / ABI v3, §33) |
 | Maintainer workflow `idf.py set-target esp32s3` + `idf.py build` | **Done** (see `firmware/README.md`) |
 | **StamPLC AW9523 driver** (`m5_aw9523` — onboard 8 DI / 4 relay DO @ I2C 0x59) | **Done** |
 | **StamPLC IO I2C driver** (`m5_stamplc_io` — expansion DO + analog voltage read) | **Done** |
@@ -1042,3 +1044,4 @@ Unchanged: IR format lock, ordered graph compile, TS simulator, C codegen, onlin
 - **Firmware CI (2026-11-22):** `firmware-ci.yml` builds the stub and each example's generated code with ESP-IDF v5.3.3. `tools/codegen` gains `--project <dir>`. Project-from-disk loading (`compileProjectDir`, `buildCodegenIoContext`, …) moved into `packages/ir-schema/src/projectDisk.ts` and is shared by the extension, CLI, and golden tests.
 - **Multi-task IR + Virtual PLC (T1a, 2026-11-22):** `compileTasksToIr()` emits IR `tasks[]` for the whole Task Configuration (IDE compile and `compileProjectDir` use it). `PlcSimulator` schedules all cyclic / freewheeling tasks in deterministic virtual time (priority breaks ties; per-task Δt); snapshots add `task_passes`. Warnings `NP-0117` (PROGRAM shared between tasks) and `NP-0118` (event task not scheduled). Firmware multi-task is T1b.
 - **Multi-task firmware (T1b, 2026-11-22):** runtime ABI v2. Codegen emits one task function per PLC task and the `nanoplc_generated_tasks()` table; `nanoplc_runtime_init()` starts one pinned FreeRTOS task per cyclic / freewheeling task with priority mapping, per-task TWDT, and rate-limited overrun logs with the task id. Fixed: `app_main` no longer hard-codes 10 ms, and the RTOS tick is 1 kHz (was 100 Hz, so intervals were rounded down to 10 ms steps, and 5 ms ran every 10 ms). HAL I/O is mutex-protected. New example `examples/multitask`, golden `multitask`, CI builds it.
+- **Event tasks + watchdog fail-safe (T2, 2026-11-22):** runtime ABI v3. IR resolves `event_source` (DI index or BOOL var) and `watchdog_action`. Simulator and host-C golden run event tasks on rising edges; firmware polls every tick. `outputs_off` calls `nanoplc_hal_force_outputs_off()` (latch). Diagnostics `NP-0118` / `NP-0119` / `NP-0120`. Example `examples/event_task`, golden `event_task`.

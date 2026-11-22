@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "entries": [
+    { "symbol": "DI_Start", "kind": "DI", "index": 0, "gpio": 0, "active_high": true },
+    { "symbol": "DO_Lamp", "kind": "DO", "index": 0, "gpio": 2, "active_high": true },
+    { "symbol": "DO_Pulse", "kind": "DO", "index": 1, "gpio": 4, "active_high": true }
+  ]
+}

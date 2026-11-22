@@ -25,6 +25,8 @@ export interface SimulatorSnapshot {
   di: boolean[];
   ai: number[];
   do: boolean[];
+  /** Watchdog fail-safe latched (`outputs_off`). */
+  failsafe_outputs_off?: boolean;
 }
 
 /** Optional process-image lengths (device I/O map may be larger than compiled IR). */
@@ -44,4 +46,6 @@ export interface SimState {
   scan_index: number;
   elapsed_ms: number;
   task_passes: Record<string, number>;
+  /** After watchdog `outputs_off`, DO writes are ignored until reset. */
+  failsafe_outputs_off: boolean;
 }

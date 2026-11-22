@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "name": "Main",
+  "blocks": [
+    { "id": "di_start", "type": "DI", "params": { "channel": 1, "symbol": "DI_Start" } },
+    { "id": "do_lamp", "type": "DO", "params": { "channel": 1, "symbol": "DO_Lamp" } }
+  ],
+  "wires": [
+    { "from": { "block": "di_start", "port": "Q" }, "to": { "block": "do_lamp", "port": "IN" } }
+  ],
+  "layout": {
+    "di_start": { "x": 48, "y": 88 },
+    "do_lamp": { "x": 300, "y": 88 }
+  }
+}

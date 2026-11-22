@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "name": "OnStart",
+  "variables": [{ "name": "Hits", "class": "VAR", "type": "DINT" }],
+  "blocks": [
+    { "id": "hits_r", "type": "LOCAL", "params": { "name": "Hits" } },
+    { "id": "one", "type": "CONST", "params": { "data_type": "DINT", "value": 1 } },
+    { "id": "add1", "type": "ADD" },
+    { "id": "hits_w", "type": "LOCAL", "params": { "name": "Hits" } },
+    { "id": "pulse", "type": "CONST", "params": { "data_type": "BOOL", "value": true } },
+    { "id": "do_pulse", "type": "DO", "params": { "channel": 2, "symbol": "DO_Pulse" } }
+  ],
+  "wires": [
+    { "from": { "block": "hits_r", "port": "Q" }, "to": { "block": "add1", "port": "IN1" } },
+    { "from": { "block": "one", "port": "Q" }, "to": { "block": "add1", "port": "IN2" } },
+    { "from": { "block": "add1", "port": "Q" }, "to": { "block": "hits_w", "port": "IN" } },
+    { "from": { "block": "pulse", "port": "Q" }, "to": { "block": "do_pulse", "port": "IN" } }
+  ],
+  "layout": {
+    "hits_r": { "x": 48, "y": 48 },
+    "one": { "x": 48, "y": 128 },
+    "add1": { "x": 280, "y": 80 },
+    "hits_w": { "x": 500, "y": 80 },
+    "pulse": { "x": 48, "y": 220 },
+    "do_pulse": { "x": 280, "y": 220 }
+  }
+}

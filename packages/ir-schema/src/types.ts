@@ -39,10 +39,18 @@ export interface NanoPlcProgramRef {
 export const PLC_TASK_KINDS = ["cyclic", "freewheeling", "event"] as const;
 export type PlcTaskKind = (typeof PLC_TASK_KINDS)[number];
 
+/** Firmware reaction when a task pass runs longer than `watchdog.time_ms`. */
+export type WatchdogAction = "hold" | "outputs_off";
+
 export interface NanoPlcTaskWatchdog {
   enabled: boolean;
   /** Watchdog timeout in milliseconds. */
   time_ms: number;
+  /**
+   * `hold` (default): log, outputs keep their last values.
+   * `outputs_off`: force every DO to OFF and latch until reboot.
+   */
+  on_timeout?: WatchdogAction;
 }
 
 /** One PROGRAM call inside a task. Legacy; a task now has a single `program`. */
@@ -64,7 +72,7 @@ export interface NanoPlcTaskRef {
   priority: number;
   /** Cyclic interval in milliseconds. Required when `kind` is `cyclic`. */
   interval_ms?: number;
-  /** BOOL symbol that triggers an `event` task (rising edge). Runtime later. */
+  /** BOOL symbol that triggers an `event` task (rising edge). */
   event?: string;
   watchdog?: NanoPlcTaskWatchdog;
   /** Entry PROGRAM id. A task runs exactly one program. */
@@ -255,6 +263,8 @@ export interface PlcIr {
 }
 
 /** One PLC task in the compiled IR (`docs/VIRTUAL_PLC_PLAN.md` §5, §33.2). */
+export type IrEventSource = { kind: "di"; index: number } | { kind: "var"; name: string };
+
 export interface IrTask {
   id: string;
   name: string;
@@ -263,10 +273,14 @@ export interface IrTask {
   priority: number;
   /** Cyclic interval (`cyclic` only). */
   interval_ms?: number;
-  /** BOOL trigger symbol (`event` only; runtime in T2). */
+  /** BOOL trigger symbol as written in the project (`event` only). */
   event?: string;
+  /** Resolved trigger: a DI of the process image or a BOOL IR variable (`event` only). */
+  event_source?: IrEventSource;
   /** Overrun limit in ms when the task watchdog is enabled. */
   watchdog_ms?: number;
+  /** Reaction to a watchdog timeout (default `hold`). */
+  watchdog_action?: WatchdogAction;
   /** Entry PROGRAM id. */
   program: string;
   /** True for the primary cyclic task (its schedule is also `PlcIr.schedule`). */

@@ -32,7 +32,8 @@ static void npgen_task_main_task(uint32_t npgen_dt_ms)
 }
 
 static const nanoplc_task_desc_t npgen_tasks[] = {
-    { "main_task", NANOPLC_TASK_CYCLIC, 1u, 10u, 50u, true, npgen_task_main_task },
+    { "main_task", NANOPLC_TASK_CYCLIC, 1u, 10u, 50u, NANOPLC_WATCHDOG_HOLD, true, NANOPLC_EVENT_NONE, 0u, NULL,
+      npgen_task_main_task },
 };
 
 const nanoplc_task_desc_t *nanoplc_generated_tasks(size_t *out_count)

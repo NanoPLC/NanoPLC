@@ -446,10 +446,22 @@ export function codegenC(ir: PlcIr, irSha256Hex: string, _ioMap?: IoMap): Codege
     .map((t) => cFunction(`static void ${cTaskFnName(t.id)}(uint32_t ${dtExpr})`, t.schedule, dtExpr))
     .join("\n\n");
   const taskRows = tasks
-    .map(
-      (t) =>
-        `    { ${cString(t.id)}, ${TASK_KIND_C[t.kind]}, ${t.priority}u, ${t.kind === "cyclic" ? (t.interval_ms ?? 0) : 0}u, ${t.watchdog_ms ?? 0}u, ${t.primary ? "true" : "false"}, ${cTaskFnName(t.id)} },`
-    )
+    .map((t) => {
+      const interval = t.kind === "cyclic" ? (t.interval_ms ?? 0) : 0;
+      const wdAction =
+        t.watchdog_action === "outputs_off" ? "NANOPLC_WATCHDOG_OUTPUTS_OFF" : "NANOPLC_WATCHDOG_HOLD";
+      let eventKind = "NANOPLC_EVENT_NONE";
+      let eventDi = "0u";
+      let eventVar = "NULL";
+      if (t.kind === "event" && t.event_source?.kind === "di") {
+        eventKind = "NANOPLC_EVENT_DI";
+        eventDi = `${t.event_source.index}u`;
+      } else if (t.kind === "event" && t.event_source?.kind === "var") {
+        eventKind = "NANOPLC_EVENT_VAR";
+        eventVar = `&npgen_v_${cIdent(t.event_source.name)}`;
+      }
+      return `    { ${cString(t.id)}, ${TASK_KIND_C[t.kind]}, ${t.priority}u, ${interval}u, ${t.watchdog_ms ?? 0}u, ${wdAction}, ${t.primary ? "true" : "false"}, ${eventKind}, ${eventDi}, ${eventVar}, ${cTaskFnName(t.id)} },`;
+    })
     .join("\n");
 
   const plc_program_c = `/* Auto-generated from IR v${IR_VERSION} — do not edit. */

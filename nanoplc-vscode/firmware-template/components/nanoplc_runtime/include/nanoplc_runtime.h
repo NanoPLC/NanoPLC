@@ -10,7 +10,7 @@ extern "C" {
  * Must stay aligned with codegen expectations + build manifest (plan §29).
  * v2: per-task entry points via `nanoplc_generated_tasks()` (T1).
  */
-#define NANOPLC_RUNTIME_ABI_VERSION 2u
+#define NANOPLC_RUNTIME_ABI_VERSION 3u
 
 /**
  * Binds I/O and starts one FreeRTOS task per PLC task from the generated task table.
