@@ -27,7 +27,8 @@ export interface EditorIoProfilePayload {
 export interface PouCatalogItem {
   id: string;
   name: string;
-  language: string;
+  /** `fb` is a function-block template, not a PROGRAM language. */
+  language: "fbd" | "st" | "lad" | "fb";
   variables: FbdVariable[];
 }
 
@@ -109,7 +110,7 @@ function readProgramText(rootPath: string, source: string): string | undefined {
 
 /** PROGRAM variable declarations from FBD sources (unsaved editor buffers win). */
 export function loadProjectPouCatalog(rootPath: string, project: NanoPlcProject): PouCatalogItem[] {
-  return project.programs.map((p) => {
+  const items: PouCatalogItem[] = project.programs.map((p) => {
     let variables: FbdVariable[] = [];
     if (p.language === "fbd") {
       const text = readProgramText(rootPath, p.source);
@@ -129,6 +130,22 @@ export function loadProjectPouCatalog(rootPath: string, project: NanoPlcProject)
       variables,
     };
   });
+  for (const fb of project.function_blocks ?? []) {
+    let variables: FbdVariable[] = [];
+    if (fb.language === "fbd") {
+      const text = readProgramText(rootPath, fb.source);
+      if (text) {
+        try {
+          const raw = JSON.parse(text) as { variables?: unknown };
+          variables = parsePouVariables(raw.variables).variables;
+        } catch {
+          variables = [];
+        }
+      }
+    }
+    items.push({ id: fb.id, name: fb.name, language: "fb", variables });
+  }
+  return items;
 }
 
 export function ioCapacityFromProfile(profile: EditorIoProfilePayload): {

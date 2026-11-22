@@ -69,6 +69,7 @@ const SUPPORTED_BLOCKS = new Set([
   "ROL",
   "ROR",
   "CALL",
+  "FB",
   "LOCAL",
 ]);
 
@@ -649,6 +650,31 @@ function emitScheduleStep(
         },
       ];
     }
+    case "FB": {
+      const target = String(block.params?.fb ?? "").trim();
+      const callee = calleeVars?.get(target) ?? [];
+      const call_in: Record<string, string> = {};
+      const call_out: Record<string, string> = {};
+      for (const v of pouInterfaceInputs(callee)) {
+        const src = wireIns.get(v.name.toUpperCase());
+        if (src) {
+          call_in[v.name] = src;
+        }
+      }
+      for (const v of pouInterfaceOutputs(callee)) {
+        call_out[v.name] = callPortIrName(block.id, v.name);
+      }
+      return [
+        {
+          step: stepIndex,
+          op: "fb",
+          program: target,
+          block_id: block.id,
+          call_in: Object.keys(call_in).length > 0 ? call_in : undefined,
+          call_out: Object.keys(call_out).length > 0 ? call_out : undefined,
+        },
+      ];
+    }
     case "LOCAL": {
       const name = String(block.params?.name ?? "").trim();
       const src = wireIns.get("IN");
@@ -723,6 +749,7 @@ export function compileFbdToIr(
   }
 
   diagnostics.push(...validateCallBlocks(fbd.blocks, project, programId));
+  diagnostics.push(...validateFbBlocks(fbd.blocks, project));
   diagnostics.push(...validateLocalBlocks(fbd.blocks, localVars));
   diagnostics.push(...validateIoBindings(fbd.blocks));
   diagnostics.push(...validateConstBlocks(fbd.blocks));
@@ -877,6 +904,38 @@ function validateCallBlocks(
           `CALL currently supports FBD programs only ("${prog.name}" is ${prog.language}).`,
           block.id
         )
+      );
+    }
+  }
+  return diagnostics;
+}
+
+function validateFbBlocks(blocks: FbdBlock[], project: NanoPlcProject): CompileDiagnostic[] {
+  const diagnostics: CompileDiagnostic[] = [];
+  const seen = new Set<string>();
+  for (const block of blocks) {
+    if (block.type.toUpperCase() !== "FB") {
+      continue;
+    }
+    const target = String(block.params?.fb ?? "").trim();
+    if (!target) {
+      diagnostics.push(diag("NP-0420", `FB block "${block.id}" has no function block assigned.`, block.id));
+      continue;
+    }
+    if (seen.has(block.id)) {
+      diagnostics.push(diag("NP-0422", `Duplicate function-block instance "${block.id}".`, block.id));
+    }
+    seen.add(block.id);
+    const fb = project.function_blocks?.find((item) => item.id === target);
+    if (!fb) {
+      diagnostics.push(
+        diag("NP-0421", `FB block "${block.id}" references unknown function block "${target}".`, block.id)
+      );
+      continue;
+    }
+    if (fb.language !== "fbd") {
+      diagnostics.push(
+        diag("NP-0205", `Function block "${fb.name}" must be FBD (found ${fb.language}).`, block.id)
       );
     }
   }
@@ -1153,7 +1212,13 @@ export function compileProjectToIr(
     return { ok: false, diagnostics: [...diagnostics, diag("NP-0105", "Entry program failed to compile.")] };
   }
   const callees = new Set([...compiled.keys()].filter((id) => id !== entryProgramId));
-  return { ok: true, diagnostics, ir: assembleIr(project, compiled, entryProgramId, callees).ir };
+  const assembled = assembleIr(project, compiled, entryProgramId, callees);
+  const linked = linkFunctionBlocks(project, sources, assembled.ir);
+  const all = [...diagnostics, ...linked];
+  if (all.some((d) => d.severity === "error")) {
+    return { ok: false, diagnostics: all };
+  }
+  return { ok: true, diagnostics: all, ir: assembled.ir };
 }
 
 function reachablePrograms(entry: string, compiled: Map<string, CompileResult>): Set<string> {
@@ -1255,6 +1320,11 @@ export function compileTasksToIr(
     primary: task === primaryEntry.task ? true : undefined,
     schedule: schedules.get(program) ?? [],
   }));
+  const linked = linkFunctionBlocks(project, sources, ir);
+  diagnostics.push(...linked);
+  if (diagnostics.some((d) => d.severity === "error")) {
+    return { ok: false, diagnostics };
+  }
   return { ok: true, diagnostics, ir };
 }
 
@@ -1292,5 +1362,132 @@ function resolveEventSource(
     return { kind: "di", index: mapped.index };
   }
   return `event variable "${name}" is not a DI symbol, a BOOL program variable, or Program.Var.`;
+}
+
+function mapFbName(name: string | undefined, fbId: string, instance: string): string | undefined {
+  if (!name) {
+    return name;
+  }
+  if (name.startsWith("__")) {
+    return `__${instance}_${name.slice(2)}`;
+  }
+  const prefix = `${fbId}__`;
+  if (name.startsWith(prefix)) {
+    return `${instance}__${name.slice(prefix.length)}`;
+  }
+  return name;
+}
+
+function rewriteFbStep(step: ScheduleStep, fbId: string, instance: string): ScheduleStep {
+  const mapRec = (map: Record<string, string> | undefined): Record<string, string> | undefined => {
+    if (!map) {
+      return map;
+    }
+    const out: Record<string, string> = {};
+    for (const [key, value] of Object.entries(map)) {
+      out[key] = mapFbName(value, fbId, instance) ?? value;
+    }
+    return out;
+  };
+  return {
+    ...step,
+    out: mapFbName(step.out, fbId, instance),
+    in1: mapFbName(step.in1, fbId, instance),
+    in2: mapFbName(step.in2, fbId, instance),
+    block_id: step.block_id ? `${instance}__${step.block_id}` : step.block_id,
+    call_in: mapRec(step.call_in),
+    call_out: mapRec(step.call_out),
+  };
+}
+
+/** Expand each canvas FB into its own schedule so timers and VARs are not shared. */
+function linkFunctionBlocks(
+  project: NanoPlcProject,
+  sources: Map<string, unknown>,
+  ir: PlcIr
+): CompileDiagnostic[] {
+  const defs = project.function_blocks ?? [];
+  if (defs.length === 0) {
+    return [];
+  }
+  const diagnostics: CompileDiagnostic[] = [];
+  const programVars = new Map<string, FbdVariable[]>();
+  for (const [id, raw] of sources) {
+    const varsRaw = raw && typeof raw === "object" ? (raw as { variables?: unknown }).variables : undefined;
+    programVars.set(id, parsePouVariables(varsRaw).variables);
+  }
+  const compiled = new Map<string, PlcIr>();
+  for (const fb of defs) {
+    if (fb.language !== "fbd") {
+      diagnostics.push(diag("NP-0205", `Function block "${fb.name}" must be FBD.`));
+      continue;
+    }
+    const raw = sources.get(fb.id);
+    if (raw === undefined) {
+      diagnostics.push(diag("NP-0200", `Cannot read FBD source for function block "${fb.name}".`));
+      continue;
+    }
+    const result = compileFbdToIr(project, raw, fb.id, undefined, programVars);
+    for (const item of result.diagnostics) {
+      diagnostics.push({ ...item, program_id: fb.id });
+    }
+    if (result.ir) {
+      if (result.ir.schedule.some((step) => step.op === "fb")) {
+        diagnostics.push(
+          diag("NP-0423", `Function block "${fb.name}" cannot contain another FB instance.`)
+        );
+      }
+      compiled.set(fb.id, result.ir);
+    }
+  }
+  if (diagnostics.some((item) => item.severity === "error")) {
+    return diagnostics;
+  }
+
+  const lists: ScheduleStep[][] = [ir.schedule];
+  for (const pou of ir.pou_schedules ?? []) {
+    lists.push(pou.schedule);
+  }
+  for (const task of ir.tasks ?? []) {
+    lists.push(task.schedule);
+  }
+  const fbInstances: { id: string; def: string; schedule: ScheduleStep[] }[] = [];
+  const seen = new Set<string>();
+  for (const schedule of lists) {
+    for (const step of schedule) {
+      if (step.op !== "fb" || !step.program || !step.block_id) {
+        continue;
+      }
+      const body = compiled.get(step.program);
+      if (!body) {
+        continue;
+      }
+      if (seen.has(step.block_id)) {
+        diagnostics.push(diag("NP-0422", `Duplicate function-block instance "${step.block_id}".`, step.block_id));
+        continue;
+      }
+      seen.add(step.block_id);
+      fbInstances.push({
+        id: step.block_id,
+        def: step.program,
+        schedule: body.schedule.map((item) => rewriteFbStep(item, step.program as string, step.block_id as string)),
+      });
+      for (const variable of body.variables) {
+        const name = mapFbName(variable.name, step.program, step.block_id) ?? variable.name;
+        if (!ir.variables.some((item) => item.name === name)) {
+          ir.variables.push({ ...variable, name });
+        }
+      }
+      for (const inst of body.instances) {
+        const id = `${step.block_id}__${inst.id}`;
+        if (!ir.instances.some((item) => item.id === id)) {
+          ir.instances.push({ ...inst, id });
+        }
+      }
+    }
+  }
+  ir.fb_defs = [...compiled.entries()].map(([id, body]) => ({ id, schedule: body.schedule }));
+  ir.fb_instances = fbInstances.length > 0 ? fbInstances : undefined;
+  return diagnostics;
 }
 

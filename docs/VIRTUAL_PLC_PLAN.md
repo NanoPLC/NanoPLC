@@ -749,7 +749,7 @@ Section 5 is the **product contract**. This section is the **implementation sequ
 ### 33.4. T3 — PROGRAM calls PROGRAM, libraries
 
 1. **CAL / program-from-program (v0 done):** FBD palette **Programs** lists other FBD POUs. Dropping a block inserts `CALL` (`params.program`) with the callee’s IN / IN_OUT / OUT ports. PROGRAM `variables[]`: IN, IN_OUT, OUT, VAR, TEMP; canvas access is `LOCAL`. Compile emits `call` plus `call_in` / `call_out` and `pou_schedules`. The callee is a singleton (shared process image, one TON/RS instance; VAR persists; TEMP resets each call). Cycles and self-calls are errors (`NP-0410`, `NP-0411`). Missing/unknown callee: `NP-0412`, `NP-0413`. Codegen emits `npgen_pou_<id>()` with argument copies. Process-image arrays (`npgen_di` / `npgen_ai` / `npgen_do`) are omitted when unused.
-2. **FB libraries** as reusable IR subgraphs (`fb_def` plus instances) — not started.
+2. **FB libraries** as reusable IR subgraphs (`fb_def` plus instances). **Done (v0):** `function_blocks[]` on the project, FBD block `FB`, IR `fb_defs` / `fb_instances`. Each canvas box is its own schedule (timers and VARs are not shared). Nested FB is `NP-0423`. Not an ST function block.
 3. User packages keyed to compatible `ir_version` branches.
 
 Status / external tasks stay out of scope until T2 is stable.
@@ -1011,7 +1011,7 @@ _Last reviewed: 2026-11-22._
 
 ### Phase 0 / later phases
 
-Phase 0–2 foundation items above are done for the MVP. Phase 3 virtual plant and Phase 4 virtual fieldbuses are simulator-only. Simulator sticky force is in the watch panel. Structured Text has a structural language service (not a compiler). Remaining later work: FB libraries, on-target golden, shared C core implementation, 3D scene, UART force/unforce.
+Phase 0–2 foundation items above are done for the MVP. Phase 3 virtual plant and Phase 4 virtual fieldbuses are simulator-only. Simulator sticky force is in the watch panel. Structured Text has a structural language service (not a compiler). Function-block instances are in the FBD compiler (`fb_def` plus per-instance schedules). Remaining later work: user FB packages, on-target golden, shared C core implementation, 3D scene, UART force/unforce.
 
 ---
 
@@ -1061,3 +1061,4 @@ Phase 0–2 foundation items above are done for the MVP. Phase 3 virtual plant a
 - **Virtual fieldbuses (Phase 4 v0, 2026-11-22):** localhost Modbus TCP, MQTT 3.1.1, and OPC UA (anonymous, no security) while the simulator runs. See `docs/FIELDBUS.md`.
 - **Sticky force (2026-11-22):** watch-panel Force/Unforce. The simulator reapplies DI/AI after the plant and DO/variables after each task pass. Watchdog `outputs_off` still wins over a DO force. UART force is unchanged.
 - **ST language service (v0, 2026-11-22):** `iec-st` diagnostics for unclosed or mismatched blocks, duplicate variables, and non-elementary types (`ST0001`…`ST0005`); keyword/type/variable completion; hover; document outline. Not compiled to IR. LAD remains grammar-only.
+- **Function blocks (T3 v0, 2026-11-22):** `function_blocks[]` plus FBD `FB` instances. IR keeps `fb_defs` and a schedule per instance so timers and VARs are not shared. Diagnostics `NP-0420`…`NP-0423`. Nested FB is rejected.

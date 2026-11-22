@@ -132,6 +132,11 @@ export interface NanoPlcProject {
    */
   tasks?: NanoPlcTaskRef[];
   programs: NanoPlcProgramRef[];
+  /**
+   * Reusable FBD function blocks. Each canvas `FB` block is its own instance
+   * (timers and VARs are not shared). Not a PROGRAM and not a task entry.
+   */
+  function_blocks?: NanoPlcProgramRef[];
   firmware_root?: string;
   /**
    * Simulator-only virtual devices bound to process-image indexes.
@@ -223,7 +228,8 @@ export type ScheduleOp =
   | "rol"
   | "ror"
   | "rs"
-  | "call";
+  | "call"
+  | "fb";
 
 export interface ScheduleStep {
   step: number;
@@ -241,8 +247,9 @@ export interface ScheduleStep {
   value?: boolean | number;
   /** PLC type of the `const` literal / destination. */
   value_type?: PlcPrimitiveType;
-  /** Callee program id for `call` ops. */
+  /** Callee program id for `call`, or function-block id for `fb`. */
   program?: string;
+  /** Function-block instance id for `fb` (also `block_id`). */
   /** Caller wire names for callee IN / IN_OUT ports (`port → source`). */
   call_in?: Record<string, string>;
   /** Caller dest names for callee OUT / IN_OUT ports (`port → dest`). */
@@ -267,6 +274,10 @@ export interface PlcIr {
   schedule: ScheduleStep[];
   /** Callee PROGRAM schedules invoked by `call` ops in `schedule` (and nested calls). */
   pou_schedules?: { id: string; schedule: ScheduleStep[] }[];
+  /** Function-block templates. Instance schedules live in `fb_instances`. */
+  fb_defs?: { id: string; schedule: ScheduleStep[] }[];
+  /** One schedule per canvas instance, with names prefixed by the instance id. */
+  fb_instances?: { id: string; def: string; schedule: ScheduleStep[] }[];
   /**
    * Every task of the Task Configuration with its entry PROGRAM's schedule (T1).
    * When present, runtimes schedule these; `schedule` remains the primary cyclic task's.

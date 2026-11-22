@@ -74,6 +74,16 @@ export function loadProjectFbdSourcesFromDisk(projectRoot: string, project: Nano
       // compileProjectToIr reports a missing source.
     }
   }
+  for (const fb of project.function_blocks ?? []) {
+    if (fb.language !== "fbd") {
+      continue;
+    }
+    try {
+      sources.set(fb.id, JSON.parse(readFileSync(join(projectRoot, fb.source), "utf8")));
+    } catch {
+      // linkFunctionBlocks reports a missing source.
+    }
+  }
   return sources;
 }
 

@@ -306,6 +306,18 @@ function line(step: ScheduleStep, dtExpr: string): string[] {
       }
       return lines;
     }
+    case "fb": {
+      const id = cIdent(step.block_id ?? "fb");
+      const lines: string[] = [];
+      for (const [port, src] of Object.entries(step.call_in ?? {})) {
+        lines.push(`    ${varRef(`${step.block_id}__${port}`)} = ${varRef(src)};`);
+      }
+      lines.push(`    npgen_fb_${id}(${dtExpr});`);
+      for (const [port, dest] of Object.entries(step.call_out ?? {})) {
+        lines.push(`    ${varRef(dest)} = ${varRef(`${step.block_id}__${port}`)};`);
+      }
+      return lines;
+    }
     default:
       return [`    /* unsupported op ${step.op} */`];
   }
@@ -314,7 +326,8 @@ function line(step: ScheduleStep, dtExpr: string): string[] {
 function allSteps(ir: PlcIr): ScheduleStep[] {
   const tasks = irTaskList(ir).flatMap((t) => t.schedule);
   const extra = ir.pou_schedules?.flatMap((p) => p.schedule) ?? [];
-  return [...tasks, ...extra];
+  const fbs = ir.fb_instances?.flatMap((item) => item.schedule) ?? [];
+  return [...tasks, ...extra, ...fbs];
 }
 
 /** C name of the static function that runs one pass of a PLC task. */
@@ -451,6 +464,10 @@ export function codegenC(ir: PlcIr, irSha256Hex: string, _ioMap?: IoMap): Codege
   const pouSig = (id: string) => `static void npgen_pou_${cIdent(id)}(uint32_t ${dtExpr})`;
   const pouProtos = pous.map((p) => `${pouSig(p.id)};`).join("\n");
   const pouFns = pous.map((p) => cFunction(pouSig(p.id), p.schedule, dtExpr)).join("\n\n");
+  const fbs = ir.fb_instances ?? [];
+  const fbSig = (id: string) => `static void npgen_fb_${cIdent(id)}(uint32_t ${dtExpr})`;
+  const fbProtos = fbs.map((item) => `${fbSig(item.id)};`).join("\n");
+  const fbFns = fbs.map((item) => cFunction(fbSig(item.id), item.schedule, dtExpr)).join("\n\n");
   const taskFns = tasks
     .map((t) => cFunction(`static void ${cTaskFnName(t.id)}(uint32_t ${dtExpr})`, t.schedule, dtExpr))
     .join("\n\n");
@@ -485,12 +502,12 @@ export function codegenC(ir: PlcIr, irSha256Hex: string, _ioMap?: IoMap): Codege
 #include <stddef.h>
 #include <stdint.h>
 ${needMath ? "#include <math.h>\n" : ""}
-${diCount > 0 ? `static bool npgen_di[${diCount}];\n` : ""}${aiCount > 0 ? `static float npgen_ai[${aiCount}];\n` : ""}${doCount > 0 ? `static bool npgen_do[${doCount}];\n` : ""}${varDecls ? `${varDecls}\n` : ""}${timerStructs ? `${timerStructs}\n` : ""}${rsStructs ? `${rsStructs}\n` : ""}${pouProtos ? `${pouProtos}\n` : ""}
+${diCount > 0 ? `static bool npgen_di[${diCount}];\n` : ""}${aiCount > 0 ? `static float npgen_ai[${aiCount}];\n` : ""}${doCount > 0 ? `static bool npgen_do[${doCount}];\n` : ""}${varDecls ? `${varDecls}\n` : ""}${timerStructs ? `${timerStructs}\n` : ""}${rsStructs ? `${rsStructs}\n` : ""}${pouProtos ? `${pouProtos}\n` : ""}${fbProtos ? `${fbProtos}\n` : ""}
 uint32_t nanoplc_generated_magic(void)
 {
     return 0x${magic.toString(16).padStart(8, "0")}u;
 }
-${pouFns ? `\n${pouFns}\n` : ""}
+${pouFns ? `\n${pouFns}\n` : ""}${fbFns ? `\n${fbFns}\n` : ""}
 ${taskFns}
 
 static const nanoplc_task_desc_t npgen_tasks[] = {

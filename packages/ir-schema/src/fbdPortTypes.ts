@@ -126,7 +126,7 @@ function inferWiredSourceType(
     return "BOOL";
   }
   const fromBlock = blocks.get(wire.from.block);
-  if (fromBlock && (fromBlock.type.toUpperCase() === "CALL" || fromBlock.type.toUpperCase() === "LOCAL")) {
+  if (fromBlock && (fromBlock.type.toUpperCase() === "CALL" || fromBlock.type.toUpperCase() === "FB" || fromBlock.type.toUpperCase() === "LOCAL")) {
     return blockOutputType(fromBlock, wire.from.port, memo, ctx);
   }
   return inferOutputTypeForBlock(wire.from.block, blocks, wires, memo, visiting, ctx);
@@ -145,11 +145,18 @@ export function buildBlockOutputTypes(
   return memo;
 }
 
+function boundPouId(block: FbdBlock): string {
+  const t = block.type.toUpperCase();
+  if (t === "FB") {
+    return String(block.params?.fb ?? "").trim();
+  }
+  return String(block.params?.program ?? "").trim();
+}
+
 export function inputPortsForBlock(block: FbdBlock, ctx?: FbdPortContext): Set<string> {
   const t = block.type.toUpperCase();
-  if (t === "CALL") {
-    const pid = String(block.params?.program ?? "").trim();
-    return new Set(callBlockPorts(ctx?.calleeVars?.get(pid)).inputs.map((n) => n.toUpperCase()));
+  if (t === "CALL" || t === "FB") {
+    return new Set(callBlockPorts(ctx?.calleeVars?.get(boundPouId(block))).inputs.map((n) => n.toUpperCase()));
   }
   if (t === "LOCAL") {
     const v = findPouVariable(ctx?.localVars, String(block.params?.name ?? ""));
@@ -161,9 +168,8 @@ export function inputPortsForBlock(block: FbdBlock, ctx?: FbdPortContext): Set<s
 export function isBlockOutputPort(block: FbdBlock, port: string, ctx?: FbdPortContext): boolean {
   const t = block.type.toUpperCase();
   const p = port.toUpperCase();
-  if (t === "CALL") {
-    const pid = String(block.params?.program ?? "").trim();
-    return callBlockPorts(ctx?.calleeVars?.get(pid)).outputs.some((n) => n.toUpperCase() === p);
+  if (t === "CALL" || t === "FB") {
+    return callBlockPorts(ctx?.calleeVars?.get(boundPouId(block))).outputs.some((n) => n.toUpperCase() === p);
   }
   if (t === "LOCAL") {
     const v = findPouVariable(ctx?.localVars, String(block.params?.name ?? ""));
@@ -182,9 +188,8 @@ export function blockOutputType(
   ctx?: FbdPortContext
 ): PlcPrimitiveType {
   const t = block.type.toUpperCase();
-  if (t === "CALL") {
-    const pid = String(block.params?.program ?? "").trim();
-    return findPouVariable(ctx?.calleeVars?.get(pid), port)?.type ?? "BOOL";
+  if (t === "CALL" || t === "FB") {
+    return findPouVariable(ctx?.calleeVars?.get(boundPouId(block)), port)?.type ?? "BOOL";
   }
   if (t === "LOCAL") {
     return findPouVariable(ctx?.localVars, String(block.params?.name ?? ""))?.type ?? "BOOL";
@@ -201,9 +206,8 @@ export function inferInputPortType(
   const t = block.type.toUpperCase();
   const p = port.toUpperCase();
 
-  if (t === "CALL") {
-    const pid = String(block.params?.program ?? "").trim();
-    return findPouVariable(ctx?.calleeVars?.get(pid), port)?.type ?? "BOOL";
+  if (t === "CALL" || t === "FB") {
+    return findPouVariable(ctx?.calleeVars?.get(boundPouId(block)), port)?.type ?? "BOOL";
   }
   if (t === "LOCAL") {
     return findPouVariable(ctx?.localVars, String(block.params?.name ?? ""))?.type ?? "BOOL";
@@ -274,6 +278,7 @@ export function inputPortsForType(type: string): Set<string> {
     case "ROR":
       return new Set(["IN", "N"]);
     case "CALL":
+    case "FB":
     case "LOCAL":
       return new Set();
     default:
@@ -296,11 +301,11 @@ export function inferFbdPortTypes(fbd: FbdSource, ctx?: FbdPortContext): FbdPort
   }
   for (const block of fbd.blocks) {
     const t = block.type.toUpperCase();
-    if (t === "CALL") {
-      const pid = String(block.params?.program ?? "").trim();
+    if (t === "CALL" || t === "FB") {
+      const vars = portCtx.calleeVars?.get(boundPouId(block));
       const ports: Record<string, PlcPrimitiveType> = {};
-      for (const v of callBlockPorts(portCtx.calleeVars?.get(pid)).outputs) {
-        ports[v] = findPouVariable(portCtx.calleeVars?.get(pid), v)?.type ?? "BOOL";
+      for (const v of callBlockPorts(vars).outputs) {
+        ports[v] = findPouVariable(vars, v)?.type ?? "BOOL";
       }
       outputPorts[block.id] = ports;
     } else if (t === "LOCAL") {

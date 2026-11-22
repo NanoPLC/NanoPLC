@@ -60,6 +60,10 @@
     );
   }
 
+  function functionBlocks() {
+    return (projectPrograms.programs || []).filter((p) => p.language === "fb");
+  }
+
   function findProgram(id) {
     return (projectPrograms.programs || []).find((p) => p.id === id);
   }
@@ -95,14 +99,17 @@
   }
 
   function findDef(type, block) {
-    if (String(type).toUpperCase() === "CALL") {
-      const pid = block?.params?.program;
+    if (String(type).toUpperCase() === "CALL" || String(type).toUpperCase() === "FB") {
+      const fb = String(type).toUpperCase() === "FB";
+      const pid = fb ? block?.params?.fb : block?.params?.program;
       const prog = pid ? findProgram(pid) : undefined;
       const ports = callBlockPorts(prog?.variables);
       return {
-        type: "CALL",
-        label: prog?.name || pid || "Program",
-        description: "Calls another PROGRAM. IN, IN_OUT, and OUT appear as ports.",
+        type: fb ? "FB" : "CALL",
+        label: prog?.name || pid || (fb ? "Function block" : "Program"),
+        description: fb
+          ? "Function block instance. Each box has its own variables and timers."
+          : "Calls another PROGRAM. IN, IN_OUT, and OUT appear as ports.",
         category: "program",
         inputs: ports.inputs,
         outputs: ports.outputs,
@@ -208,8 +215,9 @@
   function inferSourcePortType(fromBlockId, fromPort, blocks, wires, memo, visiting) {
     const fromBlock = blocks.get(fromBlockId);
     const ft = fromBlock?.type.toUpperCase() ?? "";
-    if (ft === "CALL") {
-      const prog = findProgram(fromBlock.params?.program);
+    if (ft === "CALL" || ft === "FB") {
+      const pid = ft === "FB" ? fromBlock.params?.fb : fromBlock.params?.program;
+      const prog = findProgram(pid);
       const v = findPouVariable(prog?.variables, fromPort);
       return v?.type || "BOOL";
     }
@@ -232,8 +240,9 @@
   function inferInputPortType(block, port, outputTypes) {
     const t = String(block.type).toUpperCase();
     const p = String(port).toUpperCase();
-    if (t === "CALL") {
-      const prog = findProgram(block.params?.program);
+    if (t === "CALL" || t === "FB") {
+      const pid = t === "FB" ? block.params?.fb : block.params?.program;
+      const prog = findProgram(pid);
       return findPouVariable(prog?.variables, port)?.type || "BOOL";
     }
     if (t === "LOCAL") {
@@ -300,8 +309,9 @@
 
   function inputPortsForBlock(block) {
     const t = String(block.type).toUpperCase();
-    if (t === "CALL") {
-      return callBlockPorts(findProgram(block.params?.program)?.variables).inputs;
+    if (t === "CALL" || t === "FB") {
+      const pid = t === "FB" ? block.params?.fb : block.params?.program;
+      return callBlockPorts(findProgram(pid)?.variables).inputs;
     }
     if (t === "LOCAL") {
       return localBlockPorts(findPouVariable(docVariables(), block.params?.name)).inputs;
@@ -321,8 +331,9 @@
     const outputPorts = {};
     for (const block of source?.blocks || []) {
       const t = String(block.type).toUpperCase();
-      if (t === "CALL") {
-        const vars = findProgram(block.params?.program)?.variables || [];
+      if (t === "CALL" || t === "FB") {
+        const pid = t === "FB" ? block.params?.fb : block.params?.program;
+        const vars = findProgram(pid)?.variables || [];
         const ports = {};
         for (const v of vars) {
           if (v.class === "OUT" || v.class === "IN_OUT") {
@@ -584,7 +595,7 @@
     if (t === "LOCAL") {
       return `${programId}__${String(block.params?.name || "").trim()}`;
     }
-    if (t === "CALL") {
+    if (t === "CALL" || t === "FB") {
       return `__${block.id}_${port}`;
     }
     return `__${block.id}_Q`;
@@ -652,7 +663,7 @@
       }
 
       const t = String(block.type).toUpperCase();
-      if (t === "CALL") {
+      if (t === "CALL" || t === "FB") {
         if (badge) {
           badge.textContent = "";
           badge.classList.add("hidden");
@@ -744,7 +755,7 @@
 
   function blockSubtitle(block) {
     const t = String(block.type).toUpperCase();
-    if (t === "CALL") {
+    if (t === "CALL" || t === "FB") {
       return "";
     }
     if (t === "LOCAL") {
@@ -1832,6 +1843,33 @@
       wrap.appendChild(btn);
     }
     el.palette.appendChild(wrap);
+
+    const fbs = functionBlocks();
+    const fbWrap = document.createElement("div");
+    fbWrap.className = "palette-group";
+    fbWrap.innerHTML = `<div class="palette-group-title">Function blocks</div>`;
+    if (fbs.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "muted";
+      empty.style.padding = "4px 8px";
+      empty.textContent = "Add function_blocks in the project to place an instance.";
+      fbWrap.appendChild(empty);
+    }
+    for (const fb of fbs) {
+      const btn = document.createElement("button");
+      btn.className = "palette-item";
+      btn.type = "button";
+      btn.textContent = fb.name;
+      btn.title = `Instance of ${fb.name}. Variables and timers are not shared.`;
+      btn.addEventListener("click", () => addBlock("FB", undefined, { fb: fb.id }));
+      btn.addEventListener("dragstart", (ev) => {
+        ev.dataTransfer.setData("text/nanoplc-block", "FB");
+        ev.dataTransfer.setData("text/nanoplc-fb", fb.id);
+      });
+      btn.draggable = true;
+      fbWrap.appendChild(btn);
+    }
+    el.palette.appendChild(fbWrap);
   }
 
   function addBlock(type, at, extraParams) {
@@ -1961,6 +1999,10 @@
         const callProgram = ev.dataTransfer.getData("text/nanoplc-call-program");
         if (callProgram) {
           extra.program = callProgram;
+        }
+        const fbId = ev.dataTransfer.getData("text/nanoplc-fb");
+        if (fbId) {
+          extra.fb = fbId;
         }
         const localVar = ev.dataTransfer.getData("text/nanoplc-local-var");
         if (localVar) {

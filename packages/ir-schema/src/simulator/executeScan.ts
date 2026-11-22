@@ -435,6 +435,21 @@ function executeSteps(
       }
       continue;
     }
+    if (step.op === "fb") {
+      const instance = step.block_id;
+      const body = ir.fb_instances?.find((item) => item.id === instance);
+      if (!instance || !body || callStack.includes(instance)) {
+        continue;
+      }
+      for (const [port, src] of Object.entries(step.call_in ?? {})) {
+        assignVar(state, ir, `${instance}__${port}`, state.vars[src]);
+      }
+      executeSteps(state, body.schedule, ir, dt_ms, [...callStack, instance]);
+      for (const [port, dest] of Object.entries(step.call_out ?? {})) {
+        assignVar(state, ir, dest, state.vars[`${instance}__${port}`]);
+      }
+      continue;
+    }
     executeScheduleStep(state, step, dt_ms, ir);
   }
 }
