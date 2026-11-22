@@ -84,14 +84,19 @@ function numericBinOp(
     }
     return [`    ${out} = ${a} ${oper} ${b};`];
   }
+  if (t === "DINT") {
+    if (operIsDiv(op)) {
+      return [
+        `    ${out} = (${b} == 0) ? 0 : (${b} == -1) ? (int32_t)(0u - (uint32_t)${a}) : (int32_t)(${a} / ${b});`,
+      ];
+    }
+    return [`    ${out} = (int32_t)((uint32_t)${a} ${op} (uint32_t)${b});`];
+  }
+  const cast = t === "INT" ? "int16_t" : "uint16_t";
   if (operIsDiv(op)) {
-    const cast = t === "DINT" ? "int32_t" : t === "INT" ? "int16_t" : "uint16_t";
     return [`    ${out} = (${b} != 0) ? ((${cast})(${a} / ${b})) : 0;`];
   }
-  if (t === "DINT" || t === "INT") {
-    return [`    ${out} = ${a} ${op} ${b};`];
-  }
-  return [`    ${out} = (uint16_t)(${a} ${op} ${b});`];
+  return [`    ${out} = (${cast})(${a} ${op} ${b});`];
 }
 
 function operIsDiv(op: string): boolean {
@@ -117,27 +122,11 @@ function numericRotateOp(step: ScheduleStep, op: "rol" | "ror"): string[] {
   const a = varRef(step.in1);
   const n = varRef(step.in2);
   const out = varRef(step.out);
-  if (t === "DINT") {
-    const width = 32;
-    const mask = 31;
-    if (op === "rol") {
-      return [
-        `    { uint32_t _v = (uint32_t)${a}; uint32_t _n = (uint32_t)(${n} & ${mask}u); ${out} = (int32_t)((_v << _n) | (_v >> (${width}u - _n))); }`,
-      ];
-    }
-    return [
-      `    { uint32_t _v = (uint32_t)${a}; uint32_t _n = (uint32_t)(${n} & ${mask}u); ${out} = (int32_t)((_v >> _n) | (_v << (${width}u - _n))); }`,
-    ];
-  }
-  const width = 16;
-  const mask = 15;
-  if (op === "rol") {
-    return [
-      `    { uint16_t _v = (uint16_t)${a}; uint16_t _n = (uint16_t)(${n} & ${mask}u); ${out} = (uint16_t)((_v << _n) | (_v >> (${width}u - _n))); }`,
-    ];
-  }
+  const [uType, sType, width, mask] =
+    t === "DINT" ? ["uint32_t", "int32_t", 32, 31] : ["uint16_t", t === "INT" ? "int16_t" : "uint16_t", 16, 15];
+  const [fwd, back] = op === "rol" ? ["<<", ">>"] : [">>", "<<"];
   return [
-    `    { uint16_t _v = (uint16_t)${a}; uint16_t _n = (uint16_t)(${n} & ${mask}u); ${out} = (uint16_t)((_v >> _n) | (_v << (${width}u - _n))); }`,
+    `    { ${uType} _v = (${uType})${a}; uint32_t _n = (uint32_t)${n} & ${mask}u; ${out} = (${sType})(${uType})((_v ${fwd} _n) | (_v ${back} ((${width}u - _n) & ${mask}u))); }`,
   ];
 }
 
@@ -147,15 +136,11 @@ function bitSetOp(step: ScheduleStep, set: boolean): string[] {
   const bit = varRef(step.in2);
   const out = varRef(step.out);
   const mask = bitMask(t);
-  if (t === "DINT") {
-    const expr = set
-      ? `${a} | (1L << (${bit} & ${mask}u))`
-      : `${a} & ~(1L << (${bit} & ${mask}u))`;
-    return [`    ${out} = ${expr};`];
-  }
+  const [uType, sType] = t === "DINT" ? ["uint32_t", "int32_t"] : ["uint16_t", t === "INT" ? "int16_t" : "uint16_t"];
+  const bitExpr = `((${uType})1u << ((uint32_t)${bit} & ${mask}u))`;
   const expr = set
-    ? `(uint16_t)(${a} | (1u << (${bit} & ${mask}u)))`
-    : `(uint16_t)(${a} & ~(1u << (${bit} & ${mask}u)))`;
+    ? `(${sType})(${uType})((${uType})${a} | ${bitExpr})`
+    : `(${sType})(${uType})((${uType})${a} & (${uType})~${bitExpr})`;
   return [`    ${out} = ${expr};`];
 }
 

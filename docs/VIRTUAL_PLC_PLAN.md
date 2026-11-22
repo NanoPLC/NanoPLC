@@ -349,7 +349,7 @@ Mitigate simulator/MCU mismatch: tight IR spec + tests + (later) shared C runtim
 
 - [x] Lock **IR** format choice (**JSON** on disk — see `docs/IR_SCHEMA.md`).
 - [x] Compile graph → **ordered step list** + cycle diagnostics (`packages/ir-schema`, **NanoPLC: Compile PLC program**).
-- [ ] Minimal block set and variable types (partial: DI/DO/AND/OR/NOT/TON in compiler; semantics doc pending).
+- [x] Minimal block set and variable types (I/O, logic, RS, CONST, TON/TOF/TP, math, bit ops; semantics in `docs/BLOCK_SEMANTICS.md`).
 
 ### Phase 1 — MVP «mini PLC IDE»
 
@@ -598,7 +598,7 @@ Enough for drills + golden regressions:
 | MOVE (INT/REAL) | when MVP exposes analog-ish consumers for CONST |
 | INT GT/EQ compare | sequencing |
 
-Document semantics in **`docs/BLOCK_SEMANTICS.md`**: evaluation order, PT=0 edge cases, cold-start behaviour.
+Semantics live in **`docs/BLOCK_SEMANTICS.md`** (done): evaluation order, PT=0 edge cases, cold-start behaviour, integer wrap / float32 REAL, known simulator ↔ MCU gaps.
 
 ---
 
@@ -654,7 +654,7 @@ MCU full replay unnecessary for MVP—same IR plus manual stimuli suffices early
 | Doc | Topics |
 |-----|--------|
 | `docs/IR_SCHEMA.md` or JSON Schema | IR wire format + trivial sample |
-| `docs/BLOCK_SEMANTICS.md` | MVP IEC-like interpretations |
+| `docs/BLOCK_SEMANTICS.md` | MVP IEC-like interpretations (**done**) |
 | `docs/DEBUG_PROTOCOL.md` | Framing/versioning/handshake samples |
 | `docs/TROUBLESHOOTING.md` | Expanded §44 |
 | `docs/BOOTSTRAP_TOOLCHAIN.md` | ESP-IDF bootstrap variants (offline/proxy/rollback) |
@@ -784,7 +784,8 @@ Golden IR programmes must behave the same:
 |-------|---------------|---------------|
 | Scan cadence versus timer deltas | deterministic tick clock | scheduler-bound |
 | `schedule` traversal | honours ordered steps | codegen matches |
-| TON extremes (PT=0, reset IN) | spec documented | MCU matches documented rules |
+| TON extremes (PT=0, reset IN) | spec documented (`BLOCK_SEMANTICS.md` §4) | MCU matches documented rules |
+| Integer overflow / REAL precision | wraps, float32 (`BLOCK_SEMANTICS.md` §2) | same, no C undefined behavior |
 | Post-scan snapshots | asserts | MCU golden harness or emulator |
 
 Mismatch blocks coordinated **IDE + codegen + firmware** releases unless recorded as deliberate platform caveat.
@@ -1039,3 +1040,4 @@ Unchanged: IR format lock, ordered graph compile, TS simulator, C codegen, onlin
 - **FBD green-trace (2026-08-16):** while **Run simulation** is active, FBD BOOL wires highlight true/false and blocks show live values (`fbdSourcePortIrName` + `simLive` snapshots). Sticky force still later.
 - **Watch BOOL toggles (2026-08-16):** simulator watch panel updates DI/AI/var values in place on each scan so TRUE/FALSE buttons respond on the first click.
 - **TOF / TP timers (2026-11-22):** IR ops `tof` / `tp`, simulator, C codegen (`npgen_tmr_<id>` + `npgen_et_advance`), FBD palette; TON ET now saturates at PT in the simulator too (was unbounded, C was clamped); `NP-0220` invalid PT.
+- **Block semantics + numeric parity (2026-11-22):** `docs/BLOCK_SEMANTICS.md`. Simulator wraps INT/DINT/UINT/WORD like C and rounds REAL to float32; C codegen avoids undefined behavior (DINT overflow via `uint32_t`, `INT_MIN / -1`, DINT `ROL`/`ROR` by 0, `SETBIT` bit 31). Checked 29 edge cases C ↔ TS with UBSan.

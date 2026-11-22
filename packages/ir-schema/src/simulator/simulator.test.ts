@@ -205,6 +205,64 @@ test("timers with PT = 0", () => {
   assert.deepEqual(trace(timerSim("TP", 0), [true, false, true]), [false, false, false]);
 });
 
+type NumCase = [op: string, typeA: string, a: number, typeB: string | null, b: number | null];
+
+/** Evaluates `op(a, b)` from CONST inputs in one scan, like the C runtime would. */
+function evalNumeric([op, typeA, a, typeB, b]: NumCase): boolean | number {
+  const second = typeB === null ? null : /BIT$/.test(op) ? "BIT" : /^(SH|RO)/.test(op) ? "N" : "IN2";
+  const blocks: FbdSource["blocks"] = [
+    { id: "a", type: "CONST", params: { data_type: typeA, value: a } },
+    { id: "op", type: op },
+  ];
+  const wires: FbdSource["wires"] = [
+    { from: { block: "a", port: "Q" }, to: { block: "op", port: second === "IN2" ? "IN1" : "IN" } },
+  ];
+  if (second && typeB !== null && b !== null) {
+    blocks.push({ id: "b", type: "CONST", params: { data_type: typeB, value: b } });
+    wires.push({ from: { block: "b", port: "Q" }, to: { block: "op", port: second } });
+  }
+  const fbd: FbdSource = { schema_version: FBD_SOURCE_SCHEMA_VERSION, name: "Main", blocks, wires };
+  const compiled = compileFbdToIr(baseProject, fbd, "main");
+  assert.ok(compiled.ok && compiled.ir, compiled.diagnostics.map((d) => d.message).join("; "));
+  return new PlcSimulator(compiled.ir).stepOnce().vars["__op_Q"];
+}
+
+test("integer math wraps like two's-complement C types", () => {
+  const cases: [NumCase, number][] = [
+    [["ADD", "INT", 32767, "INT", 1], -32768],
+    [["MUL", "INT", 300, "INT", 300], 24464],
+    [["DIV", "INT", -32768, "INT", -1], -32768],
+    [["DIV", "INT", -7, "INT", 2], -3],
+    [["DIV", "INT", 7, "INT", 0], 0],
+    [["ADD", "DINT", 2147483647, "DINT", 1], -2147483648],
+    [["MUL", "DINT", 123456789, "DINT", 987654321], -67153019],
+    [["SUB", "WORD", 0, "WORD", 1], 65535],
+  ];
+  for (const [c, expected] of cases) {
+    assert.equal(evalNumeric(c), expected, c.join(" "));
+  }
+});
+
+test("REAL math is rounded to float32", () => {
+  assert.equal(evalNumeric(["ADD", "REAL", 0.1, "REAL", 0.2]), Math.fround(0.1 + 0.2));
+  assert.equal(evalNumeric(["DIV", "REAL", 1, "REAL", 0]), 0);
+});
+
+test("bit ops keep the IN width and sign", () => {
+  const cases: [NumCase, number][] = [
+    [["SHR", "INT", -1, "INT", 4], 4095],
+    [["SHL", "DINT", 1, "INT", 31], -2147483648],
+    [["ROL", "DINT", 0x12345678, "INT", 0], 0x12345678],
+    [["ROR", "INT", 1, "INT", 1], -32768],
+    [["SETBIT", "INT", 0, "INT", 15], -32768],
+    [["RESETBIT", "INT", -1, "INT", 15], 32767],
+    [["SETBIT", "WORD", 1, "INT", 17], 3],
+  ];
+  for (const [c, expected] of cases) {
+    assert.equal(evalNumeric(c), expected, c.join(" "));
+  }
+});
+
 test("simulator CALL copies IN to callee and OUT back to caller", () => {
   const project: NanoPlcProject = {
     ...baseProject,

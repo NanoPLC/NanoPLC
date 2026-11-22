@@ -41,26 +41,35 @@ function writeNumeric(
   state: SimState,
   name: string | undefined,
   value: number,
-  _type?: PlcPrimitiveType
+  type?: PlcPrimitiveType
 ): void {
   if (!name) {
     return;
   }
-  state.vars[name] = value;
+  state.vars[name] = type === "REAL" ? Math.fround(value) : value;
 }
 
 function bitMask(type: PlcPrimitiveType | undefined): number {
   return type === "DINT" ? 31 : 15;
 }
 
+/**
+ * Store `v` the way the C runtime would: REAL as float32, integers truncated
+ * toward zero and wrapped to their two's-complement width.
+ */
 function toInt(v: number, type: PlcPrimitiveType | undefined): number {
   if (type === "REAL") {
-    return v;
+    return Math.fround(v);
   }
-  if (type === "DINT" || type === "INT") {
-    return Math.trunc(v);
+  const n = Number.isFinite(v) ? Math.trunc(v) : 0;
+  switch (type) {
+    case "DINT":
+      return n | 0;
+    case "INT":
+      return (n << 16) >> 16;
+    default:
+      return n & 0xffff;
   }
-  return Math.trunc(v) & 0xffff;
 }
 
 function timerState(state: SimState, blockId: string): TimerInstanceState {
@@ -157,13 +166,11 @@ function executeNumericBinOp(
   const t = step.value_type ?? "REAL";
   const a = readNumeric(state, step.in1);
   const b = readNumeric(state, step.in2);
-  let result: number;
-  if (t === "REAL") {
-    result = op(a, b);
-  } else {
-    result = toInt(op(a, b), t);
-  }
-  writeNumeric(state, step.out, result, t);
+  writeNumeric(state, step.out, toInt(op(a, b), t), t);
+}
+
+function intMul(a: number, b: number, t: PlcPrimitiveType | undefined): number {
+  return t === "REAL" ? a * b : Math.imul(a, b);
 }
 
 function executeShift(
@@ -174,10 +181,9 @@ function executeShift(
   const t = step.value_type ?? "WORD";
   const v = toInt(readNumeric(state, step.in1), t);
   const n = readNumeric(state, step.in2) & bitMask(t);
-  const mask = t === "DINT" ? 0xffffffff : 0xffff;
-  const result =
-    op === "shl" ? (v << n) & mask : (v >>> n) & mask;
-  writeNumeric(state, step.out, result, t);
+  const unsigned = t === "DINT" ? v >>> 0 : v & 0xffff;
+  const result = op === "shl" ? unsigned << n : unsigned >>> n;
+  writeNumeric(state, step.out, toInt(result, t), t);
 }
 
 function executeRotate(
@@ -193,11 +199,9 @@ function executeRotate(
     v &= 0xffff;
   }
   const n = readNumeric(state, step.in2) & mask;
-  const result =
-    op === "rol"
-      ? ((v << n) | (v >>> (width - n))) & (width === 16 ? 0xffff : 0xffffffff)
-      : ((v >>> n) | (v << (width - n))) & (width === 16 ? 0xffff : 0xffffffff);
-  writeNumeric(state, step.out, result, t);
+  const back = (width - n) & mask;
+  const result = op === "rol" ? (v << n) | (v >>> back) : (v >>> n) | (v << back);
+  writeNumeric(state, step.out, toInt(result, t), t);
 }
 
 function executeBitSet(state: SimState, step: ScheduleStep, set: boolean): void {
@@ -217,7 +221,7 @@ export function executeScheduleStep(state: SimState, step: ScheduleStep, dt_ms: 
     }
     case "read_ai": {
       const idx = step.index ?? 0;
-      const value = state.ai[idx] ?? 0;
+      const value = Math.fround(state.ai[idx] ?? 0);
       if (step.out ?? step.symbol) {
         state.vars[step.out ?? step.symbol!] = value;
       }
@@ -258,7 +262,7 @@ export function executeScheduleStep(state: SimState, step: ScheduleStep, dt_ms: 
         writeBool(state, step.out, step.value === true || step.value === 1);
       } else {
         const n = typeof step.value === "number" ? step.value : Number(step.value);
-        state.vars[step.out] = Number.isFinite(n) ? n : 0;
+        state.vars[step.out] = toInt(Number.isFinite(n) ? n : 0, t);
       }
       break;
     }
@@ -274,7 +278,7 @@ export function executeScheduleStep(state: SimState, step: ScheduleStep, dt_ms: 
       executeNumericBinOp(state, step, (a, b) => a - b);
       break;
     case "mul":
-      executeNumericBinOp(state, step, (a, b) => a * b);
+      executeNumericBinOp(state, step, (a, b) => intMul(a, b, step.value_type ?? "REAL"));
       break;
     case "div":
       executeNumericBinOp(state, step, (a, b) => (b !== 0 ? a / b : 0));

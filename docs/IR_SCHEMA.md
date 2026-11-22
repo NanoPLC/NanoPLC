@@ -2,7 +2,7 @@
 
 NanoPLC uses **JSON** as the canonical intermediate representation (IR) on disk (`build/ir.json`). Binary encodings may be added later for transport; the schema and semantics are defined here first.
 
-See also: `docs/VIRTUAL_PLC_PLAN.md` §5 (tasks), §15, §20, §29.
+See also: `docs/VIRTUAL_PLC_PLAN.md` §5 (tasks), §15, §20, §29; `docs/BLOCK_SEMANTICS.md` (runtime behavior of each block).
 
 ## Version fields
 

@@ -182,6 +182,21 @@
     return value ? "TRUE" : "FALSE";
   }
 
+  /** Shortest decimal that round-trips to the same float32 (REAL is float on the MCU). */
+  function formatNumber(value, type) {
+    const n = Number(value);
+    if (type !== "REAL" || !Number.isFinite(n)) {
+      return String(value);
+    }
+    for (let p = 1; p <= 9; p++) {
+      const s = Number(n.toPrecision(p));
+      if (Math.fround(s) === n) {
+        return String(s);
+      }
+    }
+    return String(n);
+  }
+
   function ioValue(watch) {
     const found = findIoEntry(watch.ioKind, watch.moduleId, watch.channel);
     const index = found?.entry.index ?? -1;
@@ -354,7 +369,7 @@
     input.className = "var-value";
     input.type = "number";
     input.step = type === "REAL" ? "any" : "1";
-    input.value = String(value);
+    input.value = formatNumber(value, type);
     input.addEventListener("change", () => {
       const n = Number(input.value);
       vscode.postMessage({
@@ -425,7 +440,7 @@
       }
       const input = cell.querySelector("input.var-value");
       if (input) {
-        input.value = String(value);
+        input.value = formatNumber(value, type);
       }
     }
   }
