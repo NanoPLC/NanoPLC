@@ -34,7 +34,6 @@ import {
   saveDirtyFbdDocuments,
 } from "../fbdEditor/fbdEditorProvider";
 import { ensureToolchainReady } from "../toolchainOnboarding";
-import { ensureToolchainReady } from "../toolchainOnboarding";
 
 const DIAG_COLLECTION = "nanoplc";
 let diagnosticCollection: vscode.DiagnosticCollection | undefined;

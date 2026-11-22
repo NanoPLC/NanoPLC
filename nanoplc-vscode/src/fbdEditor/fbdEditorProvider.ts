@@ -310,6 +310,8 @@ export class FbdEditorProvider implements vscode.CustomTextEditorProvider {
   <div id="toolbar">
     <span id="doc-title">FBD</span>
     <div id="toolbar-actions">
+      <button type="button" id="btn-undo" class="toolbar-btn" title="Undo (Ctrl+Z)" disabled>Undo</button>
+      <button type="button" id="btn-redo" class="toolbar-btn" title="Redo (Ctrl+Y)" disabled>Redo</button>
       <button type="button" id="btn-compile" class="toolbar-btn">Compile</button>
       <button type="button" id="btn-build" class="toolbar-btn">Build firmware</button>
     </div>
@@ -364,6 +366,10 @@ export class FbdEditorProvider implements vscode.CustomTextEditorProvider {
         if (!ok) {
           throw new Error("Failed to apply FBD edit");
         }
+        // Autosave after each debounced graph edit so diagrams survive reload.
+        if (document.isDirty) {
+          await document.save();
+        }
       };
 
       const timer = setTimeout(() => {
@@ -376,7 +382,7 @@ export class FbdEditorProvider implements vscode.CustomTextEditorProvider {
           .apply()
           .then(() => entry.resolve())
           .catch((err) => entry.reject(err));
-      }, 200);
+      }, 400);
 
       pendingFbdEdits.set(key, { timer, apply, resolve, reject });
     });

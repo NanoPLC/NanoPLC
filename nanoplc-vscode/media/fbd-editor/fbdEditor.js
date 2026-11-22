@@ -25,6 +25,13 @@
   let dirtyFromUser = false;
   /** @type {{ running: boolean, vars: Record<string, boolean|number> }} */
   let simLive = { running: false, vars: {} };
+  /** @type {Array<ReturnType<typeof cloneDocPayload>>} */
+  let undoStack = [];
+  /** @type {Array<ReturnType<typeof cloneDocPayload>>} */
+  let redoStack = [];
+  /** @type {ReturnType<typeof cloneDocPayload> | null} */
+  let lastSnapshot = null;
+  const UNDO_LIMIT = 100;
 
   const el = {
     title: document.getElementById("doc-title"),
@@ -36,6 +43,8 @@
     blocks: document.getElementById("blocks"),
     wires: document.getElementById("wires"),
     properties: document.getElementById("properties-body"),
+    btnUndo: document.getElementById("btn-undo"),
+    btnRedo: document.getElementById("btn-redo"),
     btnCompile: document.getElementById("btn-compile"),
     btnBuild: document.getElementById("btn-build"),
     simLiveBadge: document.getElementById("sim-live-badge"),
@@ -1972,10 +1981,94 @@
     });
   }
 
+  function cloneDocPayload(d) {
+    return JSON.parse(
+      JSON.stringify({
+        schema_version: d.schema_version,
+        name: d.name,
+        blocks: d.blocks,
+        wires: d.wires,
+        variables: d.variables || [],
+        layout: d.layout || {},
+      })
+    );
+  }
+
+  function applyDocPayload(payload, recordHistory) {
+    doc = {
+      schema_version: payload.schema_version,
+      name: payload.name,
+      blocks: payload.blocks,
+      wires: payload.wires,
+      variables: payload.variables || [],
+      layout: payload.layout || {},
+    };
+    lastSnapshot = cloneDocPayload(doc);
+    dirtyFromUser = true;
+    const sentKey = payloadKey(doc);
+    renderAll();
+    vscode.postMessage({
+      type: "update",
+      payload: lastSnapshot,
+    });
+    window.__nanoplcPendingKey = sentKey;
+    updateUndoRedoButtons();
+    if (recordHistory === false) {
+      return;
+    }
+  }
+
+  function updateUndoRedoButtons() {
+    if (el.btnUndo) {
+      el.btnUndo.disabled = undoStack.length === 0;
+    }
+    if (el.btnRedo) {
+      el.btnRedo.disabled = redoStack.length === 0;
+    }
+  }
+
+  function pushUndoSnapshot(previous) {
+    if (!previous) {
+      return;
+    }
+    undoStack.push(previous);
+    if (undoStack.length > UNDO_LIMIT) {
+      undoStack.shift();
+    }
+    redoStack = [];
+    updateUndoRedoButtons();
+  }
+
+  function undoEdit() {
+    if (!doc || undoStack.length === 0) {
+      return;
+    }
+    redoStack.push(cloneDocPayload(doc));
+    const previous = undoStack.pop();
+    applyDocPayload(previous, false);
+  }
+
+  function redoEdit() {
+    if (!doc || redoStack.length === 0) {
+      return;
+    }
+    undoStack.push(cloneDocPayload(doc));
+    if (undoStack.length > UNDO_LIMIT) {
+      undoStack.shift();
+    }
+    const next = redoStack.pop();
+    applyDocPayload(next, false);
+  }
+
   function commit() {
     if (!doc) {
       return;
     }
+    const next = cloneDocPayload(doc);
+    if (lastSnapshot && payloadKey(lastSnapshot) !== payloadKey(next)) {
+      pushUndoSnapshot(lastSnapshot);
+    }
+    lastSnapshot = next;
     dirtyFromUser = true;
     const sentKey = payloadKey(doc);
     renderAll();
@@ -1991,6 +2084,7 @@
       },
     });
     window.__nanoplcPendingKey = sentKey;
+    updateUndoRedoButtons();
   }
 
   function requestHostAction(type) {
@@ -2000,6 +2094,12 @@
     vscode.postMessage({ type });
   }
 
+  if (el.btnUndo) {
+    el.btnUndo.addEventListener("click", () => undoEdit());
+  }
+  if (el.btnRedo) {
+    el.btnRedo.addEventListener("click", () => redoEdit());
+  }
   if (el.btnCompile) {
     el.btnCompile.addEventListener("click", () => requestHostAction("compile"));
   }
@@ -2021,6 +2121,17 @@
   }
 
   window.addEventListener("keydown", (ev) => {
+    const mod = ev.ctrlKey || ev.metaKey;
+    if (mod && String(ev.key).toLowerCase() === "z" && !ev.shiftKey) {
+      undoEdit();
+      ev.preventDefault();
+      return;
+    }
+    if (mod && (String(ev.key).toLowerCase() === "y" || (String(ev.key).toLowerCase() === "z" && ev.shiftKey))) {
+      redoEdit();
+      ev.preventDefault();
+      return;
+    }
     if (ev.key === "Delete" || ev.key === "Backspace") {
       if (selectedWireIndex !== null && doc) {
         deleteWire(selectedWireIndex);
@@ -2047,6 +2158,10 @@
       dirtyFromUser = false;
       window.__nanoplcPendingKey = undefined;
       doc = incoming;
+      undoStack = [];
+      redoStack = [];
+      lastSnapshot = cloneDocPayload(doc);
+      updateUndoRedoButtons();
       el.parseError.classList.add("hidden");
       renderPalette();
       renderAll();

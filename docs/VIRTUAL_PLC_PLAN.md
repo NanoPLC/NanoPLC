@@ -357,7 +357,7 @@ Mitigate simulator/MCU mismatch: tight IR spec + tests + (later) shared C runtim
 
 ### Phase 1 — MVP «mini PLC IDE»
 
-1. [ ] IDE structure: **Device/project tree** (§3.2); **FBD** Node-RED–style canvas (§3.1); **ST** plain VS Code editor (§3.1). **Done so far:** CODESYS-style **Project tree** (device → modules → drivers → application → **Task configuration** + programs); **FBD canvas v0**; ST/LAD grammar-only text—see §49.
+1. [x] IDE structure: **Device/project tree** (§3.2); **FBD** Node-RED–style canvas (§3.1); **ST** plain VS Code editor (§3.1). **Done:** CODESYS-style **Project tree**; **FBD canvas v0** (palette, wiring, Variables/CALL, green-trace, undo/redo, autosave); **ST/LAD grammar-only** text (language service later)—see §49.
 2. [x] **JS/TS Virtual PLC** + **Run Simulation** (watch list: add DI/DO/AI by module/channel and POU vars; scan loop; **green-trace** on the FBD canvas).
 3. [x] **C codegen** from IR → `firmware/components/nanoplc_generated/` (auto on compile; CLI `tools/codegen`).
 4. [x] **ESP-IDF** skeleton under `firmware/` with working `idf.py build`; **manual** CLI flash/monitor. **Done:** NanoPLC IDE commands for Build/Flash/Monitor (§7.4); **per-project firmware scaffold** + **build on compile** (§7.4 item 3).
@@ -972,8 +972,8 @@ _Last reviewed: 2026-11-22._
 | Command: **Setup ESP-IDF toolchain** (bundled `bootstrap-idf.ps1` / `.sh`) | **Done** |
 | Command: **Check idf.py in PATH** | **Done** |
 | Command: **Add ESP-IDF export to PowerShell profile(s)** (Windows) | **Done** |
-| FBD graph editor / `customEditor` canvas | **Partial (v0)** — palette, pan/zoom, wiring, properties; **Variables** (IN / IN_OUT / OUT / VAR / TEMP) + **Programs** CALL; **DI/DO/AI** **module → channel** picker (per hardware module); **CONST** typed literals; toolbar **Compile** / **Build firmware**; **green-trace** while simulation runs |
-| Device / project tree (§3.2) | **Partial (v0)** — CODESYS-style hierarchy; **Task configuration** (one entry PROGRAM per task); **device catalog** + **module catalog** (StamPLC IO); Add device/module/driver/program/task |
+| FBD graph editor / `customEditor` canvas | **Done (v0)** — palette, pan/zoom, wiring, properties; **Variables** + **Programs** CALL; **DI/DO/AI** module→channel; **CONST**; toolbar Undo/Redo / Compile / Build; **autosave**; **green-trace** |
+| Device / project tree (§3.2) | **Done (v0)** — CODESYS-style hierarchy; **Task configuration**; **device catalog** + **module catalog**; Add device/module/driver/program/task |
 | `packages/ir-schema` + `docs/IR_SCHEMA.md` | **Done** |
 | Example `examples/and_gate` | **Done** |
 | TS **Virtual PLC** simulator (`PlcSimulator`, Run/Stop + watch list) | **Done** (v0 — add DI/DO/AI by module/channel and POU IN/IN_OUT/OUT/VAR/TEMP; FBD **green-trace**) |
@@ -1045,3 +1045,4 @@ Unchanged: IR format lock, ordered graph compile, TS simulator, C codegen, onlin
 - **Multi-task IR + Virtual PLC (T1a, 2026-11-22):** `compileTasksToIr()` emits IR `tasks[]` for the whole Task Configuration (IDE compile and `compileProjectDir` use it). `PlcSimulator` schedules all cyclic / freewheeling tasks in deterministic virtual time (priority breaks ties; per-task Δt); snapshots add `task_passes`. Warnings `NP-0117` (PROGRAM shared between tasks) and `NP-0118` (event task not scheduled). Firmware multi-task is T1b.
 - **Multi-task firmware (T1b, 2026-11-22):** runtime ABI v2. Codegen emits one task function per PLC task and the `nanoplc_generated_tasks()` table; `nanoplc_runtime_init()` starts one pinned FreeRTOS task per cyclic / freewheeling task with priority mapping, per-task TWDT, and rate-limited overrun logs with the task id. Fixed: `app_main` no longer hard-codes 10 ms, and the RTOS tick is 1 kHz (was 100 Hz, so intervals were rounded down to 10 ms steps, and 5 ms ran every 10 ms). HAL I/O is mutex-protected. New example `examples/multitask`, golden `multitask`, CI builds it.
 - **Event tasks + watchdog fail-safe (T2, 2026-11-22):** runtime ABI v3. IR resolves `event_source` (DI index or BOOL var) and `watchdog_action`. Simulator and host-C golden run event tasks on rising edges; firmware polls every tick. `outputs_off` calls `nanoplc_hal_force_outputs_off()` (latch). Diagnostics `NP-0118` / `NP-0119` / `NP-0120`. Example `examples/event_task`, golden `event_task`.
+- **Phase 1 IDE close-out (2026-11-22):** gated ESP-IDF onboarding (activation + Build/Compile); FBD undo/redo + autosave; Phase 1 checklist items 1 and 5 marked done (ST remains grammar-only).
