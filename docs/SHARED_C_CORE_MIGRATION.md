@@ -2,7 +2,7 @@
 
 Goal: move from **Phase A** (TS `PlcSimulator` + C codegen for MCU) to **Phase B** (one C execution core for host SoftPLC and ESP32) without rewriting the FBD editor (`VIRTUAL_PLC_PLAN.md` §4.2, §11 Phase 2).
 
-This document is the migration plan. Implementation is **not** started.
+This document is the migration plan. The first host-tested piece is `firmware/components/nanoplc_core` (`nanoplc_wrap_i16` / `i32` / `u16`). The schedule interpreter has **not** moved; codegen still emits straight-line C.
 
 ## What stays in TypeScript
 

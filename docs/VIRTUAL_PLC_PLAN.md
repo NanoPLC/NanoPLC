@@ -1011,7 +1011,7 @@ _Last reviewed: 2026-11-22._
 
 ### Phase 0 / later phases
 
-Phase 0–2 foundation items above are done for the MVP. Phase 3 virtual plant and Phase 4 virtual fieldbuses are simulator-only. Simulator sticky force is in the watch panel. Structured Text has a structural language service (not a compiler). Function-block instances are in the FBD compiler (`fb_def` plus per-instance schedules). Remaining later work: user FB packages, on-target golden, shared C core implementation, 3D scene, UART force/unforce.
+Phase 0–2 foundation items above are done for the MVP. Phase 3 virtual plant and Phase 4 virtual fieldbuses are simulator-only. Simulator sticky force is in the watch panel. Structured Text has a structural language service (not a compiler). Function-block instances are in the FBD compiler (`fb_def` plus per-instance schedules). `nanoplc_core` has host-tested integer wrap helpers; the shared schedule interpreter is not started. Remaining later work: user FB packages, on-target golden (needs hardware or QEMU; not run here), shared schedule interpreter, 3D scene, UART force/unforce.
 
 ---
 
@@ -1062,3 +1062,4 @@ Phase 0–2 foundation items above are done for the MVP. Phase 3 virtual plant a
 - **Sticky force (2026-11-22):** watch-panel Force/Unforce. The simulator reapplies DI/AI after the plant and DO/variables after each task pass. Watchdog `outputs_off` still wins over a DO force. UART force is unchanged.
 - **ST language service (v0, 2026-11-22):** `iec-st` diagnostics for unclosed or mismatched blocks, duplicate variables, and non-elementary types (`ST0001`…`ST0005`); keyword/type/variable completion; hover; document outline. Not compiled to IR. LAD remains grammar-only.
 - **Function blocks (T3 v0, 2026-11-22):** `function_blocks[]` plus FBD `FB` instances. IR keeps `fb_defs` and a schedule per instance so timers and VARs are not shared. Diagnostics `NP-0420`…`NP-0423`. Nested FB is rejected.
+- **Shared C core (first slice, 2026-11-22):** `firmware/components/nanoplc_core` integer wrap (`nanoplc_wrap_i16` / `i32` / `u16`), host-tested. The schedule interpreter is still generated C. On-target golden was not run (no hardware or QEMU in this environment).
