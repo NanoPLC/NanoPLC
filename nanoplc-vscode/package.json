@@ -366,6 +366,37 @@
             "type": "boolean",
             "default": true,
             "description": "After Compile PLC program (and codegen), run idf.py build for the project device (uses device.idf_target and project firmware_root)."
+          },
+          "nanoplc.fieldbus.enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "While Run simulation is active, listen on localhost for Modbus TCP, MQTT, and OPC UA unless the project disables a protocol."
+          },
+          "nanoplc.fieldbus.modbusPort": {
+            "type": "number",
+            "default": 5502,
+            "minimum": 0,
+            "maximum": 65535,
+            "description": "Modbus TCP port for the virtual slave (coils 0+ = DO, coils 1000+ = DI, registers 0+ = AI)."
+          },
+          "nanoplc.fieldbus.mqttPort": {
+            "type": "number",
+            "default": 5883,
+            "minimum": 0,
+            "maximum": 65535,
+            "description": "MQTT 3.1.1 port. Topics are {prefix}/di|do|ai/{index} and {prefix}/di|do|ai/{index}/set."
+          },
+          "nanoplc.fieldbus.mqttPrefix": {
+            "type": "string",
+            "default": "nanoplc",
+            "description": "MQTT topic root for the virtual broker."
+          },
+          "nanoplc.fieldbus.opcuaPort": {
+            "type": "number",
+            "default": 54840,
+            "minimum": 0,
+            "maximum": 65535,
+            "description": "OPC UA TCP port (anonymous, no security). Nodes ns=1;s=DI0, DO0, AI0."
           }
         }
       },

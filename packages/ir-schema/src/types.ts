@@ -5,6 +5,7 @@ import {
   PROJECT_SCHEMA_VERSION,
 } from "./constants";
 import type { VirtualPlantConfig } from "./plant/types";
+import type { NanoPlcCommunication } from "./fieldbus/config";
 
 export type PlcPrimitiveType = "BOOL" | "INT" | "DINT" | "UINT" | "WORD" | "REAL";
 
@@ -137,6 +138,11 @@ export interface NanoPlcProject {
    * Omitted from firmware. See `packages/ir-schema/src/plant`.
    */
   virtual_plant?: VirtualPlantConfig;
+  /**
+   * Simulator fieldbus endpoints (Modbus TCP, MQTT, OPC UA).
+   * Omitted fields use the IDE defaults. Not part of firmware.
+   */
+  communication?: NanoPlcCommunication;
 }
 
 export interface FbdPortRef {

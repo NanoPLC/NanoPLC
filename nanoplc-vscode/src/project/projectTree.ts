@@ -30,6 +30,7 @@ export type NanoPlcTreeKind =
   | "driver"
   | "communication_group"
   | "communication_placeholder"
+  | "fieldbus"
   | "virtual_plant_group"
   | "virtual_device"
   | "virtual_plant_empty"
@@ -104,6 +105,9 @@ export class NanoPlcTreeItem extends vscode.TreeItem {
         break;
       case "communication_placeholder":
         this.iconPath = new vscode.ThemeIcon("circle-slash");
+        break;
+      case "fieldbus":
+        this.iconPath = new vscode.ThemeIcon("radio-tower");
         break;
       case "virtual_plant_group":
         this.iconPath = new vscode.ThemeIcon("beaker");
@@ -289,14 +293,7 @@ export class NanoPlcProjectTreeProvider implements vscode.TreeDataProvider<NanoP
         return tree.drivers.map((drv) => driverItem(location, drv));
 
       case "communication_group":
-        return [
-          new NanoPlcTreeItem(
-            "communication_placeholder",
-            "No protocols configured",
-            vscode.TreeItemCollapsibleState.None,
-            location
-          ),
-        ];
+        return fieldbusItems(location, project);
 
       case "virtual_plant_group": {
         const devices = plantDevices(project);
@@ -348,6 +345,31 @@ export class NanoPlcProjectTreeProvider implements vscode.TreeDataProvider<NanoP
         return [];
     }
   }
+}
+
+function fieldbusItems(location: ProjectLocation, project: NanoPlcProject): NanoPlcTreeItem[] {
+  const comm = project.communication;
+  const row = (
+    label: string,
+    endpoint: { enabled?: boolean; port?: number } | undefined,
+    fallbackPort: number
+  ): NanoPlcTreeItem => {
+    const enabled = endpoint?.enabled !== false;
+    const port = typeof endpoint?.port === "number" ? endpoint.port : fallbackPort;
+    const item = new NanoPlcTreeItem(
+      enabled ? "fieldbus" : "communication_placeholder",
+      label,
+      vscode.TreeItemCollapsibleState.None,
+      location
+    );
+    item.description = enabled ? `127.0.0.1:${port} · simulation` : "disabled";
+    return item;
+  };
+  return [
+    row("Modbus TCP", comm?.modbus, 5502),
+    row("MQTT", comm?.mqtt, 5883),
+    row("OPC UA", comm?.opcua, 54840),
+  ];
 }
 
 function plantDevices(project: NanoPlcProject): VirtualDevice[] {

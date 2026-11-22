@@ -82,6 +82,8 @@ Optional **`virtual_plant`** is simulator-only (not compiled into IR or C). Devi
 
 Kinds: `pushbutton`, `switch`, `lamp`, `transmitter` (`temperature` | `pressure` | `adc`), `motor`, `valve`, `tank`, `conveyor`. The Virtual PLC writes sensors before each task pass and integrates actuators from the previous DO image. Diagnostics: `NP-0130` plant shape, `NP-0131` two devices drive the same DI or AI, `NP-0132` bad device fields, `NP-0133` transmitter range or profile.
 
+Optional **`communication`** selects which localhost fieldbuses start with **Run simulation** (`docs/FIELDBUS.md`). Omitted endpoints follow IDE settings. `enabled: false` skips that protocol. Ports and the MQTT `prefix` override the defaults (5502 / 5883 / 54840, prefix `nanoplc`). Not compiled into IR or C.
+
 When `tasks[]` is omitted, the IDE synthesizes **MainTask** from `scan.period_ms` and the first program. `scan.period_ms` remains a cache of the **primary cyclic** interval for IR `scan_period_ms` (compile T0). Compile emits every task into IR `tasks`; the Virtual PLC and the firmware (one FreeRTOS task per PLC task) run all of them, including event tasks on a rising-edge trigger. Legacy `pous[]` with one entry is still accepted.
 
 **Device catalog fields** on `device`:
@@ -178,7 +180,7 @@ Types, validation, `compileFbdToIr()`, `compileProjectToIr()` (one entry PROGRAM
 
 ### Simulator
 
-`PlcSimulator` loads compiled `PlcIr` and runs the ordered `schedule` each scan. A `call` step runs the matching `pou_schedules` entry (shared vars / process image; recursion is skipped at runtime and rejected at compile). Supported ops include `read_di`, `read_ai`, `write_do`, `and`, `or`, `not`, `ton`, `tof`, `tp`, `move`, `const`, `call`, math, and bit ops. The simulation webview is a watch list: add **DI / DO / AI** by module and channel, and add PROGRAM **IN / IN_OUT / OUT / VAR / TEMP** symbols. An optional project `virtual_plant` drives those channels from panel widgets (pushbutton, switch, lamp, transmitter, motor, valve, tank, conveyor); the plant is not part of `build/ir.json`.
+`PlcSimulator` loads compiled `PlcIr` and runs the ordered `schedule` each scan. A `call` step runs the matching `pou_schedules` entry (shared vars / process image; recursion is skipped at runtime and rejected at compile). Supported ops include `read_di`, `read_ai`, `write_do`, `and`, `or`, `not`, `ton`, `tof`, `tp`, `move`, `const`, `call`, math, and bit ops. The simulation webview is a watch list: add **DI / DO / AI** by module and channel, and add PROGRAM **IN / IN_OUT / OUT / VAR / TEMP** symbols. An optional project `virtual_plant` drives those channels from panel widgets (pushbutton, switch, lamp, transmitter, motor, valve, tank, conveyor); the plant is not part of `build/ir.json`. The same process image is published on localhost Modbus TCP, MQTT, and OPC UA while the simulation runs (`docs/FIELDBUS.md`).
 
 ### C codegen
 

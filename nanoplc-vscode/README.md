@@ -41,6 +41,8 @@ After **Compile PLC program**, run **NanoPLC: Run simulation**. The **NanoPLC Si
 
 The same panel has a **Virtual plant**: pushbutton, switch, lamp, transmitter (temperature, pressure, or ADC volts), motor, valve, tank, and conveyor. Devices are saved on `nanoplc.project.json` as `virtual_plant` and shown in the Project tree. A device that writes a DI or AI owns that channel (the watch row becomes read-only). The plant runs only in the simulator; **Compile** does not emit it into firmware.
 
+**Run simulation** also listens on localhost for **Modbus TCP** (default port 5502), **MQTT** (5883), and **OPC UA** (54840) so a SCADA client can read and write the process image. The map is `docs/FIELDBUS.md` in the monorepo. Turn a protocol off with `communication` in `nanoplc.project.json` or `nanoplc.fieldbus.enabled`.
+
 Runtime lives in `@nanoplc/ir-schema` (`PlcSimulator`) so golden tests can share the same semantics as the IDE.
 
 ## Codegen

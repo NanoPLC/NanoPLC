@@ -79,7 +79,7 @@ A dedicated NanoPLC **Tree View** («**Project**», activity bar), similar to **
 | ↳ Module | e.g. Onboard GPIO (digital) | `src/io-map.json` |
 | **Drivers** | HAL / fieldbus stacks bound to modules | — |
 | ↳ Driver | e.g. `nanoplc_hal` → module | Driver info dialog (v0) |
-| **Communication** | Modbus, MQTT, online debug (later) | Placeholder until Phase 4 |
+| **Communication** | Modbus TCP, MQTT, OPC UA while simulating | Starts with **Run simulation** (`docs/FIELDBUS.md`) |
 | **Virtual plant** | Simulator devices on the process image (Phase 3) | Run simulation |
 | **Application → Task configuration** | PLC tasks; each runs **one** PROGRAM (§5) | Add / configure task |
 | ↳ Task | e.g. MainTask (Cyclic · 10 ms · Prio 1) | Task properties wizard |
@@ -98,7 +98,9 @@ Device (and_gate · esp32-s3)
 ├── Drivers
 │   └── GPIO process image (nanoplc_hal)
 ├── Communication
-│   └── (none yet)
+│   ├── Modbus TCP          → localhost while simulating
+│   ├── MQTT
+│   └── OPC UA
 ├── Virtual plant
 │   └── (devices, simulator only)
 ├── Application
@@ -269,7 +271,7 @@ Compile copies IN / IN_OUT into the callee before its schedule (`call_in`), runs
 2. Standard timers (TON, TOF, pulse—per your block library). **Done (v0)** — `TON` / `TOF` / `TP` in IR, simulator, C codegen, and FBD palette; ET saturates at PT; verified C ↔ TS on the same input trace.
 3. Analog I/O vs analog **device stubs**. **Done (v0)** — **`AI` block**, `read_ai`, simulator **AI** watches, and themed **transmitter** widgets (temperature °C, pressure bar, ADC volts) on the virtual plant. The value written into the process image is the engineering quantity.
 4. Virtual devices (tank, motor, conveyor, valve)—layer above I/O («mini Factory I/O»). **Done (v0)** — simulator **virtual plant** (`virtual_plant` on `nanoplc.project.json`): pushbutton, switch, lamp, transmitter, motor, valve, tank, conveyor. Sensors are written before each PLC pass; actuators follow the previous pass’s DO image. Simulator only — not flashed.
-5. Virtual fieldbuses (Modbus, MQTT, OPC UA—as needed to test SCADA without hardware).
+5. Virtual fieldbuses (Modbus, MQTT, OPC UA—as needed to test SCADA without hardware). **Done (v0)** — localhost Modbus TCP, MQTT 3.1.1, and OPC UA (anonymous, no security) while **Run simulation** is active. Map in `docs/FIELDBUS.md`. Not flashed.
 
 ---
 
@@ -382,7 +384,7 @@ _Current progress versus phases is summarized in §49._
 
 ### Phase 4 — Virtual fieldbuses
 
-- [ ] Virtual Modbus / MQTT / (optional) OPC UA in simulator for SCADA linkage.
+- [x] Virtual Modbus / MQTT / OPC UA in the simulator for SCADA linkage. **Done (v0):** localhost servers started with **Run simulation** (`docs/FIELDBUS.md`). Modbus coils/registers, MQTT retained topics, OPC UA nodes `ns=1;s=DI0` / `DO0` / `AI0`. Not part of firmware.
 
 ---
 
@@ -984,6 +986,7 @@ _Last reviewed: 2026-11-22._
 | Example `examples/and_gate` | **Done** |
 | TS **Virtual PLC** simulator (`PlcSimulator`, Run/Stop + watch list) | **Done** (v0 — add DI/DO/AI by module/channel and POU IN/IN_OUT/OUT/VAR/TEMP; FBD **green-trace**) |
 | **Virtual plant** (Phase 3) | **Done (v0)** — `virtual_plant` on the project; simulator panel + Project tree. Pushbutton, switch, lamp, transmitter (temperature / pressure / ADC), motor, valve, tank, conveyor. Simulator only |
+| **Virtual fieldbus** (Phase 4) | **Done (v0)** — Modbus TCP, MQTT, OPC UA on localhost during **Run simulation** (`docs/FIELDBUS.md`) |
 | **C codegen** → `nanoplc_generated/plc_program.c` | **Done** (v0 schedule ops including `call` / `call_in` / `call_out`; omit unused DI/AI/DO arrays; auto on compile via `nanoplc.codegenOnCompile`) |
 | **`nanoplc_hal`** GPIO + registered I2C readers/writers from codegen | **Done** (v0 digital I/O; AW9523 DI/DO, StamPLC IO DO/AI) |
 | **Device catalog** + scaffold on **Add device** | **Done** (v0 — StamPLC K141, generic ESP32-S3 GPIO) |
@@ -1008,7 +1011,7 @@ _Last reviewed: 2026-11-22._
 
 ### Phase 0 / later phases
 
-Phase 0–2 foundation items above are done for the MVP. Phase 3 virtual plant is a widget panel over the process image (v0). Remaining later work: sticky force, ST language service, on-target golden, shared C core implementation, 3D scene, fieldbuses (§11 Phase 4).
+Phase 0–2 foundation items above are done for the MVP. Phase 3 virtual plant and Phase 4 virtual fieldbuses are simulator-only. Remaining later work: sticky force, ST language service, on-target golden, shared C core implementation, 3D scene.
 
 ---
 
@@ -1055,3 +1058,4 @@ Phase 0–2 foundation items above are done for the MVP. Phase 3 virtual plant i
 - **Phase 1 IDE close-out (2026-11-22):** gated ESP-IDF onboarding (activation + Build/Compile); FBD undo/redo + autosave; Phase 1 checklist items 1 and 5 marked done (ST remains grammar-only).
 - **Phase 2 close-out (2026-11-22):** LOCAL/CALL typed wrap parity; UART `#NP1` online debug (`DEBUG_PROTOCOL.md`, `nanoplc_debug`, **Attach online debug**); shared-C migration plan doc.
 - **Virtual plant (Phase 3 v0, 2026-11-22):** `virtual_plant` on `nanoplc.project.json`. Simulator integrates pushbutton, switch, lamp, transmitter, motor, valve, tank, and conveyor against the process image before each task pass. I/O panel in **Run simulation**; Project tree lists the devices. Not emitted by codegen (`NP-0130`…`NP-0133`).
+- **Virtual fieldbuses (Phase 4 v0, 2026-11-22):** localhost Modbus TCP, MQTT 3.1.1, and OPC UA (anonymous, no security) while the simulator runs. See `docs/FIELDBUS.md`.

@@ -189,6 +189,19 @@ export class PlcSimulator {
     }
   }
 
+  setDo(index: number, value: boolean): void {
+    if (this.state.failsafe_outputs_off) {
+      return;
+    }
+    if (index >= 0 && index < this.state.do.length) {
+      this.state.do[index] = value;
+      const entry = this.ir.io_image.do.find((d) => d.index === index);
+      if (entry?.symbol) {
+        this.state.vars[entry.symbol] = value;
+      }
+    }
+  }
+
   /**
    * Simulate a watchdog timeout for `taskId`. When the task's IR action is
    * `outputs_off`, force every DO OFF and latch (same as firmware fail-safe).

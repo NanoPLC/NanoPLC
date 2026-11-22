@@ -28,6 +28,7 @@ import {
 import { pickProjectLocation, PROJECT_FILENAME, readJsonFile, writeJsonFile } from "../project/projectPaths";
 import { refreshProjectTree } from "../project/deviceTreeCommands";
 import { publishSimSnapshot } from "./simLive";
+import { publishSimFieldbus, startSimFieldbus, stopSimFieldbus } from "./fieldbusHost";
 
 const VIEW_TYPE = "nanoplc.simulatorIo";
 const WATCHES_STATE_PREFIX = "nanoplc.simWatches:";
@@ -650,6 +651,7 @@ function onSimulatorTick(snap: SimulatorSnapshot): void {
     postToPanel({ type: "snapshot", snap });
     publishSimSnapshot(true, snap);
   }
+  publishSimFieldbus({ di: snap.di, do: snap.do, ai: snap.ai });
 }
 
 export async function startSimulation(context: vscode.ExtensionContext): Promise<void> {
@@ -686,15 +688,47 @@ export async function startSimulation(context: vscode.ExtensionContext): Promise
   lastPanelUpdate = 0;
   ensurePanel(context);
   postInit();
+  const project = readJsonFile<NanoPlcProject>(path.join(location.rootPath, PROJECT_FILENAME));
+  const fieldbusLine = await startSimFieldbus(project, {
+    read: () => {
+      const snap = activeSimulator?.currentSnapshot();
+      return { di: snap?.di ?? [], do: snap?.do ?? [], ai: snap?.ai ?? [] };
+    },
+    writeDi: (index, value) => {
+      activeSimulator?.setDi(index, value);
+      if (activeSimulator) {
+        pushSnapshot(activeSimulator.currentSnapshot());
+      }
+    },
+    writeDo: (index, value) => {
+      activeSimulator?.setDo(index, value);
+      if (activeSimulator) {
+        pushSnapshot(activeSimulator.currentSnapshot());
+      }
+    },
+    writeAi: (index, value) => {
+      activeSimulator?.setAi(index, value);
+      if (activeSimulator) {
+        pushSnapshot(activeSimulator.currentSnapshot());
+      }
+    },
+  });
+  publishSimFieldbus({
+    di: activeSimulator.currentSnapshot().di,
+    do: activeSimulator.currentSnapshot().do,
+    ai: activeSimulator.currentSnapshot().ai,
+  });
   activeSimulator.start((snap) => onSimulatorTick(snap));
+  const where = fieldbusLine ? ` Fieldbus: ${fieldbusLine}.` : "";
   void vscode.window.showInformationMessage(
-    `NanoPLC: Simulation started (${ir.project.scan_period_ms} ms scan). Use the Simulator panel for watches and the virtual plant.`
+    `NanoPLC: Simulation started (${ir.project.scan_period_ms} ms scan).${where}`
   );
 }
 
 export async function stopSimulation(): Promise<void> {
   activeSimulator?.stop();
   activeSimulator = undefined;
+  await stopSimFieldbus();
   publishSimSnapshot(false);
   if (statusBarItem) {
     statusBarItem.text = "$(debug-stop) NanoPLC sim stopped";
@@ -723,5 +757,6 @@ export function registerSimulator(context: vscode.ExtensionContext): vscode.Disp
 
 export function disposeSimulator(): void {
   activeSimulator?.stop();
+  void stopSimFieldbus();
   activePanel?.dispose();
 }

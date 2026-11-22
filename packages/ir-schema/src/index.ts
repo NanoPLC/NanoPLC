@@ -150,6 +150,21 @@ export type {
   VirtualDevice,
   VirtualPlantConfig,
 } from "./plant/types";
+export {
+  DEFAULT_MODBUS_PORT,
+  DEFAULT_MQTT_PORT,
+  DEFAULT_MQTT_PREFIX,
+  DEFAULT_OPCUA_PORT,
+  resolveFieldbus,
+} from "./fieldbus/config";
+export type { NanoPlcCommunication, NanoPlcFieldbusEndpoint, ResolvedFieldbus } from "./fieldbus/config";
+export { DI_COIL_BASE, DI_HOLDING_BASE } from "./fieldbus/image";
+export type { FieldbusAccess, FieldbusImage } from "./fieldbus/image";
+export { handleModbusTcp, ModbusTcpServer } from "./fieldbus/modbus";
+export { MqttBroker, MqttProcessBridge, applyMqttSet, fieldbusStateTopics, mqttTopicMatch } from "./fieldbus/mqtt";
+export { OpcUaServer } from "./fieldbus/opcua";
+export { startFieldbusServers } from "./fieldbus/server";
+export type { FieldbusListenOptions, FieldbusServerSet } from "./fieldbus/server";
 export type { ResolvedDeviceTree } from "./projectTreeDefaults";
 export { validateFbdSource, validateProject } from "./validate";
 export {
