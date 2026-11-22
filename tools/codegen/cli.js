@@ -1,27 +1,51 @@
 #!/usr/bin/env node
 /**
- * CLI: IR JSON → firmware/components/nanoplc_generated/plc_program.c
- * Usage: node cli.js <ir.json> [output-dir]
+ * CLI: IR JSON or a NanoPLC project → firmware/components/nanoplc_generated/{plc_program.c,io_hal_config.c}
+ *
+ * Usage:
+ *   nanoplc-codegen <ir.json> [output-dir]
+ *   nanoplc-codegen --project <project-dir> [output-dir]
  */
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
-const { codegenFirmware } = require("@nanoplc/ir-schema");
+const { buildCodegenIoContext, codegenFirmware, compileProjectDir } = require("@nanoplc/ir-schema");
 
-const irPath = process.argv[2];
+const USAGE = "Usage: nanoplc-codegen <ir.json> [output-dir]\n       nanoplc-codegen --project <project-dir> [output-dir]";
+const args = process.argv.slice(2);
+const projectMode = args[0] === "--project";
+const input = projectMode ? args[1] : args[0];
 const outDir =
-  process.argv[3] ||
+  (projectMode ? args[2] : args[1]) ||
   path.join(process.cwd(), "firmware", "components", "nanoplc_generated");
 
-if (!irPath) {
-  console.error("Usage: nanoplc-codegen <ir.json> [output-directory]");
+if (!input) {
+  console.error(USAGE);
   process.exit(1);
 }
 
-const irText = fs.readFileSync(irPath, "utf8");
-const ir = JSON.parse(irText);
+let ir;
+let irText;
+let context;
+if (projectMode) {
+  const result = compileProjectDir(input);
+  for (const d of result.diagnostics) {
+    console.error(`${d.severity} ${d.code}${d.program_id ? ` [${d.program_id}]` : ""}${d.block_id ? ` (${d.block_id})` : ""}: ${d.message}`);
+  }
+  if (!result.ok || !result.ir) {
+    console.error(`Compile failed for ${input}.`);
+    process.exit(2);
+  }
+  ir = result.ir;
+  irText = JSON.stringify(ir, null, 2);
+  context = buildCodegenIoContext(input, result.project);
+} else {
+  irText = fs.readFileSync(input, "utf8");
+  ir = JSON.parse(irText);
+}
+
 const hash = crypto.createHash("sha256").update(irText).digest("hex");
-const result = codegenFirmware(ir, hash);
+const result = codegenFirmware(ir, hash, context);
 
 fs.mkdirSync(outDir, { recursive: true });
 const plcPath = path.join(outDir, "plc_program.c");

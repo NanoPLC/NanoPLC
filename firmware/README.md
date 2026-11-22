@@ -15,6 +15,16 @@ idf.py set-target esp32s3
 idf.py build
 ```
 
+To build with the logic of a NanoPLC project instead of the committed stub, generate the code first (from the repo root):
+
+```bash
+(cd packages/ir-schema && npm install && npm run compile)
+(cd tools/codegen && npm install)
+node tools/codegen/cli.js --project examples/blink_fbd firmware/components/nanoplc_generated
+```
+
+CI (`.github/workflows/firmware-ci.yml`) builds the stub and every example this way with ESP-IDF **v5.3.3** for `esp32s3`.
+
 Flash + monitor:
 
 ```bash

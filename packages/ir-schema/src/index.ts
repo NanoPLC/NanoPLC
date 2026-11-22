@@ -123,3 +123,11 @@ export { listIoChannelsFromModuleEntries } from "./projectIo";
 export { resolveDeviceTree, defaultProjectModules, defaultProjectDrivers, DEFAULT_GPIO_MODULE, DEFAULT_HAL_DRIVER } from "./projectTreeDefaults";
 export type { ResolvedDeviceTree } from "./projectTreeDefaults";
 export { validateFbdSource, validateProject } from "./validate";
+export {
+  buildCodegenIoContext,
+  compileProjectDir,
+  loadProjectFbdSourcesFromDisk,
+  loadProjectIoProfile,
+  loadProjectModuleConfigs,
+} from "./projectDisk";
+export type { CompileProjectDirResult } from "./projectDisk";

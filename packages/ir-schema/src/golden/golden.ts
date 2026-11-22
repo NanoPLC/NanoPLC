@@ -3,12 +3,13 @@
  * values, run against both the TS simulator and the generated C on the host.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { codegenC, collectTypedVars, cTimerName, cTypeFor, cVarName } from "../codegen/cGenerator";
 import { compileProjectToIr } from "../compileFbd";
+import { compileProjectDir, loadProjectFbdSourcesFromDisk, loadProjectIoProfile } from "../projectDisk";
 import { FBD_SOURCE_SCHEMA_VERSION, IO_MAP_SCHEMA_VERSION, PROJECT_SCHEMA_VERSION } from "../constants";
 import { PlcSimulator } from "../simulator/PlcSimulator";
 import type { IoMap, NanoPlcProject, PlcIr, PlcPrimitiveType } from "../types";
@@ -61,19 +62,22 @@ export function compileGoldenScenario(scenario: GoldenScenario, examplesDir: str
   let ioMap: IoMap | undefined;
   let entry = scenario.entry;
 
+  if (scenario.example && !entry) {
+    const result = compileProjectDir(join(examplesDir, scenario.example));
+    if (!result.ok || !result.ir) {
+      const msg = result.diagnostics.map((d) => `${d.code} ${d.message}`).join("; ");
+      throw new Error(`Golden scenario "${scenario.name}" does not compile: ${msg}`);
+    }
+    return result.ir;
+  }
   if (scenario.example) {
     const root = join(examplesDir, scenario.example);
     project = JSON.parse(readFileSync(join(root, "nanoplc.project.json"), "utf8"));
-    for (const prog of project.programs) {
-      if (prog.language === "fbd") {
-        sources.set(prog.id, JSON.parse(readFileSync(join(root, prog.source), "utf8")));
-      }
+    for (const [id, src] of loadProjectFbdSourcesFromDisk(root, project)) {
+      sources.set(id, src);
     }
-    const ioPath = join(root, "src", "io-map.json");
-    if (existsSync(ioPath)) {
-      ioMap = JSON.parse(readFileSync(ioPath, "utf8"));
-    }
-    entry ??= project.tasks?.[0]?.program ?? project.programs[0]?.id;
+    const merged = loadProjectIoProfile(root, project).ioMap;
+    ioMap = merged.entries.length > 0 ? merged : undefined;
   } else {
     const ids = Object.keys(scenario.programs ?? {});
     project = {

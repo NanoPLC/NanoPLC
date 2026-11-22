@@ -308,11 +308,13 @@ firmware/                          ← ESP-IDF app root
 3. **Compile PLC program** pipeline (v0): FBD → `build/ir.json` + `build/generated.manifest.json` → C codegen into `{firmware_root}/components/nanoplc_generated/` → optional **`idf.py set-target`** (from `device.idf_target`) + **`idf.py build`** when `nanoplc.buildFirmwareOnCompile` is true (default). Build runs in terminal **NanoPLC Build**; manifest records `device`, `codegen`, and `firmware` status.
 4. Standalone user projects keep ESP-IDF under **`my-project/firmware/`**—run `idf.py` from that folder, not the PLC project root.
 
-### 7.5. CI (when added)
+### 7.5. CI
 
-- Pin ESP-IDF version.
-- `idf.py set-target esp32s3` and `idf.py build` without flashing.
-- Document IDF version and install steps next to the repo (script or Espressif doc link).
+**Done (v0):** `.github/workflows/firmware-ci.yml`.
+
+- Pinned ESP-IDF **v5.3.3** (`espressif/esp-idf-ci-action`, Docker image), target `esp32s3`, `idf.py build` without flashing.
+- Matrix: the committed stub `firmware/`, plus `firmware/` with code generated from each example (`node tools/codegen/cli.js --project examples/<name>`).
+- IDF version and install steps: `firmware/README.md`, `docs/BOOTSTRAP_TOOLCHAIN.md`.
 
 ---
 
@@ -422,7 +424,7 @@ Checklist:
 3. [x] **`components/nanoplc_runtime/`** with `nanoplc_runtime_init` plus internal scan task calling stub `nanoplc_generated_program_scan`; WDT and scan overrun logging (see §41).
 4. [x] **`components/nanoplc_generated/`** stub (`plc_program.c` placeholder matching §16).
 5. [x] **`main/app_main.c`** — firmware boot hook calling `nanoplc_runtime_init`.
-6. [x] Local verify: `idf.py set-target esp32s3`, `idf.py build` (maintainer workflow); flash + monitor optional. **Todo:** CI build job (§7.5).
+6. [x] Local verify: `idf.py set-target esp32s3`, `idf.py build` (maintainer workflow); flash + monitor optional. CI build job (§7.5) **done**.
 
 Afterward, codegen replaces the stub body and expands `SRCS` in `nanoplc_generated`.
 
@@ -998,7 +1000,7 @@ _Last reviewed: 2026-08-16._
 | **StamPLC AW9523 driver** (`m5_aw9523` — onboard 8 DI / 4 relay DO @ I2C 0x59) | **Done** |
 | **StamPLC IO I2C driver** (`m5_stamplc_io` — expansion DO + analog voltage read) | **Done** |
 | **StamPLC AC I2C driver** (`m5_stamplc_ac` — PI4IOE5V6408 @ 0x44, AC relay) | **Done** |
-| CI `idf.py build` (§7.5) | **Todo** |
+| CI `idf.py build` (§7.5) | **Done** (stub + generated code of every example, ESP-IDF v5.3.3) |
 
 ### Phase 0 / later phases
 
@@ -1042,3 +1044,4 @@ Unchanged: IR format lock, ordered graph compile, TS simulator, C codegen, onlin
 - **TOF / TP timers (2026-11-22):** IR ops `tof` / `tp`, simulator, C codegen (`npgen_tmr_<id>` + `npgen_et_advance`), FBD palette; TON ET now saturates at PT in the simulator too (was unbounded, C was clamped); `NP-0220` invalid PT.
 - **Block semantics + numeric parity (2026-11-22):** `docs/BLOCK_SEMANTICS.md`. Simulator wraps INT/DINT/UINT/WORD like C and rounds REAL to float32; C codegen avoids undefined behavior (DINT overflow via `uint32_t`, `INT_MIN / -1`, DINT `ROL`/`ROR` by 0, `SETBIT` bit 31). Checked 29 edge cases C ↔ TS with UBSan.
 - **Golden scenarios (2026-11-22):** `packages/ir-schema/golden/` (and_gate, blink_fbd, timers, rs_latch, numeric_wrap, call_counter) run in the TS simulator and in host-compiled generated C; CI runs `ir-schema` tests with a required C compiler. New example `examples/blink_fbd`.
+- **Firmware CI (2026-11-22):** `firmware-ci.yml` builds the stub and each example's generated code with ESP-IDF v5.3.3. `tools/codegen` gains `--project <dir>`. Project-from-disk loading (`compileProjectDir`, `buildCodegenIoContext`, …) moved into `packages/ir-schema/src/projectDisk.ts` and is shared by the extension, CLI, and golden tests.

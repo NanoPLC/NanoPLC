@@ -1,0 +1,68 @@
+# Build the ESP-IDF firmware (no flash): the committed stub and every example's generated code.
+name: Firmware CI
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "firmware/**"
+      - "packages/ir-schema/**"
+      - "tools/codegen/**"
+      - "examples/**"
+      - ".github/workflows/firmware-ci.yml"
+  pull_request:
+    paths:
+      - "firmware/**"
+      - "packages/ir-schema/**"
+      - "tools/codegen/**"
+      - "examples/**"
+      - ".github/workflows/firmware-ci.yml"
+
+concurrency:
+  group: firmware-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: idf.py build (${{ matrix.app }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # "stub" builds firmware/ as committed; other entries are examples/<name>.
+        app: [stub, and_gate, blink_fbd]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        if: matrix.app != 'stub'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            packages/ir-schema/package-lock.json
+            tools/codegen/package-lock.json
+
+      - name: Generate PLC code from examples/${{ matrix.app }}
+        if: matrix.app != 'stub'
+        run: |
+          (cd packages/ir-schema && npm ci && npm run compile)
+          (cd tools/codegen && npm ci)
+          node tools/codegen/cli.js --project examples/${{ matrix.app }} firmware/components/nanoplc_generated
+          git --no-pager diff --stat -- firmware/components/nanoplc_generated
+
+      - name: idf.py build (ESP-IDF v5.3.3, esp32s3)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.3.3
+          target: esp32s3
+          path: firmware
+
+      - name: Firmware size
+        run: ls -l firmware/build/*.bin
