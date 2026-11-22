@@ -39,6 +39,8 @@ Open the Command Palette (**Ctrl+Shift+P** / **Cmd+Shift+P**) and run:
 
 After **Compile PLC program**, run **NanoPLC: Run simulation**. The **NanoPLC Simulator** panel starts empty: add digital/analog I/O by **module and channel** (same picker as FBD DI/DO/AI blocks) and add **IN / IN_OUT / OUT / VAR / TEMP** from FBD programs. Toggle or edit values each scan (default 10 ms; UI refresh capped by `nanoplc.simulatorRefreshMs`). Watches are kept per project.
 
+The same panel has a **Virtual plant**: pushbutton, switch, lamp, transmitter (temperature, pressure, or ADC volts), motor, valve, tank, and conveyor. Devices are saved on `nanoplc.project.json` as `virtual_plant` and shown in the Project tree. A device that writes a DI or AI owns that channel (the watch row becomes read-only). The plant runs only in the simulator; **Compile** does not emit it into firmware.
+
 Runtime lives in `@nanoplc/ir-schema` (`PlcSimulator`) so golden tests can share the same semantics as the IDE.
 
 ## Codegen

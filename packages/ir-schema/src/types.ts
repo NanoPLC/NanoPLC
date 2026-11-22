@@ -4,6 +4,7 @@ import {
   IR_VERSION,
   PROJECT_SCHEMA_VERSION,
 } from "./constants";
+import type { VirtualPlantConfig } from "./plant/types";
 
 export type PlcPrimitiveType = "BOOL" | "INT" | "DINT" | "UINT" | "WORD" | "REAL";
 
@@ -131,6 +132,11 @@ export interface NanoPlcProject {
   tasks?: NanoPlcTaskRef[];
   programs: NanoPlcProgramRef[];
   firmware_root?: string;
+  /**
+   * Simulator-only virtual devices bound to process-image indexes.
+   * Omitted from firmware. See `packages/ir-schema/src/plant`.
+   */
+  virtual_plant?: VirtualPlantConfig;
 }
 
 export interface FbdPortRef {

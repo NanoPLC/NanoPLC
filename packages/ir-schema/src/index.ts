@@ -125,6 +125,31 @@ export {
 export type { ProjectIoProfile, IoModuleChannels } from "./projectIo";
 export { listIoChannelsFromModuleEntries } from "./projectIo";
 export { resolveDeviceTree, defaultProjectModules, defaultProjectDrivers, DEFAULT_GPIO_MODULE, DEFAULT_HAL_DRIVER } from "./projectTreeDefaults";
+export { VirtualPlant } from "./plant/VirtualPlant";
+export { nextPlantDeviceId, parseVirtualPlant } from "./plant/parsePlant";
+export {
+  PLANT_DEVICE_KINDS,
+  TRANSMITTER_DEFAULTS,
+  TRANSMITTER_PROFILES,
+  plantDeviceSummary,
+} from "./plant/types";
+export type {
+  ConveyorDevice,
+  LampDevice,
+  MotorDevice,
+  PlantDeviceKind,
+  PlantDeviceSnapshot,
+  PlantImage,
+  PlantSnapshot,
+  PushbuttonDevice,
+  SwitchDevice,
+  TankDevice,
+  TransmitterDevice,
+  TransmitterProfile,
+  ValveDevice,
+  VirtualDevice,
+  VirtualPlantConfig,
+} from "./plant/types";
 export type { ResolvedDeviceTree } from "./projectTreeDefaults";
 export { validateFbdSource, validateProject } from "./validate";
 export {

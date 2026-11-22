@@ -5,6 +5,7 @@ import {
   MIN_TASK_PRIORITY,
 } from "./tasks";
 import type { CompileDiagnostic, FbdSource, NanoPlcProject, NanoPlcTaskRef } from "./types";
+import { parseVirtualPlant } from "./plant/parsePlant";
 import { parsePouVariables } from "./pouVars";
 
 function diag(
@@ -54,6 +55,9 @@ export function validateProject(raw: unknown): { project?: NanoPlcProject; diagn
         Array.isArray(o.programs) ? o.programs : []
       )
     );
+  }
+  if (o.virtual_plant !== undefined) {
+    diagnostics.push(...parseVirtualPlant(o.virtual_plant).diagnostics);
   }
   if (diagnostics.some((d) => d.severity === "error")) {
     return { diagnostics };

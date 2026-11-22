@@ -125,6 +125,46 @@ input.var-value {
   max-width: 140px;
 }
 
+h3 {
+  font-size: 0.95em;
+  font-weight: 600;
+  margin: 12px 0 6px;
+}
+
+.plant-device {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.plant-device .name {
+  font-weight: 600;
+  min-width: 8em;
+}
+
+.plant-device .status {
+  color: var(--vscode-descriptionForeground);
+  min-width: 6em;
+}
+
+.plant-device.active .status {
+  color: var(--vscode-testing-iconPassed);
+  font-weight: 600;
+}
+
+button.held {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+}
+
+input.plant-name,
+input.plant-number {
+  min-width: 8em;
+}
+
 .hint {
   color: var(--vscode-descriptionForeground);
   font-size: 0.9em;

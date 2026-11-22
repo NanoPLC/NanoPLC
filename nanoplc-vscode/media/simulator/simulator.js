@@ -10,6 +10,8 @@
   /** @type {{ scan_index: number, elapsed_ms: number, task_passes?: Record<string, number>, vars: Record<string, boolean|number>, di: boolean[], ai: number[], do: boolean[] }} */
   let snap = { scan_index: 0, elapsed_ms: 0, task_passes: {}, vars: {}, di: [], ai: [], do: [] };
   let scanPeriodMs = 10;
+  /** @type {{ devices: Array<Record<string, unknown>> }} */
+  let plantConfig = { devices: [] };
 
   const el = {
     meta: document.getElementById("meta"),
@@ -24,6 +26,12 @@
     btnAddVar: document.getElementById("btn-add-var"),
     ioBody: document.getElementById("io-body"),
     varBody: document.getElementById("var-body"),
+    plantList: document.getElementById("plant-list"),
+    plantKind: document.getElementById("plant-kind"),
+    plantName: document.getElementById("plant-name"),
+    plantFields: document.getElementById("plant-fields"),
+    plantHint: document.getElementById("plant-hint"),
+    btnAddPlant: document.getElementById("btn-add-plant"),
   };
 
   function ioKey(kind) {
@@ -287,7 +295,9 @@
       input.type = "number";
       input.step = "any";
       input.value = String(value);
-      input.disabled = typeof index !== "number";
+      const owned = ownedIo().ai.has(index);
+      input.disabled = typeof index !== "number" || owned;
+      input.title = owned ? "Driven by the virtual plant" : "";
       input.addEventListener("change", () => {
         vscode.postMessage({
           type: "setAi",
@@ -302,7 +312,9 @@
     btn.className = "di-toggle";
     btn.type = "button";
     btn.textContent = formatBool(Boolean(value));
-    btn.disabled = typeof index !== "number";
+    const owned = ownedIo().di.has(index);
+    btn.disabled = typeof index !== "number" || owned;
+    btn.title = owned ? "Driven by the virtual plant" : "";
     btn.addEventListener("click", () => {
       btn.textContent = formatBool(btn.textContent !== "TRUE");
       vscode.postMessage({ type: "toggleDi", index });
@@ -445,6 +457,264 @@
     }
   }
 
+  function ownedIo() {
+    const di = new Set();
+    const ai = new Set();
+    for (const device of plantConfig.devices || []) {
+      if (device.kind === "pushbutton" || device.kind === "switch") {
+        di.add(device.di);
+      } else if (device.kind === "transmitter") {
+        ai.add(device.ai);
+      } else if (device.kind === "motor" && device.running_di != null) {
+        di.add(device.running_di);
+      } else if (device.kind === "valve" && device.opened_di != null) {
+        di.add(device.opened_di);
+      } else if (device.kind === "tank") {
+        ai.add(device.level_ai);
+        if (device.high_di != null) {
+          di.add(device.high_di);
+        }
+        if (device.low_di != null) {
+          di.add(device.low_di);
+        }
+      } else if (device.kind === "conveyor" && device.sensor_di != null) {
+        di.add(device.sensor_di);
+      }
+    }
+    return { di, ai };
+  }
+
+  const PLANT_FIELDS = {
+    pushbutton: [{ key: "di", label: "DI", kind: "DI", required: true }],
+    switch: [{ key: "di", label: "DI", kind: "DI", required: true }],
+    lamp: [{ key: "do", label: "DO", kind: "DO", required: true }],
+    transmitter: [
+      { key: "profile", label: "Profile", kind: "profile", required: true },
+      { key: "ai", label: "AI", kind: "AI", required: true },
+    ],
+    motor: [
+      { key: "run_do", label: "Run DO", kind: "DO", required: true },
+      { key: "running_di", label: "Running DI", kind: "DI", required: false },
+    ],
+    valve: [
+      { key: "open_do", label: "Open DO", kind: "DO", required: true },
+      { key: "opened_di", label: "Opened DI", kind: "DI", required: false },
+    ],
+    tank: [
+      { key: "level_ai", label: "Level AI", kind: "AI", required: true },
+      { key: "inlet_do", label: "Inlet DO", kind: "DO", required: false },
+      { key: "outlet_do", label: "Outlet DO", kind: "DO", required: false },
+      { key: "high_di", label: "High DI", kind: "DI", required: false },
+      { key: "low_di", label: "Low DI", kind: "DI", required: false },
+    ],
+    conveyor: [
+      { key: "run_do", label: "Run DO", kind: "DO", required: true },
+      { key: "sensor_di", label: "Sensor DI", kind: "DI", required: false },
+    ],
+  };
+
+  function channelOptions(kind) {
+    const mods = ioModulesForKind(kind);
+    const items = [];
+    for (const mod of mods) {
+      for (const ch of mod.channels) {
+        items.push({
+          value: String(ch.index),
+          label: `${mod.name} · ${ch.channel} — ${ch.symbol}`,
+        });
+      }
+    }
+    return items;
+  }
+
+  function refreshPlantFields() {
+    const kind = el.plantKind.value;
+    const fields = PLANT_FIELDS[kind] || [];
+    el.plantFields.innerHTML = "";
+    let missing = false;
+    for (const field of fields) {
+      const select = document.createElement("select");
+      select.dataset.key = field.key;
+      if (field.kind === "profile") {
+        fillSelect(
+          select,
+          [
+            { value: "temperature", label: "Temperature (°C)" },
+            { value: "pressure", label: "Pressure (bar)" },
+            { value: "adc", label: "ADC (V)" },
+          ],
+          field.label
+        );
+      } else {
+        const options = channelOptions(field.kind);
+        fillSelect(select, options, field.required ? field.label : `${field.label} (optional)`);
+        if (field.required && options.length === 0) {
+          missing = true;
+        }
+      }
+      select.addEventListener("change", updatePlantAddEnabled);
+      el.plantFields.appendChild(select);
+    }
+    const hasOptional = fields.some((field) => !field.required);
+    el.plantHint.textContent = missing
+      ? "This project has no channel of the required kind. Add I/O on the device first."
+      : hasOptional
+        ? "Optional feedback channels can be left unset."
+        : "";
+    updatePlantAddEnabled();
+  }
+
+  function updatePlantAddEnabled() {
+    const fields = PLANT_FIELDS[el.plantKind.value] || [];
+    let ok = el.plantName.value.trim() !== "";
+    for (const field of fields) {
+      if (!field.required) {
+        continue;
+      }
+      const select = el.plantFields.querySelector(`select[data-key="${field.key}"]`);
+      if (!select || !select.value) {
+        ok = false;
+      }
+    }
+    el.btnAddPlant.disabled = !ok;
+  }
+
+  function plantDevicesNow() {
+    return (snap.plant && snap.plant.devices) || [];
+  }
+
+  function plantRow(device) {
+    const row = document.createElement("div");
+    row.className = "plant-device";
+    row.dataset.id = device.id;
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = device.name;
+    const kind = document.createElement("span");
+    kind.className = "kind-tag";
+    kind.textContent = device.kind;
+    const status = document.createElement("span");
+    status.className = "status";
+    const control = document.createElement("span");
+    control.className = "plant-control";
+    if (device.kind === "pushbutton") {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = "Hold";
+      const release = () => {
+        if (!btn.classList.contains("held")) {
+          return;
+        }
+        btn.classList.remove("held");
+        vscode.postMessage({ type: "setPlantControl", id: device.id, value: false });
+      };
+      btn.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        if (btn.setPointerCapture) {
+          btn.setPointerCapture(event.pointerId);
+        }
+        btn.classList.add("held");
+        vscode.postMessage({ type: "setPlantControl", id: device.id, value: true });
+      });
+      btn.addEventListener("pointerup", release);
+      btn.addEventListener("pointercancel", release);
+      btn.addEventListener("lostpointercapture", release);
+      control.appendChild(btn);
+    } else if (device.kind === "switch") {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "di-toggle";
+      btn.addEventListener("click", () => {
+        const current = plantDevicesNow().find((item) => item.id === device.id);
+        vscode.postMessage({ type: "setPlantControl", id: device.id, value: !current?.bool });
+      });
+      control.appendChild(btn);
+    } else if (device.number_min != null && (device.kind === "transmitter" || device.kind === "tank")) {
+      const input = document.createElement("input");
+      input.className = "plant-number";
+      input.type = "number";
+      input.step = "any";
+      input.min = String(device.number_min);
+      input.max = String(device.number_max);
+      input.addEventListener("change", () => {
+        const n = Number(input.value);
+        vscode.postMessage({
+          type: "setPlantControl",
+          id: device.id,
+          value: Number.isFinite(n) ? n : device.number_min,
+        });
+      });
+      control.appendChild(input);
+    } else if (device.kind === "conveyor") {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = "Place part";
+      btn.addEventListener("click", () => {
+        vscode.postMessage({ type: "setPlantControl", id: device.id, value: "load" });
+      });
+      control.appendChild(btn);
+    }
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "remove";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", () => {
+      vscode.postMessage({ type: "removePlantDevice", id: device.id });
+    });
+    row.appendChild(name);
+    row.appendChild(kind);
+    row.appendChild(status);
+    row.appendChild(control);
+    row.appendChild(remove);
+    return row;
+  }
+
+  function renderPlantList() {
+    const devices = plantDevicesNow();
+    const sig = devices.map((device) => device.id).join(",");
+    if (el.plantList.dataset.sig !== sig) {
+      el.plantList.dataset.sig = sig;
+      el.plantList.innerHTML = "";
+      if (devices.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "empty";
+        empty.textContent = "No virtual devices. Add one to drive inputs from the panel.";
+        el.plantList.appendChild(empty);
+      } else {
+        for (const device of devices) {
+          el.plantList.appendChild(plantRow(device));
+        }
+      }
+    }
+    updatePlantRows();
+  }
+
+  function updatePlantRows() {
+    for (const row of el.plantList.querySelectorAll(".plant-device")) {
+      const device = plantDevicesNow().find((item) => item.id === row.dataset.id);
+      if (!device) {
+        continue;
+      }
+      row.classList.toggle("active", Boolean(device.active));
+      const status = row.querySelector(".status");
+      if (status) {
+        status.textContent = device.unit ? `${device.status}` : device.status;
+      }
+      const toggle = row.querySelector("button.di-toggle");
+      if (toggle) {
+        toggle.textContent = device.bool ? "ON" : "OFF";
+      }
+      const load = row.querySelector("button");
+      if (device.kind === "conveyor" && load && load.textContent === "Place part") {
+        load.disabled = device.can_load === false;
+      }
+      const input = row.querySelector("input.plant-number");
+      if (input && document.activeElement !== input && device.number != null) {
+        input.value = String(device.number);
+      }
+    }
+  }
+
   function renderMeta() {
     let text = `Scan #${snap.scan_index} · ${snap.elapsed_ms} ms elapsed · period ${scanPeriodMs} ms`;
     const passes = Object.entries(snap.task_passes || {});
@@ -459,6 +729,10 @@
     refreshVarSelectors();
     renderIoTable();
     renderVarTable();
+    if (!el.plantFields.childElementCount) {
+      refreshPlantFields();
+    }
+    renderPlantList();
     renderMeta();
   }
 
@@ -493,6 +767,29 @@
     });
   });
 
+  el.btnAddPlant.addEventListener("click", () => {
+    const payload = {
+      type: "addPlantDevice",
+      kind: el.plantKind.value,
+      name: el.plantName.value.trim(),
+    };
+    for (const select of el.plantFields.querySelectorAll("select")) {
+      if (!select.value) {
+        continue;
+      }
+      if (select.dataset.key === "profile") {
+        payload.profile = select.value;
+      } else {
+        payload[select.dataset.key] = Number(select.value);
+      }
+    }
+    vscode.postMessage(payload);
+    el.plantName.value = "";
+    updatePlantAddEnabled();
+  });
+  el.plantKind.addEventListener("change", refreshPlantFields);
+  el.plantName.addEventListener("input", updatePlantAddEnabled);
+
   window.addEventListener("message", (event) => {
     const msg = event.data;
     if (!msg || typeof msg !== "object") {
@@ -501,6 +798,7 @@
     if (msg.type === "init") {
       ioProfile = msg.ioProfile || ioProfile;
       programs = msg.programs || [];
+      plantConfig = msg.plant || { devices: [] };
       watches = msg.watches || [];
       snap = msg.snap || snap;
       scanPeriodMs = msg.scanPeriodMs || 10;
@@ -517,6 +815,7 @@
       renderMeta();
       updateIoValues();
       updateVarValues();
+      renderPlantList();
     }
   });
 

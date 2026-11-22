@@ -1,3 +1,5 @@
+import type { PlantSnapshot } from "../plant/types";
+
 /** State of a TON / TOF / TP instance. */
 export interface TimerInstanceState {
   et_ms: number;
@@ -27,6 +29,8 @@ export interface SimulatorSnapshot {
   do: boolean[];
   /** Watchdog fail-safe latched (`outputs_off`). */
   failsafe_outputs_off?: boolean;
+  /** Virtual plant widgets. Present only when a plant is attached. */
+  plant?: PlantSnapshot;
 }
 
 /** Optional process-image lengths (device I/O map may be larger than compiled IR). */

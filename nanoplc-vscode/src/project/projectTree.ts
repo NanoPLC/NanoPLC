@@ -2,6 +2,7 @@ import * as path from "path";
 import * as vscode from "vscode";
 
 import {
+  plantDeviceSummary,
   resolveDeviceTree,
   resolveTaskConfiguration,
   taskDescription,
@@ -11,6 +12,7 @@ import {
   type NanoPlcProgramRef,
   type NanoPlcProject,
   type NanoPlcTaskRef,
+  type VirtualDevice,
 } from "@nanoplc/ir-schema";
 
 import { discoverProjects, findProjectFileAtRoot, readJsonFile, type ProjectLocation } from "./projectPaths";
@@ -28,6 +30,9 @@ export type NanoPlcTreeKind =
   | "driver"
   | "communication_group"
   | "communication_placeholder"
+  | "virtual_plant_group"
+  | "virtual_device"
+  | "virtual_plant_empty"
   | "application_group"
   | "tasks_group"
   | "task"
@@ -99,6 +104,18 @@ export class NanoPlcTreeItem extends vscode.TreeItem {
         break;
       case "communication_placeholder":
         this.iconPath = new vscode.ThemeIcon("circle-slash");
+        break;
+      case "virtual_plant_group":
+        this.iconPath = new vscode.ThemeIcon("beaker");
+        this.command = { command: "nanoplc.startSimulation", title: "Run simulation" };
+        break;
+      case "virtual_device":
+        this.iconPath = new vscode.ThemeIcon("symbol-field");
+        this.command = { command: "nanoplc.startSimulation", title: "Run simulation" };
+        break;
+      case "virtual_plant_empty":
+        this.iconPath = new vscode.ThemeIcon("circle-slash");
+        this.command = { command: "nanoplc.startSimulation", title: "Run simulation" };
         break;
       case "application_group":
         this.iconPath = new vscode.ThemeIcon("layers");
@@ -243,6 +260,14 @@ export class NanoPlcProjectTreeProvider implements vscode.TreeDataProvider<NanoP
             location
           ),
           new NanoPlcTreeItem(
+            "virtual_plant_group",
+            "Virtual plant",
+            plantDevices(project).length > 0
+              ? vscode.TreeItemCollapsibleState.Expanded
+              : vscode.TreeItemCollapsibleState.Collapsed,
+            location
+          ),
+          new NanoPlcTreeItem(
             "application_group",
             "Application",
             vscode.TreeItemCollapsibleState.Expanded,
@@ -272,6 +297,21 @@ export class NanoPlcProjectTreeProvider implements vscode.TreeDataProvider<NanoP
             location
           ),
         ];
+
+      case "virtual_plant_group": {
+        const devices = plantDevices(project);
+        if (devices.length === 0) {
+          return [
+            new NanoPlcTreeItem(
+              "virtual_plant_empty",
+              "No virtual devices",
+              vscode.TreeItemCollapsibleState.None,
+              location
+            ),
+          ];
+        }
+        return devices.map((device) => plantDeviceItem(location, device));
+      }
 
       case "application_group":
         return [
@@ -308,6 +348,30 @@ export class NanoPlcProjectTreeProvider implements vscode.TreeDataProvider<NanoP
         return [];
     }
   }
+}
+
+function plantDevices(project: NanoPlcProject): VirtualDevice[] {
+  const devices = project.virtual_plant?.devices;
+  if (!Array.isArray(devices)) {
+    return [];
+  }
+  return devices.filter(
+    (device): device is VirtualDevice =>
+      !!device && typeof device === "object" && typeof device.id === "string" && typeof device.kind === "string"
+  );
+}
+
+function plantDeviceItem(location: ProjectLocation, device: VirtualDevice): NanoPlcTreeItem {
+  const item = new NanoPlcTreeItem(
+    "virtual_device",
+    device.name,
+    vscode.TreeItemCollapsibleState.None,
+    location,
+    undefined,
+    device.id
+  );
+  item.description = plantDeviceSummary(device);
+  return item;
 }
 
 function moduleItem(location: ProjectLocation, mod: NanoPlcModuleRef): NanoPlcTreeItem {

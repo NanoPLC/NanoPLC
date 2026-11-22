@@ -46,6 +46,10 @@ export function bindTreeRefresh(refresh: () => void): void {
   refreshTree = refresh;
 }
 
+export function refreshProjectTree(): void {
+  refreshTree?.();
+}
+
 async function resolveLocation(item?: NanoPlcTreeItem): Promise<ProjectLocation | undefined> {
   if (item?.location) {
     return item.location;

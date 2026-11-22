@@ -79,7 +79,8 @@ A dedicated NanoPLC **Tree View** («**Project**», activity bar), similar to **
 | ↳ Module | e.g. Onboard GPIO (digital) | `src/io-map.json` |
 | **Drivers** | HAL / fieldbus stacks bound to modules | — |
 | ↳ Driver | e.g. `nanoplc_hal` → module | Driver info dialog (v0) |
-| **Communication** | Modbus, MQTT, online debug (later) | Placeholder until Phase 3+ |
+| **Communication** | Modbus, MQTT, online debug (later) | Placeholder until Phase 4 |
+| **Virtual plant** | Simulator devices on the process image (Phase 3) | Run simulation |
 | **Application → Task configuration** | PLC tasks; each runs **one** PROGRAM (§5) | Add / configure task |
 | ↳ Task | e.g. MainTask (Cyclic · 10 ms · Prio 1) | Task properties wizard |
 | ↳ ↳ Entry program | e.g. Main | Opens that POU’s editor |
@@ -98,6 +99,8 @@ Device (and_gate · esp32-s3)
 │   └── GPIO process image (nanoplc_hal)
 ├── Communication
 │   └── (none yet)
+├── Virtual plant
+│   └── (devices, simulator only)
 ├── Application
 │   ├── Task configuration
 │   │   └── MainTask (Cyclic · 10 ms · Prio 1)
@@ -224,7 +227,9 @@ Watchdog: each PLC task is registered with the ESP task WDT; `task <id> overrun`
 
 **Done (T1a + T2):** `PlcSimulator` is a deterministic **virtual-time** scheduler over IR `tasks[]`. A cyclic task passes at every multiple of `interval_ms` (Δt = `interval_ms`); a freewheeling task passes every 1 ms (Δt = 1, modeling one RTOS tick); an event task runs on each rising edge of its `event_source` (Δt = 0 on the first edge). Passes due at the same instant run in priority order (0 first). `advance(ms)` runs every pass due within the window; `stepOnce()` advances by the primary interval; `start()` drives `advance` from one JS timer. Snapshots carry `scan_index` (primary passes) and `task_passes` per task id. Empty event → warning `NP-0118`; unresolved event → error `NP-0119`. `tripWatchdog(taskId)` models `outputs_off` fail-safe in the simulator.
 
-**v0 watch panel:** the webview starts empty. The user adds **DI / DO / AI** with the same **module → local channel** picker as FBD I/O blocks, and adds PROGRAM **IN / IN_OUT / OUT / VAR / TEMP**. DI and AI are writable; DO is read-only; BOOL vars toggle, numeric vars use a field. Scan refresh updates watch values **in place** (BOOL TRUE/FALSE buttons are not recreated, so the first click is not lost). `PlcSimulator` can size the process image from the full device I/O map (`SimIoCapacity`), not only compiled `io_image`. Watches persist in VS Code `workspaceState` per project. **Green-trace:** while simulation runs, open FBD diagrams highlight BOOL wires (true = bright, false = dim), show live values on blocks, and display a **Simulation live** toolbar badge. Sticky force remains later work.
+**v0 watch panel:** the webview starts empty. The user adds **DI / DO / AI** with the same **module → local channel** picker as FBD I/O blocks, and adds PROGRAM **IN / IN_OUT / OUT / VAR / TEMP**. DI and AI are writable unless a virtual-plant device owns that channel; DO is read-only; BOOL vars toggle, numeric vars use a field. Scan refresh updates watch values **in place** (BOOL TRUE/FALSE buttons are not recreated, so the first click is not lost). `PlcSimulator` can size the process image from the full device I/O map (`SimIoCapacity`), not only compiled `io_image`. Watches persist in VS Code `workspaceState` per project. **Green-trace:** while simulation runs, open FBD diagrams highlight BOOL wires (true = bright, false = dim), show live values on blocks, and display a **Simulation live** toolbar badge. Sticky force remains later work.
+
+**Virtual plant (Phase 3 v0):** optional `virtual_plant.devices[]` on the project. Before each task pass the simulator integrates the plant up to that virtual time (tanks, valves, conveyors, motor run-feedback) using the DO image from the previous pass, then the PLC samples DI/AI. Operator controls (pushbutton hold, switch, transmitter, tank level, conveyor “place part”) publish sensors immediately. Channels a device writes are owned: the watch row for that DI/AI is read-only. The plant is not code-generated.
 
 ### 5.9. Compile / codegen — current vs target
 
@@ -262,8 +267,8 @@ Compile copies IN / IN_OUT into the callee before its schedule (`call_in`), runs
 
 1. Digital I/O (buttons, coils, lamps). **Done (v0)** — `DI` / `DO` blocks, simulator **watch list** (add by module/channel), GPIO / AW9523 / StamPLC IO DO paths.
 2. Standard timers (TON, TOF, pulse—per your block library). **Done (v0)** — `TON` / `TOF` / `TP` in IR, simulator, C codegen, and FBD palette; ET saturates at PT; verified C ↔ TS on the same input trace.
-3. Analog I/O vs analog **device stubs**. **Partial (v0)** — **`AI` block**, `read_ai` in schedule, simulator **AI** watch fields (module/channel), StamPLC IO voltage read on device; **todo:** themed virtual transmitters (temperature, pressure, generic ADC profiles) as simulator widgets above raw REAL values.
-4. Virtual devices (tank, motor, conveyor, valve)—layer above I/O («mini Factory I/O»).
+3. Analog I/O vs analog **device stubs**. **Done (v0)** — **`AI` block**, `read_ai`, simulator **AI** watches, and themed **transmitter** widgets (temperature °C, pressure bar, ADC volts) on the virtual plant. The value written into the process image is the engineering quantity.
+4. Virtual devices (tank, motor, conveyor, valve)—layer above I/O («mini Factory I/O»). **Done (v0)** — simulator **virtual plant** (`virtual_plant` on `nanoplc.project.json`): pushbutton, switch, lamp, transmitter, motor, valve, tank, conveyor. Sensors are written before each PLC pass; actuators follow the previous pass’s DO image. Simulator only — not flashed.
 5. Virtual fieldbuses (Modbus, MQTT, OPC UA—as needed to test SCADA without hardware).
 
 ---
@@ -373,7 +378,7 @@ _Current progress versus phases is summarized in §49._
 
 ### Phase 3 — «Factory I/O lite»
 
-- [ ] Virtual devices and I/O panels over the process image.
+- [x] Virtual devices and I/O panels over the process image. **Done (v0):** widget panel in **Run simulation** (pushbutton, switch, lamp, transmitter, motor, valve, tank, conveyor) stored as `virtual_plant` and listed under **Virtual plant** in the project tree. Not a 3D scene; not part of firmware.
 
 ### Phase 4 — Virtual fieldbuses
 
@@ -978,6 +983,7 @@ _Last reviewed: 2026-11-22._
 | `packages/ir-schema` + `docs/IR_SCHEMA.md` | **Done** |
 | Example `examples/and_gate` | **Done** |
 | TS **Virtual PLC** simulator (`PlcSimulator`, Run/Stop + watch list) | **Done** (v0 — add DI/DO/AI by module/channel and POU IN/IN_OUT/OUT/VAR/TEMP; FBD **green-trace**) |
+| **Virtual plant** (Phase 3) | **Done (v0)** — `virtual_plant` on the project; simulator panel + Project tree. Pushbutton, switch, lamp, transmitter (temperature / pressure / ADC), motor, valve, tank, conveyor. Simulator only |
 | **C codegen** → `nanoplc_generated/plc_program.c` | **Done** (v0 schedule ops including `call` / `call_in` / `call_out`; omit unused DI/AI/DO arrays; auto on compile via `nanoplc.codegenOnCompile`) |
 | **`nanoplc_hal`** GPIO + registered I2C readers/writers from codegen | **Done** (v0 digital I/O; AW9523 DI/DO, StamPLC IO DO/AI) |
 | **Device catalog** + scaffold on **Add device** | **Done** (v0 — StamPLC K141, generic ESP32-S3 GPIO) |
@@ -1002,7 +1008,7 @@ _Last reviewed: 2026-11-22._
 
 ### Phase 0 / later phases
 
-Phase 0–2 foundation items above are done for the MVP. Remaining later work: sticky force, ST language service, on-target golden, shared C core implementation, Factory I/O / fieldbuses (§11 Phases 3–4).
+Phase 0–2 foundation items above are done for the MVP. Phase 3 virtual plant is a widget panel over the process image (v0). Remaining later work: sticky force, ST language service, on-target golden, shared C core implementation, 3D scene, fieldbuses (§11 Phase 4).
 
 ---
 
@@ -1048,3 +1054,4 @@ Phase 0–2 foundation items above are done for the MVP. Remaining later work: s
 - **Event tasks + watchdog fail-safe (T2, 2026-11-22):** runtime ABI v3. IR resolves `event_source` (DI index or BOOL var) and `watchdog_action`. Simulator and host-C golden run event tasks on rising edges; firmware polls every tick. `outputs_off` calls `nanoplc_hal_force_outputs_off()` (latch). Diagnostics `NP-0118` / `NP-0119` / `NP-0120`. Example `examples/event_task`, golden `event_task`.
 - **Phase 1 IDE close-out (2026-11-22):** gated ESP-IDF onboarding (activation + Build/Compile); FBD undo/redo + autosave; Phase 1 checklist items 1 and 5 marked done (ST remains grammar-only).
 - **Phase 2 close-out (2026-11-22):** LOCAL/CALL typed wrap parity; UART `#NP1` online debug (`DEBUG_PROTOCOL.md`, `nanoplc_debug`, **Attach online debug**); shared-C migration plan doc.
+- **Virtual plant (Phase 3 v0, 2026-11-22):** `virtual_plant` on `nanoplc.project.json`. Simulator integrates pushbutton, switch, lamp, transmitter, motor, valve, tank, and conveyor against the process image before each task pass. I/O panel in **Run simulation**; Project tree lists the devices. Not emitted by codegen (`NP-0130`…`NP-0133`).

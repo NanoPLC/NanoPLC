@@ -4,12 +4,18 @@ import * as vscode from "vscode";
 
 import {
   IR_VERSION,
+  nextPlantDeviceId,
+  parseVirtualPlant,
   PlcSimulator,
   pouIrName,
+  PLANT_DEVICE_KINDS,
   type NanoPlcProject,
+  type PlantDeviceKind,
   type PlcIr,
   type PlcPrimitiveType,
   type SimulatorSnapshot,
+  type TransmitterProfile,
+  type VirtualPlantConfig,
 } from "@nanoplc/ir-schema";
 
 import {
@@ -19,7 +25,8 @@ import {
   type EditorIoProfilePayload,
   type PouCatalogItem,
 } from "../project/editorIoProfile";
-import { pickProjectLocation, PROJECT_FILENAME, readJsonFile } from "../project/projectPaths";
+import { pickProjectLocation, PROJECT_FILENAME, readJsonFile, writeJsonFile } from "../project/projectPaths";
+import { refreshProjectTree } from "../project/deviceTreeCommands";
 import { publishSimSnapshot } from "./simLive";
 
 const VIEW_TYPE = "nanoplc.simulatorIo";
@@ -36,6 +43,7 @@ interface SimulatorContext {
   rootPath: string;
   ioProfile: EditorIoProfilePayload;
   programs: PouCatalogItem[];
+  plant?: VirtualPlantConfig;
 }
 
 let activeSimulator: PlcSimulator | undefined;
@@ -166,11 +174,18 @@ async function saveWatches(rootPath: string, watches: SimWatchItem[]): Promise<v
 
 function loadSimContext(rootPath: string, ir: PlcIr): SimulatorContext {
   const project = readJsonFile<NanoPlcProject>(path.join(rootPath, PROJECT_FILENAME));
+  const parsed = parseVirtualPlant(project.virtual_plant);
+  if (project.virtual_plant !== undefined && parsed.diagnostics.length > 0) {
+    void vscode.window.showWarningMessage(
+      `NanoPLC: virtual plant ignored. ${parsed.diagnostics.map((d) => d.message).join(" ")}`
+    );
+  }
   return {
     ir,
     rootPath,
     ioProfile: loadEditorIoProfile(rootPath),
     programs: loadProjectPouCatalog(rootPath, project),
+    plant: parsed.config,
   };
 }
 
@@ -201,6 +216,29 @@ function renderHtml(webview: vscode.Webview): string {
 </head>
 <body>
   <div class="meta" id="meta">Simulation stopped</div>
+
+  <section class="add-card" id="plant-card">
+    <h2>Virtual plant</h2>
+    <p class="hint">Devices sit on the process image. Sensors update before each scan; actuators follow digital outputs. This plant is not written into firmware.</p>
+    <div id="plant-list"></div>
+    <h3>Add device</h3>
+    <div class="add-row">
+      <select id="plant-kind">
+        <option value="pushbutton">Pushbutton</option>
+        <option value="switch">Switch</option>
+        <option value="lamp">Lamp</option>
+        <option value="transmitter">Transmitter</option>
+        <option value="motor">Motor</option>
+        <option value="valve">Valve</option>
+        <option value="tank">Tank</option>
+        <option value="conveyor">Conveyor</option>
+      </select>
+      <input id="plant-name" class="plant-name" type="text" placeholder="Name" />
+      <button type="button" class="primary" id="btn-add-plant">Add</button>
+    </div>
+    <div class="add-row" id="plant-fields"></div>
+    <p class="hint" id="plant-hint"></p>
+  </section>
 
   <section class="add-card">
     <h2>Add I/O</h2>
@@ -278,6 +316,7 @@ function postInit(): void {
     type: "init",
     ioProfile: activeContext.ioProfile,
     programs: activeContext.programs,
+    plant: activeContext.plant ?? { devices: [] },
     watches: currentWatches(),
     snap,
     scanPeriodMs: activeSimulator?.scanPeriodMs ?? activeContext.ir.project.scan_period_ms,
@@ -352,6 +391,131 @@ function coerceVarValue(type: PlcPrimitiveType | undefined, value: unknown): boo
   return type === "REAL" ? n : Math.trunc(n);
 }
 
+function isPlantKind(value: unknown): value is PlantDeviceKind {
+  return typeof value === "string" && (PLANT_DEVICE_KINDS as readonly string[]).includes(value);
+}
+
+function isTransmitterProfile(value: unknown): value is TransmitterProfile {
+  return value === "temperature" || value === "pressure" || value === "adc";
+}
+
+function optIndex(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+function plantDraft(
+  id: string,
+  name: string,
+  kind: PlantDeviceKind,
+  msg: Record<string, unknown>
+): Record<string, unknown> | undefined {
+  const base = { id, name, kind };
+  switch (kind) {
+    case "pushbutton":
+    case "switch": {
+      const di = optIndex(msg.di);
+      return di === undefined ? undefined : { ...base, di };
+    }
+    case "lamp": {
+      const dout = optIndex(msg.do);
+      return dout === undefined ? undefined : { ...base, do: dout };
+    }
+    case "transmitter": {
+      const ai = optIndex(msg.ai);
+      if (ai === undefined || !isTransmitterProfile(msg.profile)) {
+        return undefined;
+      }
+      return { ...base, ai, profile: msg.profile };
+    }
+    case "motor": {
+      const runDo = optIndex(msg.run_do);
+      if (runDo === undefined) {
+        return undefined;
+      }
+      return { ...base, run_do: runDo, running_di: optIndex(msg.running_di) };
+    }
+    case "valve": {
+      const openDo = optIndex(msg.open_do);
+      if (openDo === undefined) {
+        return undefined;
+      }
+      return { ...base, open_do: openDo, opened_di: optIndex(msg.opened_di) };
+    }
+    case "tank": {
+      const levelAi = optIndex(msg.level_ai);
+      if (levelAi === undefined) {
+        return undefined;
+      }
+      return {
+        ...base,
+        level_ai: levelAi,
+        inlet_do: optIndex(msg.inlet_do),
+        outlet_do: optIndex(msg.outlet_do),
+        high_di: optIndex(msg.high_di),
+        low_di: optIndex(msg.low_di),
+      };
+    }
+    case "conveyor": {
+      const runDo = optIndex(msg.run_do);
+      if (runDo === undefined) {
+        return undefined;
+      }
+      return { ...base, run_do: runDo, sensor_di: optIndex(msg.sensor_di) };
+    }
+  }
+}
+
+function savePlant(config: VirtualPlantConfig): void {
+  if (!activeContext) {
+    return;
+  }
+  const projectPath = path.join(activeContext.rootPath, PROJECT_FILENAME);
+  const project = readJsonFile<NanoPlcProject>(projectPath);
+  if (config.devices.length === 0) {
+    delete project.virtual_plant;
+  } else {
+    project.virtual_plant = config;
+  }
+  writeJsonFile(projectPath, project);
+  activeContext = { ...activeContext, plant: config.devices.length > 0 ? config : undefined };
+  activeSimulator?.attachPlant(activeContext.plant);
+  refreshProjectTree();
+  postInit();
+  if (activeSimulator) {
+    pushSnapshot(activeSimulator.currentSnapshot());
+  }
+}
+
+function addPlantDevice(msg: Record<string, unknown>): void {
+  if (!activeContext || !isPlantKind(msg.kind)) {
+    return;
+  }
+  const name = typeof msg.name === "string" ? msg.name.trim() : "";
+  if (!name) {
+    void vscode.window.showWarningMessage("NanoPLC: Enter a name for the virtual device.");
+    return;
+  }
+  const existing = activeContext.plant?.devices ?? [];
+  const draft = plantDraft(nextPlantDeviceId(msg.kind, existing), name, msg.kind, msg);
+  if (!draft) {
+    void vscode.window.showWarningMessage("NanoPLC: Choose the required I/O channel for this device.");
+    return;
+  }
+  const parsed = parseVirtualPlant({ devices: [...existing, draft] });
+  if (!parsed.config) {
+    void vscode.window.showErrorMessage(
+      `NanoPLC: ${parsed.diagnostics.map((d) => `${d.code} ${d.message}`).join(" ")}`
+    );
+    return;
+  }
+  savePlant(parsed.config);
+}
+
+function removePlantDevice(id: string): void {
+  const devices = (activeContext?.plant?.devices ?? []).filter((device) => device.id !== id);
+  savePlant({ devices });
+}
+
 function handleWebviewMessage(msg: {
   type?: string;
   ioKind?: string;
@@ -361,7 +525,22 @@ function handleWebviewMessage(msg: {
   name?: string;
   id?: string;
   index?: number;
-  value?: boolean | number;
+  value?: boolean | number | string;
+  kind?: string;
+  profile?: string;
+  di?: number;
+  do?: number;
+  ai?: number;
+  run_do?: number;
+  running_di?: number;
+  open_do?: number;
+  opened_di?: number;
+  level_ai?: number;
+  inlet_do?: number;
+  outlet_do?: number;
+  high_di?: number;
+  low_di?: number;
+  sensor_di?: number;
 }): void {
   if (msg.type === "ready") {
     postInit();
@@ -379,7 +558,22 @@ function handleWebviewMessage(msg: {
     void removeWatch(msg.id);
     return;
   }
+  if (msg.type === "addPlantDevice") {
+    addPlantDevice(msg);
+    return;
+  }
+  if (msg.type === "removePlantDevice" && typeof msg.id === "string") {
+    removePlantDevice(msg.id);
+    return;
+  }
   if (!activeSimulator) {
+    return;
+  }
+  if (msg.type === "setPlantControl" && typeof msg.id === "string") {
+    if (msg.value === "load" || typeof msg.value === "boolean" || typeof msg.value === "number") {
+      activeSimulator.setPlantControl(msg.id, msg.value);
+      pushSnapshot(activeSimulator.currentSnapshot());
+    }
     return;
   }
   if (msg.type === "toggleDi" && typeof msg.index === "number") {
@@ -460,7 +654,8 @@ function onSimulatorTick(snap: SimulatorSnapshot): void {
 
 export async function startSimulation(context: vscode.ExtensionContext): Promise<void> {
   if (activeSimulator?.running) {
-    void vscode.window.showInformationMessage("NanoPLC: Simulation is already running.");
+    ensurePanel(context);
+    postInit();
     return;
   }
 
@@ -486,14 +681,14 @@ export async function startSimulation(context: vscode.ExtensionContext): Promise
   workspaceState = context.workspaceState;
   const simContext = loadSimContext(location.rootPath, ir);
   activeContext = simContext;
-  activeSimulator = new PlcSimulator(ir, ioCapacityFromProfile(simContext.ioProfile));
+  activeSimulator = new PlcSimulator(ir, ioCapacityFromProfile(simContext.ioProfile), simContext.plant);
   lastSnapJson = "";
   lastPanelUpdate = 0;
   ensurePanel(context);
   postInit();
   activeSimulator.start((snap) => onSimulatorTick(snap));
   void vscode.window.showInformationMessage(
-    `NanoPLC: Simulation started (${ir.project.scan_period_ms} ms scan). Add I/O or variables in the Simulator panel.`
+    `NanoPLC: Simulation started (${ir.project.scan_period_ms} ms scan). Use the Simulator panel for watches and the virtual plant.`
   );
 }
 

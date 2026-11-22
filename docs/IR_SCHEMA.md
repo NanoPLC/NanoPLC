@@ -59,6 +59,29 @@ Optional **`modules[]`** and **`drivers[]`** drive the Project tree (§3.2). Whe
 
 **`tasks[]`** is the CODESYS-style **Task Configuration** (`docs/VIRTUAL_PLC_PLAN.md` §5). Each task has `kind` (`cyclic` | `freewheeling` | `event`), `priority` (0 = highest … 31 = lowest), optional `interval_ms` / `event` / `watchdog`, and **`program`** — the single entry PROGRAM. Extra programs belong on other tasks, or are invoked with an FBD **`CALL`** block (`params.program`).
 
+Optional **`virtual_plant`** is simulator-only (not compiled into IR or C). Devices bind to process-image indexes:
+
+```json
+"virtual_plant": {
+  "devices": [
+    { "id": "pb1", "name": "Start", "kind": "pushbutton", "di": 0 },
+    { "id": "tx1", "name": "Temp", "kind": "transmitter", "profile": "temperature", "ai": 0 },
+    {
+      "id": "tank1",
+      "name": "Sump",
+      "kind": "tank",
+      "level_ai": 1,
+      "inlet_do": 0,
+      "outlet_do": 1,
+      "fill_per_s": 10,
+      "drain_per_s": 10
+    }
+  ]
+}
+```
+
+Kinds: `pushbutton`, `switch`, `lamp`, `transmitter` (`temperature` | `pressure` | `adc`), `motor`, `valve`, `tank`, `conveyor`. The Virtual PLC writes sensors before each task pass and integrates actuators from the previous DO image. Diagnostics: `NP-0130` plant shape, `NP-0131` two devices drive the same DI or AI, `NP-0132` bad device fields, `NP-0133` transmitter range or profile.
+
 When `tasks[]` is omitted, the IDE synthesizes **MainTask** from `scan.period_ms` and the first program. `scan.period_ms` remains a cache of the **primary cyclic** interval for IR `scan_period_ms` (compile T0). Compile emits every task into IR `tasks`; the Virtual PLC and the firmware (one FreeRTOS task per PLC task) run all of them, including event tasks on a rising-edge trigger. Legacy `pous[]` with one entry is still accepted.
 
 **Device catalog fields** on `device`:
@@ -126,7 +149,7 @@ Top-level entities:
 
 `tasks` is written by `compileTasksToIr()` (IDE compile). Older IR without `tasks` runs `schedule` as a single cyclic task. Names are prefixed per program (`<prog>__<var>`, `__<prog>_...`) whenever more than one program is compiled, so tasks never collide.
 
-**Virtual PLC scheduling** (deterministic virtual time): a cyclic task passes at every multiple of `interval_ms` with Δt = `interval_ms`; a freewheeling task passes every 1 ms with Δt = 1. Passes due at the same instant run in priority order (0 first). Event tasks are compiled but not scheduled yet. `scan_index` counts passes of the primary task; `task_passes` counts passes per task id.
+**Virtual PLC scheduling** (deterministic virtual time): a cyclic task passes at every multiple of `interval_ms` with Δt = `interval_ms`; a freewheeling task passes every 1 ms with Δt = 1. Passes due at the same instant run in priority order (0 first). An event task runs on a rising edge of its BOOL trigger. `scan_index` counts passes of the primary task; `task_passes` counts passes per task id. When a virtual plant is attached, the simulator integrates it up to the pass time before the task reads inputs.
 
 Example schedule fragments:
 
@@ -141,6 +164,8 @@ Stable codes live in `packages/ir-schema` (e.g. `NP-0400` combinational cycle). 
 
 Task configuration: `NP-0106` invalid task, `NP-0107` duplicate task id, `NP-0108` unknown program in a task, `NP-0109` cyclic task missing `interval_ms`, `NP-0110` priority out of 0..31, `NP-0112` event task without variable (warning), `NP-0113` no entry program (warning), `NP-0115` same PROGRAM bound to multiple tasks (warning), `NP-0116` more than one program on a task, `NP-0117` a PROGRAM is reachable from several tasks, so its state is shared without locking (warning), `NP-0118` event task has no event variable so it never runs (warning), `NP-0119` event variable cannot be resolved (error), `NP-0120` invalid watchdog (`time_ms` / `on_timeout`).
 
+Virtual plant (simulator only): `NP-0130` `virtual_plant` shape, `NP-0131` two devices write the same DI or AI, `NP-0132` invalid device field, `NP-0133` transmitter profile or range.
+
 Program `CALL`: `NP-0410` self-call, `NP-0411` call cycle, `NP-0412` CALL with no program, `NP-0413` unknown program.
 
 Program variables: `NP-0216` invalid name, `NP-0217` duplicate name, `NP-0218` invalid class/type, `NP-0219` LOCAL block with unknown variable.
@@ -153,7 +178,7 @@ Types, validation, `compileFbdToIr()`, `compileProjectToIr()` (one entry PROGRAM
 
 ### Simulator
 
-`PlcSimulator` loads compiled `PlcIr` and runs the ordered `schedule` each scan. A `call` step runs the matching `pou_schedules` entry (shared vars / process image; recursion is skipped at runtime and rejected at compile). Supported ops include `read_di`, `read_ai`, `write_do`, `and`, `or`, `not`, `ton`, `tof`, `tp`, `move`, `const`, `call`, math, and bit ops. The simulation webview is a watch list: add **DI / DO / AI** by module and channel, and add PROGRAM **IN / IN_OUT / OUT / VAR / TEMP** symbols.
+`PlcSimulator` loads compiled `PlcIr` and runs the ordered `schedule` each scan. A `call` step runs the matching `pou_schedules` entry (shared vars / process image; recursion is skipped at runtime and rejected at compile). Supported ops include `read_di`, `read_ai`, `write_do`, `and`, `or`, `not`, `ton`, `tof`, `tp`, `move`, `const`, `call`, math, and bit ops. The simulation webview is a watch list: add **DI / DO / AI** by module and channel, and add PROGRAM **IN / IN_OUT / OUT / VAR / TEMP** symbols. An optional project `virtual_plant` drives those channels from panel widgets (pushbutton, switch, lamp, transmitter, motor, valve, tank, conveyor); the plant is not part of `build/ir.json`.
 
 ### C codegen
 

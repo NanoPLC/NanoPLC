@@ -1,4 +1,6 @@
 import { irPrimaryPeriodMs, irTaskList, irTaskPeriodMs } from "../irTasks";
+import { VirtualPlant } from "../plant/VirtualPlant";
+import type { VirtualPlantConfig } from "../plant/types";
 import type { IrEventSource, IrTask, PlcIr } from "../types";
 import { createSimState, runTaskPass, snapshot } from "./executeScan";
 import type { SimIoCapacity, SimState, SimulatorSnapshot } from "./types";
@@ -27,13 +29,17 @@ export class PlcSimulator {
   private readonly capacity: SimIoCapacity | undefined;
   private state: SimState;
   private tasks: SimTask[];
+  private plant: VirtualPlant | undefined;
+  /** Virtual time the plant has already been integrated to. */
+  private plantTime = 0;
   private timer: ReturnType<typeof setInterval> | undefined;
   private listener: ((snap: SimulatorSnapshot) => void) | undefined;
 
-  constructor(ir: PlcIr, capacity?: SimIoCapacity) {
+  constructor(ir: PlcIr, capacity?: SimIoCapacity, plant?: VirtualPlantConfig) {
     this.ir = ir;
     this.capacity = capacity;
     this.state = createSimState(ir, capacity);
+    this.attachPlant(plant);
     this.tasks = this.createTasks();
   }
 
@@ -88,8 +94,69 @@ export class PlcSimulator {
 
   reset(): void {
     this.state = createSimState(this.ir, this.capacity);
+    this.plantTime = 0;
+    this.plant?.reset();
+    this.plant?.integrate(this.state, 0);
     this.tasks = this.createTasks();
-    this.listener?.(snapshot(this.state));
+    this.listener?.(this.publish());
+  }
+
+  /**
+   * Replace the virtual plant without resetting PLC task state.
+   * Pass `undefined` or an empty device list to detach it.
+   */
+  attachPlant(config: VirtualPlantConfig | undefined): void {
+    this.plant = config && config.devices.length > 0 ? new VirtualPlant(config) : undefined;
+    this.plantTime = this.state.elapsed_ms;
+    this.plant?.integrate(this.state, 0);
+    this.mirrorSensorSymbols();
+  }
+
+  /** Operator gesture on a virtual device (`"load"` places a conveyor part). */
+  setPlantControl(id: string, value: boolean | number | "load"): void {
+    if (!this.plant) {
+      return;
+    }
+    this.plant.setControl(id, value, this.state);
+    this.mirrorSensorSymbols();
+  }
+
+  /** Move the plant from `plantTime` to `now` using the current DO image, then publish sensors. */
+  private catchUpPlant(now: number): void {
+    if (!this.plant) {
+      return;
+    }
+    const dt = now - this.plantTime;
+    if (dt < 0) {
+      return;
+    }
+    this.plant.integrate(this.state, dt);
+    this.plantTime = now;
+  }
+
+  /** Keep DI/AI symbol vars aligned with the image the plant just wrote. */
+  private mirrorSensorSymbols(): void {
+    if (!this.plant) {
+      return;
+    }
+    for (const entry of this.ir.io_image.di) {
+      if (entry.symbol && entry.index >= 0 && entry.index < this.state.di.length) {
+        this.state.vars[entry.symbol] = this.state.di[entry.index] === true;
+      }
+    }
+    for (const entry of this.ir.io_image.ai) {
+      if (entry.symbol && entry.index >= 0 && entry.index < this.state.ai.length) {
+        this.state.vars[entry.symbol] = this.state.ai[entry.index] ?? 0;
+      }
+    }
+  }
+
+  private publish(): SimulatorSnapshot {
+    const snap = snapshot(this.state);
+    if (this.plant) {
+      snap.plant = this.plant.snapshot(this.state);
+    }
+    return snap;
   }
 
   setVar(name: string, value: boolean | number): void {
@@ -139,12 +206,13 @@ export class PlcSimulator {
         }
       }
     }
-    return snapshot(this.state);
+    return this.publish();
   }
 
   /** Advance virtual time by `ms`, running every task pass that falls due. */
   advance(ms: number): SimulatorSnapshot {
     const target = this.state.elapsed_ms + Math.max(0, ms);
+    this.catchUpPlant(this.state.elapsed_ms);
     this.sampleEventEdges(this.state.elapsed_ms);
     for (;;) {
       let next: SimTask | undefined;
@@ -164,6 +232,7 @@ export class PlcSimulator {
         break;
       }
       const now = next.next_due_ms;
+      this.catchUpPlant(now);
       let dt: number;
       if (next.task.kind === "cyclic") {
         dt = next.period_ms;
@@ -187,8 +256,10 @@ export class PlcSimulator {
       }
       this.sampleEventEdges(now);
     }
+    this.catchUpPlant(target);
+    this.mirrorSensorSymbols();
     this.state.elapsed_ms = target;
-    return snapshot(this.state);
+    return this.publish();
   }
 
   /** Advance by one primary-task interval (useful in tests). */
@@ -201,7 +272,7 @@ export class PlcSimulator {
       return;
     }
     this.listener = onTick;
-    onTick(snapshot(this.state));
+    onTick(this.publish());
     const tick = this.scanPeriodMs;
     this.timer = setInterval(() => {
       onTick(this.advance(tick));
@@ -217,6 +288,6 @@ export class PlcSimulator {
   }
 
   currentSnapshot(): SimulatorSnapshot {
-    return snapshot(this.state);
+    return this.publish();
   }
 }
