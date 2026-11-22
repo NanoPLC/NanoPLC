@@ -31,6 +31,16 @@ export interface SimulatorSnapshot {
   failsafe_outputs_off?: boolean;
   /** Virtual plant widgets. Present only when a plant is attached. */
   plant?: PlantSnapshot;
+  /** Sticky forces. The simulator reapplies these after the plant and after each task pass. */
+  forces?: SimForce[];
+}
+
+/** One sticky force. `name` is the IR variable name (`programId__var`). */
+export interface SimForce {
+  kind: "di" | "do" | "ai" | "var";
+  index?: number;
+  name?: string;
+  value: boolean | number;
 }
 
 /** Optional process-image lengths (device I/O map may be larger than compiled IR). */

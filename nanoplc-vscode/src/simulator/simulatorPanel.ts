@@ -267,9 +267,10 @@ function renderHtml(webview: vscode.Webview): string {
   </section>
 
   <h2>Watched I/O</h2>
+  <p class="hint">Force holds a value across scans. The plant and the program cannot clear it until Unforce. A watchdog outputs-off latch still turns digital outputs off.</p>
   <table>
     <thead>
-      <tr><th>Kind</th><th>Location</th><th>Value</th><th></th></tr>
+      <tr><th>Kind</th><th>Location</th><th>Value</th><th>Force</th><th></th></tr>
     </thead>
     <tbody id="io-body"></tbody>
   </table>
@@ -277,7 +278,7 @@ function renderHtml(webview: vscode.Webview): string {
   <h2>Watched variables</h2>
   <table>
     <thead>
-      <tr><th>Class</th><th>Variable</th><th>Type</th><th>Value</th><th></th></tr>
+      <tr><th>Class</th><th>Variable</th><th>Type</th><th>Value</th><th>Force</th><th></th></tr>
     </thead>
     <tbody id="var-body"></tbody>
   </table>
@@ -596,7 +597,58 @@ function handleWebviewMessage(msg: {
       ?.variables.find((v) => v.name === msg.name);
     activeSimulator.setVar(pouIrName(msg.programId, msg.name), coerceVarValue(variable?.type, msg.value));
     pushSnapshot(activeSimulator.currentSnapshot());
+    return;
   }
+  if (msg.type === "force") {
+    applyForce(msg, true);
+    return;
+  }
+  if (msg.type === "unforce") {
+    applyForce(msg, false);
+  }
+}
+
+function applyForce(
+  msg: { kind?: string; index?: number; programId?: string; name?: string; value?: boolean | number | string },
+  enable: boolean
+): void {
+  if (!activeSimulator) {
+    return;
+  }
+  if (msg.kind === "di" && typeof msg.index === "number") {
+    if (enable) {
+      activeSimulator.forceDi(msg.index, msg.value === true);
+    } else {
+      activeSimulator.unforceDi(msg.index);
+    }
+  } else if (msg.kind === "do" && typeof msg.index === "number") {
+    if (enable) {
+      activeSimulator.forceDo(msg.index, msg.value === true);
+    } else {
+      activeSimulator.unforceDo(msg.index);
+    }
+  } else if (msg.kind === "ai" && typeof msg.index === "number") {
+    if (enable) {
+      const value = typeof msg.value === "number" && Number.isFinite(msg.value) ? msg.value : Number(msg.value);
+      if (Number.isFinite(value)) {
+        activeSimulator.forceAi(msg.index, value);
+      }
+    } else {
+      activeSimulator.unforceAi(msg.index);
+    }
+  } else if (msg.kind === "var" && typeof msg.programId === "string" && typeof msg.name === "string") {
+    const variable = activeContext?.programs
+      .find((p) => p.id === msg.programId)
+      ?.variables.find((v) => v.name === msg.name);
+    if (enable) {
+      activeSimulator.forceVar(pouIrName(msg.programId, msg.name), coerceVarValue(variable?.type, msg.value));
+    } else {
+      activeSimulator.unforceVar(pouIrName(msg.programId, msg.name));
+    }
+  } else {
+    return;
+  }
+  pushSnapshot(activeSimulator.currentSnapshot());
 }
 
 function ensurePanel(context: vscode.ExtensionContext): vscode.WebviewPanel {

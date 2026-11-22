@@ -249,11 +249,43 @@
     return btn;
   }
 
+  function forcedIo(ioKind, index) {
+    const kind = String(ioKind || "").toLowerCase();
+    return (snap.forces || []).some((force) => force.kind === kind && force.index === index);
+  }
+
+  function forcedVar(programId, name) {
+    const irName = varIrName(programId, name);
+    return (snap.forces || []).some((force) => force.kind === "var" && force.name === irName);
+  }
+
+  function forceButton(spec) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "force";
+    const sync = () => {
+      const on = spec.kind === "var" ? forcedVar(spec.programId, spec.name) : forcedIo(spec.kind, spec.index);
+      btn.classList.toggle("on", on);
+      btn.textContent = on ? "Unforce" : "Force";
+    };
+    sync();
+    btn.addEventListener("click", () => {
+      const on = spec.kind === "var" ? forcedVar(spec.programId, spec.name) : forcedIo(spec.kind, spec.index);
+      const value = spec.kind === "var" ? varValue(spec.watch) : ioValue(spec.watch);
+      vscode.postMessage(
+        on
+          ? { type: "unforce", kind: spec.kind, index: spec.index, programId: spec.programId, name: spec.name }
+          : { type: "force", kind: spec.kind, index: spec.index, programId: spec.programId, name: spec.name, value }
+      );
+    });
+    return btn;
+  }
+
   function renderIoTable() {
     const rows = watches.filter((w) => w.kind === "io");
     el.ioBody.innerHTML = "";
     if (rows.length === 0) {
-      el.ioBody.appendChild(emptyRow(4, "No I/O watched. Add a module channel above."));
+      el.ioBody.appendChild(emptyRow(5, "No I/O watched. Add a module channel above."));
       return;
     }
     for (const watch of rows) {
@@ -269,11 +301,20 @@
       const value = document.createElement("td");
       value.className = "value-cell";
       fillIoValueCell(value, watch, found);
+      const force = document.createElement("td");
+      force.appendChild(
+        forceButton({
+          kind: String(watch.ioKind).toLowerCase(),
+          index: found?.entry.index,
+          watch,
+        })
+      );
       const remove = document.createElement("td");
       remove.appendChild(removeButton(watch.id));
       tr.appendChild(kind);
       tr.appendChild(loc);
       tr.appendChild(value);
+      tr.appendChild(force);
       tr.appendChild(remove);
       el.ioBody.appendChild(tr);
     }
@@ -283,7 +324,8 @@
     cell.innerHTML = "";
     const index = found?.entry.index;
     const value = ioValue(watch);
-    if (watch.ioKind === "DO") {
+    const forced = forcedIo(watch.ioKind, index);
+    if (watch.ioKind === "DO" && !forced) {
       cell.className = `value-cell ${value ? "on" : "off"}`;
       cell.textContent = formatBool(Boolean(value));
       return;
@@ -296,14 +338,14 @@
       input.step = "any";
       input.value = String(value);
       const owned = ownedIo().ai.has(index);
-      input.disabled = typeof index !== "number" || owned;
-      input.title = owned ? "Driven by the virtual plant" : "";
+      input.disabled = typeof index !== "number" || (owned && !forced);
+      input.title = owned && !forced ? "Driven by the virtual plant" : forced ? "Forced" : "";
       input.addEventListener("change", () => {
-        vscode.postMessage({
-          type: "setAi",
-          index,
-          value: Number(input.value),
-        });
+        const next = Number(input.value);
+        const live = forcedIo(watch.ioKind, index);
+        vscode.postMessage(
+          live ? { type: "force", kind: "ai", index, value: next } : { type: "setAi", index, value: next }
+        );
       });
       cell.appendChild(input);
       return;
@@ -312,12 +354,17 @@
     btn.className = "di-toggle";
     btn.type = "button";
     btn.textContent = formatBool(Boolean(value));
-    const owned = ownedIo().di.has(index);
-    btn.disabled = typeof index !== "number" || owned;
-    btn.title = owned ? "Driven by the virtual plant" : "";
+    const owned = watch.ioKind === "DI" && ownedIo().di.has(index);
+    btn.disabled = typeof index !== "number" || (owned && !forced);
+    btn.title = owned && !forced ? "Driven by the virtual plant" : forced ? "Forced" : "";
     btn.addEventListener("click", () => {
-      btn.textContent = formatBool(btn.textContent !== "TRUE");
-      vscode.postMessage({ type: "toggleDi", index });
+      const next = btn.textContent !== "TRUE";
+      btn.textContent = formatBool(next);
+      const kind = String(watch.ioKind).toLowerCase();
+      const live = forcedIo(watch.ioKind, index);
+      vscode.postMessage(
+        live ? { type: "force", kind, index, value: next } : { type: "toggleDi", index }
+      );
     });
     cell.appendChild(btn);
   }
@@ -326,7 +373,7 @@
     const rows = watches.filter((w) => w.kind === "var");
     el.varBody.innerHTML = "";
     if (rows.length === 0) {
-      el.varBody.appendChild(emptyRow(5, "No variables watched. Add a program variable above."));
+      el.varBody.appendChild(emptyRow(6, "No variables watched. Add a program variable above."));
       return;
     }
     for (const watch of rows) {
@@ -344,12 +391,22 @@
       const value = document.createElement("td");
       value.className = "value-cell";
       fillVarValueCell(value, watch, variable);
+      const force = document.createElement("td");
+      force.appendChild(
+        forceButton({
+          kind: "var",
+          programId: watch.programId,
+          name: watch.name,
+          watch,
+        })
+      );
       const remove = document.createElement("td");
       remove.appendChild(removeButton(watch.id));
       tr.appendChild(cls);
       tr.appendChild(loc);
       tr.appendChild(type);
       tr.appendChild(value);
+      tr.appendChild(force);
       tr.appendChild(remove);
       el.varBody.appendChild(tr);
     }
@@ -359,20 +416,22 @@
     cell.innerHTML = "";
     const type = variable?.type ?? "BOOL";
     const value = varValue(watch);
+    const forced = forcedVar(watch.programId, watch.name);
     if (type === "BOOL") {
       const btn = document.createElement("button");
       btn.className = "di-toggle";
       btn.type = "button";
       btn.textContent = formatBool(Boolean(value));
+      btn.title = forced ? "Forced" : "";
       btn.addEventListener("click", () => {
         const next = btn.textContent !== "TRUE";
         btn.textContent = formatBool(next);
-        vscode.postMessage({
-          type: "setVar",
-          programId: watch.programId,
-          name: watch.name,
-          value: next,
-        });
+        const live = forcedVar(watch.programId, watch.name);
+        vscode.postMessage(
+          live
+            ? { type: "force", kind: "var", programId: watch.programId, name: watch.name, value: next }
+            : { type: "setVar", programId: watch.programId, name: watch.name, value: next }
+        );
       });
       cell.appendChild(btn);
       return;
@@ -382,14 +441,16 @@
     input.type = "number";
     input.step = type === "REAL" ? "any" : "1";
     input.value = formatNumber(value, type);
+    input.title = forced ? "Forced" : "";
     input.addEventListener("change", () => {
       const n = Number(input.value);
-      vscode.postMessage({
-        type: "setVar",
-        programId: watch.programId,
-        name: watch.name,
-        value: Number.isFinite(n) ? n : 0,
-      });
+      const next = Number.isFinite(n) ? n : 0;
+      const live = forcedVar(watch.programId, watch.name);
+      vscode.postMessage(
+        live
+          ? { type: "force", kind: "var", programId: watch.programId, name: watch.name, value: next }
+          : { type: "setVar", programId: watch.programId, name: watch.name, value: next }
+      );
     });
     cell.appendChild(input);
   }
@@ -398,34 +459,63 @@
     return Boolean(cell.querySelector("input:focus") || cell.querySelector("button:active"));
   }
 
+  function syncForceButton(row, on) {
+    const btn = row.querySelector("button.force");
+    if (!btn) {
+      return;
+    }
+    btn.classList.toggle("on", on);
+    btn.textContent = on ? "Unforce" : "Force";
+  }
+
   function updateIoValues() {
     for (const row of el.ioBody.querySelectorAll("tr[data-id]")) {
       const watch = watches.find((w) => w.id === row.dataset.id);
       if (!watch || watch.kind !== "io") {
         continue;
       }
+      const found = findIoEntry(watch.ioKind, watch.moduleId, watch.channel);
+      const index = found?.entry.index;
+      const forced = forcedIo(watch.ioKind, index);
+      syncForceButton(row, forced);
       const cell = row.querySelector(".value-cell");
       if (!cell || cellIsBusy(cell)) {
         continue;
       }
-      const found = findIoEntry(watch.ioKind, watch.moduleId, watch.channel);
       const value = ioValue(watch);
+      const hasToggle = Boolean(cell.querySelector("button.di-toggle"));
+      if (watch.ioKind === "DO" && forced !== hasToggle) {
+        fillIoValueCell(cell, watch, found);
+        continue;
+      }
       if (watch.ioKind === "DO") {
-        cell.className = `value-cell ${value ? "on" : "off"}`;
-        cell.textContent = formatBool(Boolean(value));
+        if (forced) {
+          const btn = cell.querySelector("button.di-toggle");
+          if (btn) {
+            btn.textContent = formatBool(Boolean(value));
+          }
+        } else {
+          cell.className = `value-cell ${value ? "on" : "off"}`;
+          cell.textContent = formatBool(Boolean(value));
+        }
         continue;
       }
       if (watch.ioKind === "AI") {
         const input = cell.querySelector("input.ai-value");
         if (input) {
           input.value = String(value);
+          const owned = ownedIo().ai.has(index);
+          input.disabled = typeof index !== "number" || (owned && !forced);
+          input.title = owned && !forced ? "Driven by the virtual plant" : forced ? "Forced" : "";
         }
         continue;
       }
       const btn = cell.querySelector("button.di-toggle");
       if (btn) {
         btn.textContent = formatBool(Boolean(value));
-        btn.disabled = typeof found?.entry.index !== "number";
+        const owned = ownedIo().di.has(index);
+        btn.disabled = typeof index !== "number" || (owned && !forced);
+        btn.title = owned && !forced ? "Driven by the virtual plant" : forced ? "Forced" : "";
       }
     }
   }
@@ -436,6 +526,7 @@
       if (!watch || watch.kind !== "var") {
         continue;
       }
+      syncForceButton(row, forcedVar(watch.programId, watch.name));
       const cell = row.querySelector(".value-cell");
       if (!cell || cellIsBusy(cell)) {
         continue;
@@ -443,16 +534,19 @@
       const variable = findVariable(watch.programId, watch.name);
       const type = variable?.type ?? "BOOL";
       const value = varValue(watch);
+      const forced = forcedVar(watch.programId, watch.name);
       if (type === "BOOL") {
         const btn = cell.querySelector("button.di-toggle");
         if (btn) {
           btn.textContent = formatBool(Boolean(value));
+          btn.title = forced ? "Forced" : "";
         }
         continue;
       }
       const input = cell.querySelector("input.var-value");
       if (input) {
         input.value = formatNumber(value, type);
+        input.title = forced ? "Forced" : "";
       }
     }
   }

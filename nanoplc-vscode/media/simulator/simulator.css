@@ -88,6 +88,16 @@ button.remove {
   padding: 2px 8px;
 }
 
+button.force {
+  min-width: auto;
+  padding: 2px 8px;
+}
+
+button.force.on {
+  background: var(--vscode-inputValidation-warningBackground, #a67c00);
+  color: var(--vscode-inputValidation-warningForeground, #fff);
+}
+
 table {
   border-collapse: collapse;
   width: 100%;

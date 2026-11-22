@@ -43,6 +43,8 @@ The same panel has a **Virtual plant**: pushbutton, switch, lamp, transmitter (t
 
 **Run simulation** also listens on localhost for **Modbus TCP** (default port 5502), **MQTT** (5883), and **OPC UA** (54840) so a SCADA client can read and write the process image. The map is `docs/FIELDBUS.md` in the monorepo. Turn a protocol off with `communication` in `nanoplc.project.json` or `nanoplc.fieldbus.enabled`.
 
+Each watch row has **Force** / **Unforce**. A forced value is written back after the virtual plant and after every task pass, so the program cannot clear it. **Unforce** releases it. Watchdog `outputs_off` still turns every DO off.
+
 Runtime lives in `@nanoplc/ir-schema` (`PlcSimulator`) so golden tests can share the same semantics as the IDE.
 
 ## Codegen

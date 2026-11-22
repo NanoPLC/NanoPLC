@@ -23,6 +23,7 @@ export type { CodegenCResult } from "./codegen/cGenerator";
 export type { CodegenFirmwareOutput, CodegenIoContext } from "./codegen/codegenFirmware";
 export { PlcSimulator } from "./simulator/PlcSimulator";
 export type {
+  SimForce,
   SimIoCapacity,
   SimulatorSnapshot,
   TimerInstanceState,

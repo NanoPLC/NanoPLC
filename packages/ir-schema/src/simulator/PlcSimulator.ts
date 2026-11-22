@@ -3,7 +3,7 @@ import { VirtualPlant } from "../plant/VirtualPlant";
 import type { VirtualPlantConfig } from "../plant/types";
 import type { IrEventSource, IrTask, PlcIr } from "../types";
 import { createSimState, runTaskPass, snapshot } from "./executeScan";
-import type { SimIoCapacity, SimState, SimulatorSnapshot } from "./types";
+import type { SimForce, SimIoCapacity, SimState, SimulatorSnapshot } from "./types";
 
 export { FREEWHEEL_PERIOD_MS } from "../irTasks";
 
@@ -32,6 +32,8 @@ export class PlcSimulator {
   private plant: VirtualPlant | undefined;
   /** Virtual time the plant has already been integrated to. */
   private plantTime = 0;
+  /** Sticky forces. Keyed by `di:0`, `do:0`, `ai:0`, or `var:<ir name>`. */
+  private readonly forces = new Map<string, SimForce>();
   private timer: ReturnType<typeof setInterval> | undefined;
   private listener: ((snap: SimulatorSnapshot) => void) | undefined;
 
@@ -95,6 +97,7 @@ export class PlcSimulator {
   reset(): void {
     this.state = createSimState(this.ir, this.capacity);
     this.plantTime = 0;
+    this.forces.clear();
     this.plant?.reset();
     this.plant?.integrate(this.state, 0);
     this.tasks = this.createTasks();
@@ -110,6 +113,7 @@ export class PlcSimulator {
     this.plantTime = this.state.elapsed_ms;
     this.plant?.integrate(this.state, 0);
     this.mirrorSensorSymbols();
+    this.holdInputs();
   }
 
   /** Operator gesture on a virtual device (`"load"` places a conveyor part). */
@@ -119,6 +123,7 @@ export class PlcSimulator {
     }
     this.plant.setControl(id, value, this.state);
     this.mirrorSensorSymbols();
+    this.holdInputs();
   }
 
   /** Move the plant from `plantTime` to `now` using the current DO image, then publish sensors. */
@@ -152,11 +157,155 @@ export class PlcSimulator {
   }
 
   private publish(): SimulatorSnapshot {
+    this.holdInputs();
+    this.holdOutputs();
     const snap = snapshot(this.state);
     if (this.plant) {
       snap.plant = this.plant.snapshot(this.state);
     }
+    if (this.forces.size > 0) {
+      snap.forces = [...this.forces.values()].map((force) => ({ ...force }));
+    }
     return snap;
+  }
+
+  forceDi(index: number, value: boolean): void {
+    this.putForce(`di:${index}`, { kind: "di", index, value });
+  }
+
+  unforceDi(index: number): void {
+    this.forces.delete(`di:${index}`);
+  }
+
+  forceDo(index: number, value: boolean): void {
+    this.putForce(`do:${index}`, { kind: "do", index, value });
+  }
+
+  unforceDo(index: number): void {
+    this.forces.delete(`do:${index}`);
+  }
+
+  forceAi(index: number, value: number): void {
+    if (!Number.isFinite(value)) {
+      return;
+    }
+    this.putForce(`ai:${index}`, { kind: "ai", index, value });
+  }
+
+  unforceAi(index: number): void {
+    this.forces.delete(`ai:${index}`);
+  }
+
+  /** `name` is the IR variable (`programId__var`). */
+  forceVar(name: string, value: boolean | number): void {
+    if (!name || (typeof value !== "boolean" && typeof value !== "number")) {
+      return;
+    }
+    this.putForce(`var:${name}`, { kind: "var", name, value });
+  }
+
+  unforceVar(name: string): void {
+    this.forces.delete(`var:${name}`);
+  }
+
+  private putForce(key: string, force: SimForce): void {
+    if (force.kind !== "var") {
+      const index = force.index ?? -1;
+      const length =
+        force.kind === "di" ? this.state.di.length : force.kind === "do" ? this.state.do.length : this.state.ai.length;
+      if (index < 0 || index >= length) {
+        return;
+      }
+    }
+    this.forces.set(key, force);
+  }
+
+  /** Pin DI, AI, and non-output variables so the next task pass reads the forced value. */
+  private holdInputs(): void {
+    for (const force of this.forces.values()) {
+      if (force.kind === "di" && typeof force.index === "number") {
+        this.writeDiImage(force.index, force.value === true);
+      } else if (force.kind === "ai" && typeof force.index === "number" && typeof force.value === "number") {
+        this.writeAiImage(force.index, force.value);
+      } else if (force.kind === "var" && force.name && !this.isDoSymbol(force.name)) {
+        this.writeForcedVar(force.name, force.value);
+      }
+    }
+  }
+
+  /** Pin DO and variables after the pass so logic cannot clear them. Fail-safe wins over a DO force. */
+  private holdOutputs(): void {
+    for (const force of this.forces.values()) {
+      if (force.kind === "do" && typeof force.index === "number") {
+        this.writeDoImage(force.index, force.value === true);
+      } else if (force.kind === "var" && force.name && (this.isDoSymbol(force.name) || !this.isIoSymbol(force.name))) {
+        this.writeForcedVar(force.name, force.value);
+      }
+    }
+  }
+
+  private isDoSymbol(name: string): boolean {
+    return this.ir.io_image.do.some((entry) => entry.symbol === name);
+  }
+
+  private isIoSymbol(name: string): boolean {
+    return (
+      this.isDoSymbol(name) ||
+      this.ir.io_image.di.some((entry) => entry.symbol === name) ||
+      this.ir.io_image.ai.some((entry) => entry.symbol === name)
+    );
+  }
+
+  private writeDiImage(index: number, value: boolean): void {
+    if (index < 0 || index >= this.state.di.length) {
+      return;
+    }
+    this.state.di[index] = value;
+    const entry = this.ir.io_image.di.find((item) => item.index === index);
+    if (entry?.symbol) {
+      this.state.vars[entry.symbol] = value;
+    }
+  }
+
+  private writeAiImage(index: number, value: number): void {
+    if (index < 0 || index >= this.state.ai.length) {
+      return;
+    }
+    this.state.ai[index] = value;
+    const entry = this.ir.io_image.ai.find((item) => item.index === index);
+    if (entry?.symbol) {
+      this.state.vars[entry.symbol] = value;
+    }
+  }
+
+  private writeDoImage(index: number, value: boolean): void {
+    if (this.state.failsafe_outputs_off || index < 0 || index >= this.state.do.length) {
+      return;
+    }
+    this.state.do[index] = value;
+    const entry = this.ir.io_image.do.find((item) => item.index === index);
+    if (entry?.symbol) {
+      this.state.vars[entry.symbol] = value;
+    }
+  }
+
+  private writeForcedVar(name: string, value: boolean | number): void {
+    const dout = this.ir.io_image.do.find((entry) => entry.symbol === name);
+    if (dout) {
+      this.writeDoImage(dout.index, value === true);
+      return;
+    }
+    const din = this.ir.io_image.di.find((entry) => entry.symbol === name);
+    if (din) {
+      this.writeDiImage(din.index, value === true);
+      return;
+    }
+    const ain = this.ir.io_image.ai.find((entry) => entry.symbol === name);
+    if (ain && typeof value === "number") {
+      this.writeAiImage(ain.index, value);
+      return;
+    }
+    this.state.vars[name] = value;
   }
 
   setVar(name: string, value: boolean | number): void {
@@ -226,6 +375,7 @@ export class PlcSimulator {
   advance(ms: number): SimulatorSnapshot {
     const target = this.state.elapsed_ms + Math.max(0, ms);
     this.catchUpPlant(this.state.elapsed_ms);
+    this.holdInputs();
     this.sampleEventEdges(this.state.elapsed_ms);
     for (;;) {
       let next: SimTask | undefined;
@@ -246,6 +396,7 @@ export class PlcSimulator {
       }
       const now = next.next_due_ms;
       this.catchUpPlant(now);
+      this.holdInputs();
       let dt: number;
       if (next.task.kind === "cyclic") {
         dt = next.period_ms;
@@ -256,6 +407,7 @@ export class PlcSimulator {
       }
       this.state.elapsed_ms = now;
       runTaskPass(this.state, this.ir, next.task.schedule, dt);
+      this.holdOutputs();
       next.last_run_ms = now;
       if (next.task.kind === "event") {
         next.next_due_ms = Number.POSITIVE_INFINITY;
@@ -271,6 +423,8 @@ export class PlcSimulator {
     }
     this.catchUpPlant(target);
     this.mirrorSensorSymbols();
+    this.holdInputs();
+    this.holdOutputs();
     this.state.elapsed_ms = target;
     return this.publish();
   }

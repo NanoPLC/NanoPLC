@@ -52,7 +52,7 @@ This keeps maintenance simpler and reduces «simulator differs from silicon» dr
 | ST editor | Standard **text** VS Code surface + grammar/services; **not** a canvas (§3.1) |
 | IR / AST layer | Graph normalization, checks, stable export format |
 | Simulator (Virtual PLC) | Scan cycle, vars, timers, virtual I/O |
-| Watch / live UI | v0: simulator **watch list** + **green-trace** on FBD BOOL wires (live values on blocks). Later: sticky force |
+| Watch / live UI | Simulator **watch list** with sticky **Force / Unforce**, plus **green-trace** on FBD BOOL wires |
 | C codegen | IR → C + headers/tables for runtime |
 | Build & flash | Invoke **ESP-IDF** (`idf.py build flash monitor`) from the workspace |
 | Online debug (later) | Device ↔ IDE protocol (Serial / WebSocket, etc.) |
@@ -229,7 +229,7 @@ Watchdog: each PLC task is registered with the ESP task WDT; `task <id> overrun`
 
 **Done (T1a + T2):** `PlcSimulator` is a deterministic **virtual-time** scheduler over IR `tasks[]`. A cyclic task passes at every multiple of `interval_ms` (Δt = `interval_ms`); a freewheeling task passes every 1 ms (Δt = 1, modeling one RTOS tick); an event task runs on each rising edge of its `event_source` (Δt = 0 on the first edge). Passes due at the same instant run in priority order (0 first). `advance(ms)` runs every pass due within the window; `stepOnce()` advances by the primary interval; `start()` drives `advance` from one JS timer. Snapshots carry `scan_index` (primary passes) and `task_passes` per task id. Empty event → warning `NP-0118`; unresolved event → error `NP-0119`. `tripWatchdog(taskId)` models `outputs_off` fail-safe in the simulator.
 
-**v0 watch panel:** the webview starts empty. The user adds **DI / DO / AI** with the same **module → local channel** picker as FBD I/O blocks, and adds PROGRAM **IN / IN_OUT / OUT / VAR / TEMP**. DI and AI are writable unless a virtual-plant device owns that channel; DO is read-only; BOOL vars toggle, numeric vars use a field. Scan refresh updates watch values **in place** (BOOL TRUE/FALSE buttons are not recreated, so the first click is not lost). `PlcSimulator` can size the process image from the full device I/O map (`SimIoCapacity`), not only compiled `io_image`. Watches persist in VS Code `workspaceState` per project. **Green-trace:** while simulation runs, open FBD diagrams highlight BOOL wires (true = bright, false = dim), show live values on blocks, and display a **Simulation live** toolbar badge. Sticky force remains later work.
+**Watch panel:** the webview starts empty. The user adds **DI / DO / AI** with the same **module → local channel** picker as FBD I/O blocks, and adds PROGRAM **IN / IN_OUT / OUT / VAR / TEMP**. DI and AI are writable unless a virtual-plant device owns that channel; DO is read-only until forced; BOOL vars toggle, numeric vars use a field. **Force** pins that value: inputs are reapplied after the plant and before the task pass, outputs and variables after the pass, so the program cannot clear them. **Unforce** releases the pin. A watchdog `outputs_off` latch still clears DO. Scan refresh updates watch values **in place** (BOOL TRUE/FALSE buttons are not recreated, so the first click is not lost). `PlcSimulator` can size the process image from the full device I/O map (`SimIoCapacity`), not only compiled `io_image`. Watches persist in VS Code `workspaceState` per project. **Green-trace:** while simulation runs, open FBD diagrams highlight BOOL wires (true = bright, false = dim), show live values on blocks, and display a **Simulation live** toolbar badge. UART force/unforce remains later (`docs/DEBUG_PROTOCOL.md`).
 
 **Virtual plant (Phase 3 v0):** optional `virtual_plant.devices[]` on the project. Before each task pass the simulator integrates the plant up to that virtual time (tanks, valves, conveyors, motor run-feedback) using the DO image from the previous pass, then the PLC samples DI/AI. Operator controls (pushbutton hold, switch, transmitter, tank level, conveyor “place part”) publish sensors immediately. Channels a device writes are owned: the watch row for that DI/AI is read-only. The plant is not code-generated.
 
@@ -1011,7 +1011,7 @@ _Last reviewed: 2026-11-22._
 
 ### Phase 0 / later phases
 
-Phase 0–2 foundation items above are done for the MVP. Phase 3 virtual plant and Phase 4 virtual fieldbuses are simulator-only. Remaining later work: sticky force, ST language service, on-target golden, shared C core implementation, 3D scene.
+Phase 0–2 foundation items above are done for the MVP. Phase 3 virtual plant and Phase 4 virtual fieldbuses are simulator-only. Simulator sticky force is in the watch panel. Remaining later work: ST language service, on-target golden, shared C core implementation, 3D scene, UART force/unforce.
 
 ---
 
@@ -1059,3 +1059,4 @@ Phase 0–2 foundation items above are done for the MVP. Phase 3 virtual plant a
 - **Phase 2 close-out (2026-11-22):** LOCAL/CALL typed wrap parity; UART `#NP1` online debug (`DEBUG_PROTOCOL.md`, `nanoplc_debug`, **Attach online debug**); shared-C migration plan doc.
 - **Virtual plant (Phase 3 v0, 2026-11-22):** `virtual_plant` on `nanoplc.project.json`. Simulator integrates pushbutton, switch, lamp, transmitter, motor, valve, tank, and conveyor against the process image before each task pass. I/O panel in **Run simulation**; Project tree lists the devices. Not emitted by codegen (`NP-0130`…`NP-0133`).
 - **Virtual fieldbuses (Phase 4 v0, 2026-11-22):** localhost Modbus TCP, MQTT 3.1.1, and OPC UA (anonymous, no security) while the simulator runs. See `docs/FIELDBUS.md`.
+- **Sticky force (2026-11-22):** watch-panel Force/Unforce. The simulator reapplies DI/AI after the plant and DO/variables after each task pass. Watchdog `outputs_off` still wins over a DO force. UART force is unchanged.

@@ -326,3 +326,57 @@ test("simulator CALL copies IN to callee and OUT back to caller", () => {
   const sim = new PlcSimulator(compiled.ir);
   assert.equal(sim.stepOnce().vars["DO_Lamp"], true);
 });
+
+test("sticky force pins a DI against later writes and a DO against the program", () => {
+  const compiled = compileFbdToIr(baseProject, andFbd, "main");
+  assert.ok(compiled.ir);
+  const sim = new PlcSimulator(compiled.ir);
+  sim.setDi(0, true);
+  sim.setDi(1, true);
+  sim.forceDi(0, false);
+  sim.forceDo(0, true);
+  const forced = sim.stepOnce();
+  assert.equal(forced.di[0], false);
+  assert.equal(forced.do[0], true);
+  assert.equal(forced.vars["DO_Lamp"], true);
+  assert.equal(forced.forces?.length, 2);
+
+  sim.setDi(0, true);
+  assert.equal(sim.currentSnapshot().di[0], false);
+
+  sim.unforceDi(0);
+  sim.unforceDo(0);
+  sim.setDi(0, true);
+  sim.setDi(1, true);
+  const released = sim.stepOnce();
+  assert.equal(released.di[0], true);
+  assert.equal(released.do[0], true);
+  assert.equal(released.forces, undefined);
+});
+
+test("sticky force on a program variable survives the scan", () => {
+  const compiled = compileFbdToIr(baseProject, andFbd, "main");
+  assert.ok(compiled.ir);
+  const sim = new PlcSimulator(compiled.ir);
+  sim.forceVar("DO_Lamp", true);
+  const snap = sim.stepOnce();
+  assert.equal(snap.vars["DO_Lamp"], true);
+  assert.equal(snap.do[0], true);
+  sim.unforceVar("DO_Lamp");
+  assert.equal(sim.stepOnce().do[0], false);
+});
+
+test("sticky DI force wins over the virtual plant", () => {
+  const compiled = compileFbdToIr(baseProject, andFbd, "main");
+  assert.ok(compiled.ir);
+  const sim = new PlcSimulator(compiled.ir, undefined, {
+    devices: [{ id: "sw1", name: "Run", kind: "switch", di: 0 }],
+  });
+  sim.setPlantControl("sw1", true);
+  assert.equal(sim.currentSnapshot().di[0], true);
+  sim.forceDi(0, false);
+  sim.setDi(1, true);
+  const snap = sim.stepOnce();
+  assert.equal(snap.di[0], false);
+  assert.equal(snap.do[0], false);
+});
