@@ -6,26 +6,60 @@
   "brackets": [
     ["{", "}"],
     ["[", "]"],
-    ["(", ")"]
+    ["(", ")"],
+    ["VAR", "END_VAR"],
+    ["VAR_INPUT", "END_VAR"],
+    ["VAR_OUTPUT", "END_VAR"],
+    ["VAR_IN_OUT", "END_VAR"],
+    ["VAR_TEMP", "END_VAR"],
+    ["VAR_GLOBAL", "END_VAR"],
+    ["VAR_EXTERNAL", "END_VAR"],
+    ["TYPE", "END_TYPE"],
+    ["STRUCT", "END_STRUCT"],
+    ["PROGRAM", "END_PROGRAM"],
+    ["FUNCTION", "END_FUNCTION"],
+    ["FUNCTION_BLOCK", "END_FUNCTION_BLOCK"],
+    ["METHOD", "END_METHOD"],
+    ["CLASS", "END_CLASS"],
+    ["INTERFACE", "END_INTERFACE"],
+    ["IF", "END_IF"],
+    ["CASE", "END_CASE"],
+    ["FOR", "END_FOR"],
+    ["WHILE", "END_WHILE"],
+    ["REPEAT", "END_REPEAT"]
   ],
   "autoClosingPairs": [
     { "open": "{", "close": "}" },
     { "open": "[", "close": "]" },
     { "open": "(", "close": ")" },
-    { "open": "'", "close": "'", "notIn": ["string"] },
-    { "open": "\"", "close": "\"", "notIn": ["string"] }
+    { "open": "\"", "close": "\"", "notIn": ["string"] },
+    { "open": "'", "close": "'", "notIn": ["string", "comment"] },
+    { "open": "(*", "close": "*)", "notIn": ["string", "comment"] },
+    { "open": "VAR", "close": "\nEND_VAR", "notIn": ["string", "comment"] },
+    { "open": "VAR_INPUT", "close": "\nEND_VAR", "notIn": ["string", "comment"] },
+    { "open": "PROGRAM", "close": "\nEND_PROGRAM", "notIn": ["string", "comment"] },
+    { "open": "FUNCTION", "close": "\nEND_FUNCTION", "notIn": ["string", "comment"] },
+    { "open": "FUNCTION_BLOCK", "close": "\nEND_FUNCTION_BLOCK", "notIn": ["string", "comment"] },
+    { "open": "IF", "close": " THEN\nEND_IF", "notIn": ["string", "comment"] }
   ],
+  "autoCloseBefore": " \n\t",
   "surroundingPairs": [
     ["{", "}"],
     ["[", "]"],
     ["(", ")"],
-    ["'", "'"],
-    ["\"", "\""]
+    ["(*", "*)"],
+    ["\"", "\""],
+    ["'", "'"]
   ],
   "folding": {
     "markers": {
-      "start": "^\\s*(PROGRAM|FUNCTION_BLOCK|FUNCTION|VAR|IF|CASE|FOR|WHILE|REPEAT)\\b",
-      "end": "^\\s*(END_PROGRAM|END_FUNCTION_BLOCK|END_FUNCTION|END_VAR|END_IF|END_CASE|END_FOR|END_WHILE|END_REPEAT)\\b"
+      "start": "^\\s*(PROGRAM|FUNCTION_BLOCK|FUNCTION|METHOD|CLASS|INTERFACE|VAR|VAR_INPUT|VAR_OUTPUT|VAR_IN_OUT|VAR_TEMP|VAR_GLOBAL|TYPE|STRUCT|IF|CASE|FOR|WHILE|REPEAT)\\b",
+      "end": "^\\s*(END_PROGRAM|END_FUNCTION_BLOCK|END_FUNCTION|END_METHOD|END_CLASS|END_INTERFACE|END_VAR|END_TYPE|END_STRUCT|END_IF|END_CASE|END_FOR|END_WHILE|END_REPEAT)\\b"
     }
-  }
+  },
+  "indentationRules": {
+    "increaseIndentPattern": "^\\s*(PROGRAM|FUNCTION_BLOCK|FUNCTION|METHOD|CLASS|INTERFACE|IF|ELSIF|ELSE|CASE|FOR|WHILE|REPEAT|VAR|VAR_INPUT|VAR_OUTPUT|VAR_IN_OUT|VAR_TEMP|VAR_GLOBAL|TYPE|STRUCT)\\b.*$",
+    "decreaseIndentPattern": "^\\s*(END_PROGRAM|END_FUNCTION_BLOCK|END_FUNCTION|END_METHOD|END_CLASS|END_INTERFACE|END_IF|END_CASE|END_FOR|END_WHILE|END_REPEAT|END_VAR|END_TYPE|END_STRUCT|ELSE|ELSIF)\\b"
+  },
+  "wordPattern": "(-?\\d*\\.\\d\\w*)|([^\\`\\~\\!\\@\\#\\%\\^\\&\\*\\(\\)\\-\\=\\+\\[\\{\\]\\}\\\\\\|\\;\\:\\'\\\"\\,\\.\\<\\>\\/\\?\\s]+)"
 }

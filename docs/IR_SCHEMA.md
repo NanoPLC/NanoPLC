@@ -178,7 +178,7 @@ Timers: `NP-0220` invalid `pt_ms` on `TON` / `TOF` / `TP`.
 
 Types, validation, `compileFbdToIr()`, `compileProjectToIr()` (one entry PROGRAM plus transitive `CALL`s), and `compileTasksToIr()` (every task's entry PROGRAM plus their `CALL`s) live in **`packages/ir-schema/`**. The VS Code extension depends on this package via `file:../packages/ir-schema`.
 
-`analyzeSt()` checks Structured Text structure for the editor (`ST0001` unclosed block, `ST0002` mismatched `END_`, `ST0003` bad declaration, `ST0004` duplicate name, `ST0005` non-elementary type). It does not produce IR.
+`analyzeSt()` checks Structured Text structure for the editor (`ST0001` unclosed block, `ST0002` mismatched `END_`, `ST0003` bad declaration, `ST0004` duplicate name, `ST0005` non-elementary type). `completeSt`, `hoverSt`, `definitionSt`, and `formatSt` serve the same editor. None of them produce IR.
 
 `function_blocks[]` on the project are FBD templates. A canvas block `FB` (`params.fb`) compiles to op `fb`. `fb_defs` stores the template schedule; `fb_instances` stores one schedule per box with names prefixed by the instance id. `NP-0420` missing target, `NP-0421` unknown block, `NP-0422` duplicate instance, `NP-0423` nested FB.
 

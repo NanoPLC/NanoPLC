@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { analyzeSt, completeSt, hoverSt } from "./analyzeSt";
+import { analyzeSt, completeSt, definitionSt, formatSt, hoverSt } from "./analyzeSt";
 
 const program = `PROGRAM Main
 VAR
@@ -68,4 +68,28 @@ test("hover names a declared variable", () => {
   const use = "  Count := Count + 1;";
   const useLine = program.split("\n").findIndex((row) => row.includes("Count :="));
   assert.equal(hoverSt(program, useLine, use.indexOf("Count") + 2), "Count : INT");
+});
+
+test("hover and completion know IEC keywords from the language list", () => {
+  const text = "PROGRAM Main\nEND_PROGRAM\n";
+  assert.equal(hoverSt(text, 0, 2), "PROGRAM — Program organization unit");
+  const items = completeSt("CLA", 0, 3);
+  assert.ok(items.some((item) => item.label === "CLASS" && item.detail === "OOP class"));
+});
+
+test("definition jumps to the variable declaration", () => {
+  const useLine = program.split("\n").findIndex((row) => row.includes("Count :="));
+  const location = definitionSt(program, useLine, program.split("\n")[useLine]?.indexOf("Count") ?? 0);
+  assert.equal(location?.line, program.split("\n").findIndex((row) => row.includes("Count : INT")));
+});
+
+test("format uppercases keywords outside comments and spaces assignment", () => {
+  const formatted = formatSt("program main\n  a:=1; // program\n  name := 'program';\nend_program\n");
+  assert.equal(formatted, "PROGRAM main\n  a := 1; // program\n  name := 'program';\nEND_PROGRAM\n");
+});
+
+test("an unclosed class is reported", () => {
+  const result = analyzeSt("CLASS Drive\nEND_CLASS\nCLASS Motor\n");
+  assert.equal(result.diagnostics.filter((item) => item.code === "ST0001").length, 1);
+  assert.equal(result.symbols.some((item) => item.kind === "class" && item.name === "Drive"), true);
 });

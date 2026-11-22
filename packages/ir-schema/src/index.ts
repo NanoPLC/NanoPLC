@@ -166,8 +166,18 @@ export { MqttBroker, MqttProcessBridge, applyMqttSet, fieldbusStateTopics, mqttT
 export { OpcUaServer } from "./fieldbus/opcua";
 export { startFieldbusServers } from "./fieldbus/server";
 export type { FieldbusListenOptions, FieldbusServerSet } from "./fieldbus/server";
-export { analyzeSt, completeSt, hoverSt, maskStComments, ST_KEYWORDS, ST_TYPES } from "./st/analyzeSt";
-export type { StAnalysis, StCompletion, StDiagnostic, StSymbol } from "./st/analyzeSt";
+export {
+  analyzeSt,
+  completeSt,
+  definitionSt,
+  formatSt,
+  hoverSt,
+  maskStComments,
+  ST_KEYWORD_DETAILS,
+  ST_KEYWORDS,
+  ST_TYPES,
+} from "./st/analyzeSt";
+export type { StAnalysis, StCompletion, StDiagnostic, StLocation, StSymbol } from "./st/analyzeSt";
 export type { ResolvedDeviceTree } from "./projectTreeDefaults";
 export { validateFbdSource, validateProject } from "./validate";
 export {

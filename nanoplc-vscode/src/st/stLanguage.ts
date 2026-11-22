@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 
-import { analyzeSt, completeSt, hoverSt, type StSymbol } from "@nanoplc/ir-schema";
+import { analyzeSt, completeSt, definitionSt, formatSt, hoverSt, type StSymbol } from "@nanoplc/ir-schema";
 
 const LANGUAGE = "iec-st";
 
@@ -11,8 +11,14 @@ function symbolKind(kind: StSymbol["kind"]): vscode.SymbolKind {
   if (kind === "function") {
     return vscode.SymbolKind.Function;
   }
-  if (kind === "function_block") {
+  if (kind === "function_block" || kind === "class") {
     return vscode.SymbolKind.Class;
+  }
+  if (kind === "method") {
+    return vscode.SymbolKind.Method;
+  }
+  if (kind === "interface") {
+    return vscode.SymbolKind.Interface;
   }
   return vscode.SymbolKind.Variable;
 }
@@ -49,7 +55,7 @@ function refresh(collection: vscode.DiagnosticCollection, document: vscode.TextD
   );
 }
 
-/** Diagnostics, completion, hover, and outline for `iec-st` files. Structural only. */
+/** Diagnostics, completion, hover, outline, go-to-definition, and formatting for `iec-st`. Structural only. */
 export function registerStLanguage(context: vscode.ExtensionContext): vscode.Disposable {
   const collection = vscode.languages.createDiagnosticCollection("nanoplc-st");
   const selector = { language: LANGUAGE };
@@ -77,6 +83,28 @@ export function registerStLanguage(context: vscode.ExtensionContext): vscode.Dis
           return undefined;
         }
         return new vscode.Hover(new vscode.MarkdownString().appendCodeblock(text, "iec-st"));
+      },
+    }),
+    vscode.languages.registerDefinitionProvider(selector, {
+      provideDefinition(document, position) {
+        const location = definitionSt(document.getText(), position.line, position.character);
+        if (!location) {
+          return undefined;
+        }
+        return new vscode.Location(
+          document.uri,
+          new vscode.Range(location.line, location.start, location.line, location.end)
+        );
+      },
+    }),
+    vscode.languages.registerDocumentFormattingEditProvider(selector, {
+      provideDocumentFormattingEdits(document) {
+        const next = formatSt(document.getText());
+        if (next === document.getText()) {
+          return [];
+        }
+        const full = new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length));
+        return [vscode.TextEdit.replace(full, next)];
       },
     }),
     vscode.languages.registerDocumentSymbolProvider(selector, {

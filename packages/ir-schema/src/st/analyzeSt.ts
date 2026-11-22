@@ -12,12 +12,18 @@ export interface StDiagnostic {
 
 export interface StSymbol {
   name: string;
-  kind: "program" | "function" | "function_block" | "variable";
+  kind: "program" | "function" | "function_block" | "method" | "class" | "interface" | "variable";
   line: number;
   start: number;
   end: number;
   /** `TYPE` for a variable, or the matching END keyword for a POU. */
   detail: string;
+}
+
+export interface StLocation {
+  line: number;
+  start: number;
+  end: number;
 }
 
 export interface StCompletion {
@@ -45,6 +51,21 @@ const BLOCKS: Record<string, string> = {
   REPEAT: "END_REPEAT",
   STRUCT: "END_STRUCT",
   TYPE: "END_TYPE",
+  CLASS: "END_CLASS",
+  INTERFACE: "END_INTERFACE",
+  PROPERTY: "END_PROPERTY",
+  GET: "END_GET",
+  SET: "END_SET",
+  UNION: "END_UNION",
+  NAMESPACE: "END_NAMESPACE",
+  CONFIGURATION: "END_CONFIGURATION",
+  RESOURCE: "END_RESOURCE",
+  ACTION: "END_ACTION",
+  STEP: "END_STEP",
+  INITIAL_STEP: "END_STEP",
+  TRANSITION: "END_TRANSITION",
+  VAR_ACCESS: "END_VAR",
+  VAR_CONFIG: "END_VAR",
 };
 
 const VAR_BLOCKS = new Set([
@@ -55,52 +76,131 @@ const VAR_BLOCKS = new Set([
   "VAR_TEMP",
   "VAR_GLOBAL",
   "VAR_EXTERNAL",
+  "VAR_ACCESS",
+  "VAR_CONFIG",
 ]);
 
-const POU_BLOCKS = new Set(["PROGRAM", "FUNCTION_BLOCK", "FUNCTION", "METHOD"]);
+const POU_BLOCKS = new Set(["PROGRAM", "FUNCTION_BLOCK", "FUNCTION", "METHOD", "CLASS", "INTERFACE"]);
 
-export const ST_KEYWORDS = [
-  "PROGRAM",
-  "END_PROGRAM",
-  "FUNCTION",
-  "END_FUNCTION",
-  "FUNCTION_BLOCK",
-  "END_FUNCTION_BLOCK",
-  "METHOD",
-  "END_METHOD",
-  "VAR",
-  "VAR_INPUT",
-  "VAR_OUTPUT",
-  "VAR_IN_OUT",
-  "VAR_TEMP",
-  "VAR_GLOBAL",
-  "END_VAR",
-  "IF",
-  "THEN",
-  "ELSIF",
-  "ELSE",
-  "END_IF",
-  "CASE",
-  "OF",
-  "END_CASE",
-  "FOR",
-  "TO",
-  "BY",
-  "DO",
-  "END_FOR",
-  "WHILE",
-  "END_WHILE",
-  "REPEAT",
-  "UNTIL",
-  "END_REPEAT",
-  "RETURN",
-  "EXIT",
-  "TRUE",
-  "FALSE",
-] as const;
+/** Keyword names and short hover text from kropochev/st-lsp (MIT). */
+export const ST_KEYWORD_DETAILS: Record<string, string> = {
+  PROGRAM: "Program organization unit",
+  END_PROGRAM: "End PROGRAM",
+  FUNCTION: "Function POU",
+  END_FUNCTION: "End FUNCTION",
+  FUNCTION_BLOCK: "Function block POU",
+  END_FUNCTION_BLOCK: "End FUNCTION_BLOCK",
+  CLASS: "OOP class",
+  END_CLASS: "End CLASS",
+  INTERFACE: "OOP interface",
+  END_INTERFACE: "End INTERFACE",
+  METHOD: "Class method",
+  END_METHOD: "End METHOD",
+  PROPERTY: "Class property",
+  END_PROPERTY: "End PROPERTY",
+  GET: "Property getter",
+  END_GET: "End GET",
+  SET: "Property setter",
+  END_SET: "End SET",
+  TYPE: "Type declarations",
+  END_TYPE: "End TYPE",
+  STRUCT: "Structure type",
+  END_STRUCT: "End STRUCT",
+  UNION: "Union type",
+  END_UNION: "End UNION",
+  NAMESPACE: "Namespace",
+  END_NAMESPACE: "End NAMESPACE",
+  USING: "Import namespace",
+  CONFIGURATION: "Resource configuration",
+  END_CONFIGURATION: "End CONFIGURATION",
+  RESOURCE: "Configuration resource",
+  END_RESOURCE: "End RESOURCE",
+  TASK: "Cyclic task",
+  ACTION: "SFC action",
+  END_ACTION: "End ACTION",
+  STEP: "SFC step",
+  INITIAL_STEP: "SFC initial step",
+  END_STEP: "End STEP",
+  TRANSITION: "SFC transition",
+  END_TRANSITION: "End TRANSITION",
+  VAR: "Local variables",
+  VAR_INPUT: "Input variables",
+  VAR_OUTPUT: "Output variables",
+  VAR_IN_OUT: "In-out variables",
+  VAR_TEMP: "Temporary variables",
+  VAR_GLOBAL: "Global variables",
+  VAR_EXTERNAL: "External variables",
+  VAR_ACCESS: "Access variables",
+  VAR_CONFIG: "Instance configuration",
+  END_VAR: "End VAR block",
+  CONSTANT: "Constant qualifier",
+  RETAIN: "Retain qualifier",
+  NON_RETAIN: "Non-retain qualifier",
+  PERSISTENT: "Persistent qualifier",
+  ABSTRACT: "Abstract modifier",
+  FINAL: "Final modifier",
+  OVERRIDE: "Override modifier",
+  PUBLIC: "Public access",
+  PRIVATE: "Private access",
+  PROTECTED: "Protected access",
+  INTERNAL: "Internal access",
+  EXTENDS: "Inherit from type",
+  IMPLEMENTS: "Implement interface",
+  IF: "Conditional",
+  THEN: "IF/ELSIF body",
+  ELSIF: "Else-if branch",
+  ELSEIF: "Else-if branch (dialect)",
+  ELSE: "Else branch",
+  END_IF: "End IF",
+  CASE: "Selection",
+  OF: "CASE/ARRAY OF",
+  END_CASE: "End CASE",
+  FOR: "Counted loop",
+  TO: "FOR range / POINTER TO",
+  BY: "FOR step",
+  DO: "Loop body",
+  END_FOR: "End FOR",
+  WHILE: "Pre-test loop",
+  END_WHILE: "End WHILE",
+  REPEAT: "Post-test loop",
+  UNTIL: "REPEAT condition",
+  END_REPEAT: "End REPEAT",
+  EXIT: "Leave loop",
+  CONTINUE: "Next loop iteration",
+  RETURN: "Return from POU",
+  ARRAY: "Array type",
+  AT: "Direct address",
+  POINTER: "Pointer type",
+  REF_TO: "Reference type",
+  ON: "RESOURCE ON",
+  WITH: "PROGRAM WITH task",
+  FROM: "TRANSITION FROM",
+  AND: "Boolean AND",
+  AND_THEN: "Short-circuit AND",
+  OR: "Boolean OR",
+  OR_ELSE: "Short-circuit OR",
+  XOR: "Boolean XOR",
+  NOT: "Boolean NOT",
+  MOD: "Modulo",
+  ADR: "Address of",
+  THIS: "Current instance",
+  SUPER: "Base class",
+  TRUE: "Boolean true",
+  FALSE: "Boolean false",
+  __TRY: "CODESYS try",
+  __CATCH: "CODESYS catch",
+  __FINALLY: "CODESYS finally",
+  __ENDTRY: "CODESYS end try",
+};
+
+export const ST_KEYWORDS = Object.keys(ST_KEYWORD_DETAILS);
 
 export const ST_TYPES = [
   "BOOL",
+  "BYTE",
+  "WORD",
+  "DWORD",
+  "LWORD",
   "SINT",
   "INT",
   "DINT",
@@ -111,18 +211,39 @@ export const ST_TYPES = [
   "ULINT",
   "REAL",
   "LREAL",
-  "BYTE",
-  "WORD",
-  "DWORD",
-  "LWORD",
   "TIME",
+  "LTIME",
   "DATE",
+  "LDATE",
   "TIME_OF_DAY",
   "TOD",
+  "LTIME_OF_DAY",
+  "LTOD",
   "DATE_AND_TIME",
   "DT",
+  "LDATE_AND_TIME",
+  "LDT",
+  "CHAR",
+  "WCHAR",
+  "UCHAR",
   "STRING",
   "WSTRING",
+  "USTRING",
+  "ANY",
+  "ANY_DERIVED",
+  "ANY_ELEMENTARY",
+  "ANY_MAGNITUDE",
+  "ANY_NUM",
+  "ANY_REAL",
+  "ANY_INT",
+  "ANY_UNSIGNED",
+  "ANY_SIGNED",
+  "ANY_DURATION",
+  "ANY_BIT",
+  "ANY_CHARS",
+  "ANY_STRING",
+  "ANY_CHAR",
+  "ANY_DATE",
 ] as const;
 
 const KNOWN_TYPES = new Set<string>(ST_TYPES);
@@ -224,6 +345,15 @@ function pouKind(open: string): StSymbol["kind"] | undefined {
   }
   if (open === "FUNCTION_BLOCK") {
     return "function_block";
+  }
+  if (open === "METHOD") {
+    return "method";
+  }
+  if (open === "CLASS") {
+    return "class";
+  }
+  if (open === "INTERFACE") {
+    return "interface";
   }
   return undefined;
 }
@@ -403,7 +533,7 @@ export function completeSt(text: string, line: number, character: number): StCom
     return ST_TYPES.filter((type) => type.startsWith(prefix.toUpperCase())).map((label) => ({
       label,
       kind: "type" as const,
-      detail: "elementary type",
+      detail: "Elementary or generic type",
     }));
   }
   const prefix = (/[A-Za-z_][A-Za-z0-9_]*$/.exec(before)?.[0] ?? "").toUpperCase();
@@ -415,11 +545,12 @@ export function completeSt(text: string, line: number, character: number): StCom
   const keywords = ST_KEYWORDS.filter((kw) => kw.startsWith(prefix)).map((label) => ({
     label,
     kind: "keyword" as const,
+    detail: ST_KEYWORD_DETAILS[label],
   }));
   const types = ST_TYPES.filter((type) => type.startsWith(prefix)).map((label) => ({
     label,
     kind: "type" as const,
-    detail: "elementary type",
+    detail: "Elementary or generic type",
   }));
   const seen = new Set<string>();
   const out: StCompletion[] = [];
@@ -433,7 +564,7 @@ export function completeSt(text: string, line: number, character: number): StCom
   return out;
 }
 
-/** Hover text for a declared variable at this position. */
+/** Hover text for a declared variable, keyword, or elementary type. */
 export function hoverSt(text: string, line: number, character: number): string | undefined {
   const rawLine = text.split(/\r?\n/)[line] ?? "";
   const word = tokenAt(rawLine, character);
@@ -445,8 +576,139 @@ export function hoverSt(text: string, line: number, character: number): string |
   const decl = analysis.variables.find(
     (item) => item.name.toUpperCase() === word.toUpperCase() && (item.scope === scope || item.scope === "<file>")
   );
-  if (!decl) {
+  if (decl) {
+    return `${decl.name} : ${decl.type}`;
+  }
+  const upper = word.toUpperCase();
+  const detail = ST_KEYWORD_DETAILS[upper];
+  if (detail) {
+    return `${upper} — ${detail}`;
+  }
+  if (KNOWN_TYPES.has(upper)) {
+    return `${upper} — Elementary or generic type`;
+  }
+  return undefined;
+}
+
+/** Same-file location of a variable or POU whose name is under the cursor. */
+export function definitionSt(text: string, line: number, character: number): StLocation | undefined {
+  const rawLine = text.split(/\r?\n/)[line] ?? "";
+  const word = tokenAt(rawLine, character);
+  if (!word) {
     return undefined;
   }
-  return `${decl.name} : ${decl.type}`;
+  const analysis = analyzeSt(text);
+  const scope = scopeAt(analysis, line);
+  const variable = analysis.variables.find(
+    (item) => item.name.toUpperCase() === word.toUpperCase() && (item.scope === scope || item.scope === "<file>")
+  );
+  if (variable) {
+    return { line: variable.line, start: variable.start, end: variable.end };
+  }
+  const pou = analysis.symbols.find(
+    (item) => item.kind !== "variable" && item.name.toUpperCase() === word.toUpperCase()
+  );
+  if (!pou) {
+    return undefined;
+  }
+  return { line: pou.line, start: pou.start, end: pou.end };
+}
+
+const FORMAT_WORDS = new Set<string>([...ST_KEYWORDS, ...ST_TYPES]);
+
+function rewriteCode(code: string): string {
+  let result = "";
+  let i = 0;
+  while (i < code.length) {
+    const ch = code[i] ?? "";
+    if (/[A-Za-z_]/.test(ch)) {
+      let end = i + 1;
+      while (end < code.length && /[A-Za-z0-9_]/.test(code[end] ?? "")) {
+        end += 1;
+      }
+      const word = code.slice(i, end);
+      const upper = word.toUpperCase();
+      result += FORMAT_WORDS.has(upper) ? upper : word;
+      i = end;
+      continue;
+    }
+    if (ch === ":" && code[i + 1] === "=") {
+      if (result.length > 0 && !/\s$/.test(result)) {
+        result += " ";
+      }
+      result += ":=";
+      i += 2;
+      const next = code[i];
+      if (next && next !== " " && next !== "\t" && next !== "\n" && next !== "\r") {
+        result += " ";
+      }
+      continue;
+    }
+    result += ch;
+    i += 1;
+  }
+  return result;
+}
+
+/**
+ * Uppercase IEC keywords and types outside comments and strings, and space `:=`.
+ * Does not rewrite identifiers or vendor function names.
+ */
+export function formatSt(text: string): string {
+  let out = "";
+  let code = "";
+  let i = 0;
+  const flush = () => {
+    if (!code) {
+      return;
+    }
+    out += rewriteCode(code);
+    code = "";
+  };
+  const copyQuoted = (quote: string) => {
+    flush();
+    out += quote;
+    i += 1;
+    while (i < text.length) {
+      const ch = text[i] ?? "";
+      out += ch;
+      i += 1;
+      if (ch === quote && text[i] === quote) {
+        out += text[i] ?? "";
+        i += 1;
+        continue;
+      }
+      if (ch === quote || ch === "\n") {
+        break;
+      }
+    }
+  };
+  while (i < text.length) {
+    const ch = text[i] ?? "";
+    const next = text[i + 1];
+    if (ch === "'" || ch === '"') {
+      copyQuoted(ch);
+      continue;
+    }
+    if (ch === "(" && next === "*") {
+      flush();
+      const close = text.indexOf("*)", i + 2);
+      const end = close < 0 ? text.length : close + 2;
+      out += text.slice(i, end);
+      i = end;
+      continue;
+    }
+    if (ch === "/" && next === "/") {
+      flush();
+      const nl = text.indexOf("\n", i);
+      const end = nl < 0 ? text.length : nl;
+      out += text.slice(i, end);
+      i = end;
+      continue;
+    }
+    code += ch;
+    i += 1;
+  }
+  flush();
+  return out.replace(/[ \t]+$/gm, "");
 }

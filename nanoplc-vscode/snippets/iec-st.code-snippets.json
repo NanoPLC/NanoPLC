@@ -1,0 +1,362 @@
+{
+	"PROGRAM …": {
+		"prefix": ["st program"],
+		"body": [
+			"PROGRAM ${1:PLC_PRG}",
+			"\t$0",
+			"END_PROGRAM",
+			""
+		],
+		"description": "Define program"
+    },
+	"IF END_IF...": {
+		"prefix": "st if",
+		"body": [
+			"IF ${1:Condition} THEN",
+			"\t$0",
+			"END_IF;",
+			""
+		],
+		"description": "Define IF condition"
+    },
+	"IF ELSE END_IF...": {
+		"prefix": "st if else",
+		"body": [
+			"IF ${1:Condition} THEN",
+			"\t$0",
+			"ELSE",
+			"\t$0",
+			"END_IF;",
+			""
+		],
+		"description": "Define IF condition with ELSE"
+    },
+	"IF ELSIF ELSE END_IF...": {
+		"prefix": "st if elsif else",
+		"body": [
+			"IF ${1:Condition} THEN",
+			"\t$0",
+			"ELSIF ${2:Condition2} THEN",
+			"\t",
+			"ELSE",
+			"\t",
+			"END_IF;",
+			""
+		],
+		"description": "Define IF condition with ELSIF and ELSE"
+	},
+	"ELSIF…": {
+		"prefix": "st elsif ",
+		"body": [
+			"ELSIF (${1:Condition1}) THEN",
+			"\t$0"
+		],
+		"description": "Define ELSIF condition"
+    },
+	"WHILE …": {
+		"prefix": "st while ",
+		"body": [
+			"WHILE ${1:Condition} DO",
+			"\t$0",
+			"END_WHILE;",
+			""
+		],
+		"description": "Define WHILE cycle"
+    },
+	"REPEAT …": {
+		"prefix": "st repeat ",
+		"body": [
+			"REPEAT",
+			"\t$0",
+			"UNTIL ${1:Condition}",
+			"END_REPEAT;",
+			""
+		],
+		"description": "Define REPEAT cycle"
+    },
+	"CASE …": {
+		"prefix": "st case ",
+		"body": [
+			"CASE ${1:ANY_NUM} OF",
+			"\t0: $0",
+			"\t1:",
+			"\t2:",
+			"END_CASE;",
+			""
+		],
+		"description": "Define CASE condition"
+    },
+	"CASE … ELSE": {
+		"prefix": "st case else",
+		"body": [
+			"CASE ${1:ANY_NUM} OF",
+			"\t0: $0",
+			"\t1:",
+			"ELSE",
+			"\t",
+			"END_CASE;",
+			""
+		],
+		"description": "Define CASE condition with ELSE"
+    },
+	"ACTION …": {
+		"prefix": "st action ",
+		"body": [
+			"ACTION ${1:Name}:",
+			"\t$0",
+			"END_ACTION;",
+			""
+		],
+		"description": "Define ACTION"
+    },
+	"STEP …": {
+		"prefix": "st step ",
+		"body": [
+			"STEP ${1:Name}:",
+			"\t$0",
+			"END_STEP;",
+			""
+		],
+		"description": "Define STEP"
+    },
+	"INITIAL_STEP …": {
+		"prefix": "st initial_step ",
+		"body": [
+			"INITIAL_STEP ${1:Name}:",
+			"\t$0",
+			"END_STEP;",
+			""
+		],
+		"description": "Define Initial STEP"
+    },
+	"TRANSITION …": {
+		"prefix": "st transaction",
+		"body": [
+			"TRANSITION ${1:Name} FROM ${2:Step1} TO ${3:Step2}",
+			"\t$0",
+			"END_TRANSITION;",
+			""
+		],
+		"description": "Define ACTION"
+    },
+	"FOR …": {
+		"prefix": "st for ",
+		"body": [
+			"FOR ${1:Var} TO ${2:Num} DO",
+			"\t$0",
+			"END_FOR;",
+			""
+		],
+		"description": "Define FOR cycle"
+    },
+	"FOR BY…": {
+		"prefix": "st for by",
+		"body": [
+			"FOR ${1:Var} TO ${2:Num} BY ${3:1} DO",
+			"\t$0",
+			"END_FOR;",
+			""
+		],
+		"description": "Define FOR cycle with BY"
+	},
+	"NAMESPACE ... END_NAMESPACE": {
+		"prefix": "st namespace ",
+		"body": [
+			"NAMESPACE ${1:Name}",
+			"\t$0",
+			"END_NAMESPACE"
+		],
+		"description": "Define NAMESPACE"
+	},
+	"CLASS ... END_CLASS": {
+		"prefix": "st class ",
+		"body": [
+			"CLASS ${1:Name}",
+			"\t$0",
+			"END_CLASS"
+		],
+		"description": "Define CLASS"
+	},
+	"PROPERTY ... END_PROPERTY": {
+		"prefix": "st property ",
+		"body": [
+			"PROPERTY ${1:Name} : ${2:Type} ",
+			"\tGET",
+			"\t\t$0",
+			"\tEND_GET",
+			"\tSET",
+			"\t\t$0",
+			"\tEND_SET",
+			"END_PROPERTY"
+		],
+		"description": "Define Property"
+	},
+	"FUNCTION ... END_FUNCTION": {
+		"prefix": "st function ",
+		"body": [
+			"FUNCTION ${1:Name} : ${2:Type}",
+			"\t$0",
+			"END_FUNCTION"
+		],
+		"description": "Define FUNCTION"
+	},
+	"FUNCTION_BLOCK ... END_FUNCTION_BLOCK": {
+		"prefix": "st function_block",
+		"body": [
+			"FUNCTION_BLOCK ${1:Name}",
+			"\t$0",
+			"END_FUNCTION_BLOCK"
+		],
+		"description": "Define FUNCTION_BLOCK"
+	},
+	"METHOD ... END_METHOD": {
+		"prefix": "st Method",
+		"body": [
+			"(* ${1:Description} *)",
+			"METHOD ${2:Name} : ${3:ReturnType}",
+			"\t$0",
+			"END_METHOD"
+		],
+		"description": "Define METHOD"
+	},
+	"IMPLEMENTATION ... END_IMPLEMENTATION": {
+		"prefix": "st implement",
+		"body": [
+			"IMPLEMENTATION",
+			"\t$0",
+			"END_IMPLEMENTATION"
+		],
+		"description": "Define IMPLEMENTATION"
+	},
+	"Variable declaration": {
+		"prefix": ["st var declaration", "st declare"],
+		"body": [
+			"${1:Variable}: ${2|BOOL,BYTE,WORD,DWORD,STRING,WSTRING,REAL,LREAL,ARARY,POINTER TO,REF_TO,INT,SINT,DINT,LINT,UINT,USINT,UDINT,ULINT,TIME,TOD,DATE,DT,ANY, ANY_NUM,ANY_INT,ANY_REAL,TON,TOF,TP,RS,SR,R_TRIG,F_TRIG,CTU,CTD,CTUD|}; (* ${3:Comment} *)$0"
+		],
+		"description": "Define new variable"
+	},
+	"VAR ... END_VAR": {
+		"prefix": "st var",
+		"body": [
+			"VAR",
+			"\t${1:Variable}: ${2|BOOL,BYTE,WORD,DWORD,STRING,WSTRING,REAL,LREAL,ARARY,POINTER TO,REF_TO,INT,SINT,DINT,LINT,UINT,USINT,UDINT,ULINT,TIME,TOD,DATE,DT,ANY, ANY_NUM,ANY_INT,ANY_REAL,TON,TOF,TP,RS,SR,R_TRIG,F_TRIG,CTU,CTD,CTUD|}; (* ${3:Comment} *)$0",
+			"END_VAR"
+		],
+		"description": "Define VAR block"
+	},
+	"VAR_GLOBAL ... END_VAR": {
+		"prefix": ["st var_global", "global"],
+		"body": [
+			"VAR_GLOBAL",
+			"\t${1:Variable}: ${2|BOOL,BYTE,WORD,DWORD,STRING,WSTRING,REAL,LREAL,ARARY,POINTER TO,REF_TO,INT,SINT,DINT,LINT,UINT,USINT,UDINT,ULINT,TIME,TOD,DATE,DT,ANY, ANY_NUM,ANY_INT,ANY_REAL,TON,TOF,TP,RS,SR,R_TRIG,F_TRIG,CTU,CTD,CTUD|}; (* ${3:Comment} *)$0",
+			"END_VAR"
+		],
+		"description": "Define VAR_GLOBAL"
+	},
+	"VAR_IN_OUT ... END_VAR": {
+		"prefix": ["st var_in_out"],
+		"body": [
+			"VAR_IN_OUT",
+			"\t${1:Variable}: ${2|BOOL,BYTE,WORD,DWORD,STRING,WSTRING,REAL,LREAL,ARARY,POINTER TO,REF_TO,INT,SINT,DINT,LINT,UINT,USINT,UDINT,ULINT,TIME,TOD,DATE,DT,ANY, ANY_NUM,ANY_INT,ANY_REAL,TON,TOF,TP,RS,SR,R_TRIG,F_TRIG,CTU,CTD,CTUD|}; (* ${3:Comment} *)$0",
+			"END_VAR"
+		],
+		"description": "Define VAR_IN_OUT"
+	},
+	"VAR_INPUT ... END_VAR": {
+		"prefix": ["st var_input"],
+		"body": [
+			"VAR_INPUT",
+			"\t${1:Variable}: ${2|BOOL,BYTE,WORD,DWORD,STRING,WSTRING,REAL,LREAL,ARARY,POINTER TO,REF_TO,INT,SINT,DINT,LINT,UINT,USINT,UDINT,ULINT,TIME,TOD,DATE,DT,ANY, ANY_NUM,ANY_INT,ANY_REAL,TON,TOF,TP,RS,SR,R_TRIG,F_TRIG,CTU,CTD,CTUD|}; (* ${3:Comment} *)$0",
+			"END_VAR"
+		],
+		"description": "Define VAR_INPUT"
+	},
+	"VAR_OUTPUT ... END_VAR": {
+		"prefix": ["st var_output"],
+		"body": [
+			"VAR_OUTPUT",
+			"\t${1:Variable}: ${2|BOOL,BYTE,WORD,DWORD,STRING,WSTRING,REAL,LREAL,ARARY,POINTER TO,REF_TO,INT,SINT,DINT,LINT,UINT,USINT,UDINT,ULINT,TIME,TOD,DATE,DT,ANY, ANY_NUM,ANY_INT,ANY_REAL,TON,TOF,TP,RS,SR,R_TRIG,F_TRIG,CTU,CTD,CTUD|}; (* ${3:Comment} *)$0",
+			"END_VAR"
+		],
+		"description": "Define VAR_OUTPUT"
+	},
+	"TYPE ... END_TYPE": {
+		"prefix": ["st type enum"],
+		"body": [
+			"TYPE ${1:EnumName} (",
+			"\t${2:Variable1}, ${3:Variable2}$0",
+			")",
+			"END_TYPE"
+		],
+		"description": "Define Enumeration"
+	},
+	"TYPE ... STRUCT ...END_STRUCT END_TYPE": {
+		"prefix": ["st type struct"],
+		"body": [
+			"TYPE ${1:StructName} : STRUCT",
+			"\t\t${2:Variable} : ${3|BOOL,BYTE,WORD,DWORD,STRING,WSTRING,REAL,LREAL,ARARY,POINTER TO,REF_TO,INT,SINT,DINT,LINT,UINT,USINT,UDINT,ULINT,TIME,TOD,DATE,DT,ANY, ANY_NUM,ANY_INT,ANY_REAL,TON,TOF,TP,RS,SR,R_TRIG,F_TRIG,CTU,CTD,CTUD|}; (* ${4:Comment} *)",
+			"\t\t${5:Variable} : ${6|BOOL,BYTE,WORD,DWORD,STRING,WSTRING,REAL,LREAL,ARARY,POINTER TO,REF_TO,INT,SINT,DINT,LINT,UINT,USINT,UDINT,ULINT,TIME,TOD,DATE,DT,ANY, ANY_NUM,ANY_INT,ANY_REAL,TON,TOF,TP,RS,SR,R_TRIG,F_TRIG,CTU,CTD,CTUD|}; (* ${7:Comment} *)$0",
+			"\tEND_STRUCT",
+			"END_TYPE"
+		],
+		"description": "Define STRUCT"
+	},
+	"TYPE ... UNION ...END_UNION END_TYPE": {
+		"prefix": ["st type union"],
+		"body": [
+			"TYPE ${1:UnionName} : UNION",
+			"\t\t${2:Variable} : ${3|BOOL,BYTE,WORD,DWORD,STRING,WSTRING,REAL,LREAL,ARARY,POINTER TO,REF_TO,INT,SINT,DINT,LINT,UINT,USINT,UDINT,ULINT,TIME,TOD,DATE,DT,ANY, ANY_NUM,ANY_INT,ANY_REAL,TON,TOF,TP,RS,SR,R_TRIG,F_TRIG,CTU,CTD,CTUD|}; (* ${4:Comment} *)",
+			"\t\t${5:Variable} : ${6|BOOL,BYTE,WORD,DWORD,STRING,WSTRING,REAL,LREAL,ARARY,POINTER TO,REF_TO,INT,SINT,DINT,LINT,UINT,USINT,UDINT,ULINT,TIME,TOD,DATE,DT,ANY, ANY_NUM,ANY_INT,ANY_REAL,TON,TOF,TP,RS,SR,R_TRIG,F_TRIG,CTU,CTD,CTUD|}; (* ${7:Comment} *)$0",
+			"\tEND_UNION",
+			"END_TYPE"
+		],
+		"description": "Define UNION"
+	},
+	"comment": {
+		"prefix": "st comment",
+		"body": "$BLOCK_COMMENT_START $0 $BLOCK_COMMENT_END",
+		"description": "Define comment"
+	},
+	"block comment": {
+		"prefix": "st comment block",
+		"body": [
+			"$BLOCK_COMMENT_START ************************************* $BLOCK_COMMENT_END",
+			"$BLOCK_COMMENT_START $0 $BLOCK_COMMENT_END",
+			"$BLOCK_COMMENT_START ************************************* $BLOCK_COMMENT_END"
+		],
+		"description": "Define comment block"
+	},
+	"TRY ... CATCH ... FINALLY ... ENDTRY": {
+		"prefix": "st try",
+		"body": [
+			"__TRY",
+			"\t$0",
+			"__CATCH (${1:Variable})",
+			"\t",
+			"__FINALLY",
+			"__ENDTRY"
+		],
+		"description": "Define TRY-CATCH-FINALLY exception handling block. Variable is an UDINT or __SYSTEM.ExceptionCode type. These operators are extended from the IEC 61131-3 standard."
+	},
+	"Dynamic allocation scalar": {
+		"prefix": "st new",
+		"body": [
+			"__NEW(${1:Scalar Type}, ${2:Number of elements});"
+		],
+		"description": "The __NEW operator allocates memory for arrays of standard data types. The operator returns a suitable typed pointer to the object. These operators are extended from the IEC 61131-3 standard."
+	},
+	"Dynamic allocation function": {
+		"prefix": ["st new fb"],
+		"body": [
+			"__NEW(${1:Function Block Or Structure Type});"
+		],
+		"description": "The __NEW operator allocates memory for function block instances or structure. The operator returns a suitable typed pointer to the object. These operators are extended from the IEC 61131-3 standard."
+	},
+	"Dynamic memory free": {
+		"prefix": "st delete",
+		"body": [
+			"__DELETE(${1:POINTER_TO Variable});"
+		],
+		"description": "The operator releases the memory of instances, which the operator __NEW generated dynamically. These operators are extended from the IEC 61131-3 standard."
+	}
+}

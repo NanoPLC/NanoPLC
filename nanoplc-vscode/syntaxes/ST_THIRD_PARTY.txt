@@ -1,0 +1,13 @@
+Structured Text editor assets adapted for NanoPLC.
+
+syntaxes/iec-st.tmLanguage.json, snippets/iec-st.code-snippets.json, and the
+bracket/comment parts of language-configuration/iec-st-language-configuration.json
+come from https://github.com/kropochev/vscode-st (upstream https://github.com/Serhioromano/vscode-st),
+MIT License, Copyright (c) 2018 Sergey Romanov.
+
+Keyword and type completion names follow https://github.com/kropochev/st-lsp
+(MIT). The in-process analyzer does not embed that language server.
+
+Permission is granted to use, copy, modify, and distribute those portions
+under the MIT License. The full license text is the standard MIT license
+included with those repositories.
