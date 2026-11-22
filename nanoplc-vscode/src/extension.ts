@@ -12,6 +12,7 @@ import * as scaffoldFirmware from "./project/scaffoldFirmware";
 import * as projectTree from "./project/projectTree";
 import * as onlineDebug from "./onlineDebug/onlineDebug";
 import * as simulatorPanel from "./simulator/simulatorPanel";
+import * as stLanguage from "./st/stLanguage";
 import * as setupToolchain from "./setupToolchain";
 import {
   maybePromptToolchainOnActivate,
@@ -50,7 +51,8 @@ export function activate(context: vscode.ExtensionContext): void {
     onlineDebug.registerOnlineDebug(context),
     codegenFirmware.registerCodegenFirmware(),
     scaffoldFirmware.registerInitFirmwareTree(),
-    fbdEditor.registerFbdEditor(context)
+    fbdEditor.registerFbdEditor(context),
+    stLanguage.registerStLanguage(context)
   );
 }
 

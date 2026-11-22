@@ -6,7 +6,7 @@ IEC 61131-3 oriented language support (ST, LAD, FBD) and helpers for NanoPLC to
 
 | Area | Details |
 |------|---------|
-| **Languages** | Syntax highlighting for **Structured Text** (`.st`, `.iecst`), **Ladder** (`.lad`, `.ld`), **FBD** (`.fbd`) |
+| **Languages** | Syntax highlighting for **Structured Text** (`.st`, `.iecst`), **Ladder** (`.lad`, `.ld`), **FBD** (`.fbd`). ST also has structural diagnostics (`ST0001`…`ST0005`), completion, hover, and an outline. That service does not compile ST into IR. |
 | **Toolchain** | Bootstrap **ESP-IDF** into your user profile (`~/.nanoplc` or `%USERPROFILE%\.nanoplc`), check `idf.py`, and **Build / Flash / Monitor** under `firmware/` |
 | **Project** | `nanoplc.project.json`, **Device** tree (including **Task configuration**), FBD JSON → IR compile, `examples/and_gate`. FBD programs declare IN / IN_OUT / OUT / VAR / TEMP; CALL boxes show the interface ports |
 

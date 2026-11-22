@@ -178,6 +178,8 @@ Timers: `NP-0220` invalid `pt_ms` on `TON` / `TOF` / `TP`.
 
 Types, validation, `compileFbdToIr()`, `compileProjectToIr()` (one entry PROGRAM plus transitive `CALL`s), and `compileTasksToIr()` (every task's entry PROGRAM plus their `CALL`s) live in **`packages/ir-schema/`**. The VS Code extension depends on this package via `file:../packages/ir-schema`.
 
+`analyzeSt()` checks Structured Text structure for the editor (`ST0001` unclosed block, `ST0002` mismatched `END_`, `ST0003` bad declaration, `ST0004` duplicate name, `ST0005` non-elementary type). It does not produce IR.
+
 ### Simulator
 
 `PlcSimulator` loads compiled `PlcIr` and runs the ordered `schedule` each scan. A `call` step runs the matching `pou_schedules` entry (shared vars / process image; recursion is skipped at runtime and rejected at compile). Supported ops include `read_di`, `read_ai`, `write_do`, `and`, `or`, `not`, `ton`, `tof`, `tp`, `move`, `const`, `call`, math, and bit ops. The simulation webview is a watch list: add **DI / DO / AI** by module and channel, and add PROGRAM **IN / IN_OUT / OUT / VAR / TEMP** symbols. An optional project `virtual_plant` drives those channels from panel widgets (pushbutton, switch, lamp, transmitter, motor, valve, tank, conveyor); the plant is not part of `build/ir.json`. The same process image is published on localhost Modbus TCP, MQTT, and OPC UA while the simulation runs (`docs/FIELDBUS.md`). Watch rows can **Force** a DI, DO, AI, or variable; the simulator writes that value back after the plant (inputs) and after each task pass (outputs and variables) until **Unforce**. A watchdog `outputs_off` latch still clears DO.
