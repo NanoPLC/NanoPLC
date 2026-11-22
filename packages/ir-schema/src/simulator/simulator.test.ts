@@ -141,6 +141,70 @@ test("simulator setVar writes a PROGRAM variable", () => {
   assert.equal(snap.vars["DO_Lamp"], true);
 });
 
+function timerSim(type: "TON" | "TOF" | "TP", pt_ms: number): PlcSimulator {
+  const fbd: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [
+      { id: "di1", type: "DI", params: { channel: 1, symbol: "DI_In" } },
+      { id: "t1", type, params: { pt_ms } },
+      { id: "do1", type: "DO", params: { channel: 1, symbol: "DO_Q" } },
+    ],
+    wires: [
+      { from: { block: "di1", port: "Q" }, to: { block: "t1", port: "IN" } },
+      { from: { block: "t1", port: "Q" }, to: { block: "do1", port: "IN" } },
+    ],
+  };
+  const compiled = compileFbdToIr(baseProject, fbd, "main");
+  assert.ok(compiled.ok && compiled.ir, compiled.diagnostics.map((d) => d.message).join("; "));
+  return new PlcSimulator(compiled.ir);
+}
+
+/** Runs one 10 ms scan per entry of `inputs`; returns DO_Q after each scan. */
+function trace(sim: PlcSimulator, inputs: boolean[]): boolean[] {
+  return inputs.map((v) => {
+    sim.setDi(0, v);
+    return sim.stepOnce().do[0];
+  });
+}
+
+test("TON: Q rises after IN held for PT; ET saturates at PT", () => {
+  const sim = timerSim("TON", 30);
+  assert.deepEqual(trace(sim, [true, true, true, true, false]), [false, false, true, true, false]);
+  const snap = sim.stepOnce();
+  assert.equal(snap.vars["t1.ET"], 0);
+  const held = timerSim("TON", 30);
+  trace(held, [true, true, true, true, true, true]);
+  assert.equal(held.stepOnce().vars["t1.ET"], 30);
+});
+
+test("TOF: Q follows IN on, falls PT after IN goes false", () => {
+  const sim = timerSim("TOF", 30);
+  assert.deepEqual(
+    trace(sim, [false, true, false, false, false, false, true, false, true]),
+    [false, true, true, true, false, false, true, true, true]
+  );
+});
+
+test("TP: fixed pulse on rising edge, not retriggerable", () => {
+  const sim = timerSim("TP", 30);
+  assert.deepEqual(
+    trace(sim, [true, false, true, false, false, true, true, true, true]),
+    [true, true, false, false, false, true, true, false, false]
+  );
+});
+
+test("TP: new edge right after a pulse ended with IN false starts a new pulse", () => {
+  const sim = timerSim("TP", 20);
+  assert.deepEqual(trace(sim, [true, false, true, true]), [true, false, true, false]);
+});
+
+test("timers with PT = 0", () => {
+  assert.deepEqual(trace(timerSim("TON", 0), [true, false]), [true, false]);
+  assert.deepEqual(trace(timerSim("TOF", 0), [true, false]), [true, false]);
+  assert.deepEqual(trace(timerSim("TP", 0), [true, false, true]), [false, false, false]);
+});
+
 test("simulator CALL copies IN to callee and OUT back to caller", () => {
   const project: NanoPlcProject = {
     ...baseProject,

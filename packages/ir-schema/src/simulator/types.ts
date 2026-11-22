@@ -1,7 +1,13 @@
-export interface TonInstanceState {
+/** State of a TON / TOF / TP instance. */
+export interface TimerInstanceState {
   et_ms: number;
   q: boolean;
+  /** IN from the previous pass (TP rising-edge detection). */
+  in_prev: boolean;
 }
+
+/** @deprecated Use `TimerInstanceState`. */
+export type TonInstanceState = TimerInstanceState;
 
 export interface RsInstanceState {
   q: boolean;
@@ -29,7 +35,7 @@ export interface SimState {
   di: boolean[];
   ai: number[];
   do: boolean[];
-  ton: Map<string, TonInstanceState>;
+  timers: Map<string, TimerInstanceState>;
   rs: Map<string, RsInstanceState>;
   scan_index: number;
   elapsed_ms: number;

@@ -192,6 +192,38 @@ test("codegenC emits scan dt only when TON is present", () => {
   const hash = createHash("sha256").update(JSON.stringify(compiled.ir)).digest("hex");
   const out = codegenC(compiled.ir, hash);
   assert.match(out.plc_program_c, /const uint32_t npgen_scan_dt_ms = nanoplc_runtime_scan_period_ms\(\);/);
-  assert.match(out.plc_program_c, /npgen_ton_ton1\.et_ms \+= npgen_scan_dt_ms/);
+  assert.match(
+    out.plc_program_c,
+    /npgen_tmr_ton1\.et_ms = npgen_et_advance\(npgen_tmr_ton1\.et_ms, npgen_scan_dt_ms, 500u\);/
+  );
   assert.doesNotMatch(out.plc_program_c, /NPGEN_SCAN_DT_MS/);
+});
+
+test("codegenC emits TOF and TP timer state", () => {
+  const fbd: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [
+      { id: "di1", type: "DI", params: { channel: 1, symbol: "DI_Start" } },
+      { id: "tof1", type: "TOF", params: { pt_ms: 300 } },
+      { id: "tp1", type: "TP", params: { pt_ms: 200 } },
+      { id: "do1", type: "DO", params: { channel: 1, symbol: "DO_Off" } },
+      { id: "do2", type: "DO", params: { channel: 2, symbol: "DO_Pulse" } },
+    ],
+    wires: [
+      { from: { block: "di1", port: "Q" }, to: { block: "tof1", port: "IN" } },
+      { from: { block: "di1", port: "Q" }, to: { block: "tp1", port: "IN" } },
+      { from: { block: "tof1", port: "Q" }, to: { block: "do1", port: "IN" } },
+      { from: { block: "tp1", port: "Q" }, to: { block: "do2", port: "IN" } },
+    ],
+  };
+  const compiled = compileFbdToIr(project, fbd, "main");
+  assert.ok(compiled.ok && compiled.ir, compiled.diagnostics.map((d) => d.message).join("; "));
+  const hash = createHash("sha256").update(JSON.stringify(compiled.ir)).digest("hex");
+  const out = codegenC(compiled.ir, hash);
+  assert.match(out.plc_program_c, /static struct \{ uint32_t et_ms; bool q; bool in_prev; \} npgen_tmr_tof1;/);
+  assert.match(out.plc_program_c, /static struct \{ uint32_t et_ms; bool q; bool in_prev; \} npgen_tmr_tp1;/);
+  assert.match(out.plc_program_c, /\} else if \(npgen_tmr_tof1\.q\) \{/);
+  assert.match(out.plc_program_c, /if \(!npgen_tmr_tp1\.q && npgen_v_DI_Start && !npgen_tmr_tp1\.in_prev\) \{/);
+  assert.equal((out.plc_program_c.match(/static inline uint32_t npgen_et_advance/g) ?? []).length, 1);
 });

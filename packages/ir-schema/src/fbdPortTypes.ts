@@ -5,7 +5,7 @@ import { callBlockPorts, findPouVariable, localBlockPorts } from "./pouVars";
 const MATH_BLOCKS = new Set(["ADD", "SUB", "MUL", "DIV"]);
 const REAL_MATH_BLOCKS = new Set(["POW", "SQRT"]);
 const BIT_BLOCKS = new Set(["SETBIT", "RESETBIT", "SHL", "SHR", "ROL", "ROR"]);
-const BOOL_BLOCKS = new Set(["AND", "OR", "NOT", "TON", "RS"]);
+const BOOL_BLOCKS = new Set(["AND", "OR", "NOT", "TON", "TOF", "TP", "RS"]);
 
 const NUMERIC_RANK: Record<PlcPrimitiveType, number> = {
   BOOL: 0,
@@ -252,6 +252,8 @@ export function inputPortsForType(type: string): Set<string> {
     case "NOT":
       return new Set(["IN"]);
     case "TON":
+    case "TOF":
+    case "TP":
       return new Set(["IN"]);
     case "RS":
       return new Set(["SET", "RESET1"]);

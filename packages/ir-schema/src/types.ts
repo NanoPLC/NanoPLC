@@ -187,6 +187,8 @@ export type ScheduleOp =
   | "not"
   | "move"
   | "ton"
+  | "tof"
+  | "tp"
   | "const"
   | "add"
   | "sub"
@@ -212,7 +214,7 @@ export interface ScheduleStep {
   in2?: string;
   symbol?: string;
   index?: number;
-  /** Block instance id for FB ops (e.g. TON). */
+  /** Block instance id for FB ops (e.g. TON / TOF / TP). */
   block_id?: string;
   pt_ms?: number;
   /** Literal value for `const` ops. */

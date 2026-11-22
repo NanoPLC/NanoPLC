@@ -79,7 +79,7 @@ Optional **`layout`** map (`block id → { x, y }`) stores canvas positions for 
 
 Open `*.fbd.json` in VS Code with the **FBD Diagram** custom editor (palette, pan/zoom, wiring, properties).
 
-Supported block types (v0): `DI`, `DO`, `AI`, `AND`, `OR`, `NOT`, `RS`, `TON`, `CONST`, `ADD`, `SUB`, `MUL`, `DIV`, `POW`, `SQRT`, `SETBIT`, `RESETBIT`, `SHL`, `SHR`, `ROL`, `ROR`, `CALL`, `LOCAL`.
+Supported block types (v0): `DI`, `DO`, `AI`, `AND`, `OR`, `NOT`, `RS`, `TON`, `TOF`, `TP`, `CONST`, `ADD`, `SUB`, `MUL`, `DIV`, `POW`, `SQRT`, `SETBIT`, `RESETBIT`, `SHL`, `SHR`, `ROL`, `ROR`, `CALL`, `LOCAL`.
 
 **`CALL`** invokes another FBD PROGRAM (`params.program` = callee id). The box shows the callee’s **IN**, **IN_OUT**, and **OUT** variables as ports. VAR and TEMP stay internal. The callee is a singleton that shares the process image (DI/DO/AI symbols) and keeps VAR state between calls. TEMP is reset at the start of every call. The current program is omitted from the FBD **Programs** palette. Self-call is `NP-0410`; a call cycle is `NP-0411`; empty `params.program` is `NP-0412`; unknown id is `NP-0413`. ST programs cannot be called (`NP-0205`).
 
@@ -107,6 +107,8 @@ Device I/O counts live in `DeviceIoProfile` / module catalog (`di_count` / `do_c
 
 **RS** is a reset-dominant set/reset latch (IEC 61131): ports `SET`, `RESET1`, output `Q`. When both inputs are active, `Q` is `FALSE`. Cold start: `Q = false`.
 
+**Timers** `TON` (on-delay), `TOF` (off-delay), and `TP` (pulse) have one BOOL input `IN`, output `Q`, and `params.pt_ms` (preset time in whole milliseconds, default `1000`). Schedule ops are `ton` / `tof` / `tp` with `pt_ms` and `block_id`. ET advances by the executing task's Δt and saturates at PT. A negative, fractional, or non-numeric PT is `NP-0220`. Exact edge cases (PT = 0, retrigger, cold start) are in `docs/BLOCK_SEMANTICS.md`.
+
 ## Compiled IR (`build/ir.json`)
 
 Top-level entities:
@@ -117,7 +119,7 @@ Top-level entities:
 | `variables` | Symbols with PLC types and roles (`di`, `do`, `ai`, `internal`, …) |
 | `io_image` | Ordered DI / DO / AI index map for simulator and HAL |
 | `network` | Original FBD blocks and wires |
-| `instances` | FB instances (e.g. `TON`, `RS`) |
+| `instances` | FB instances (e.g. `TON`, `TOF`, `TP`, `RS`) |
 | `schedule` | **Ordered** execution steps of the entry PROGRAM (topological compile output) |
 | `pou_schedules` | Callee PROGRAM schedules invoked by `call` ops (omitted when there are no CALLs) |
 
@@ -138,13 +140,15 @@ Program `CALL`: `NP-0410` self-call, `NP-0411` call cycle, `NP-0412` CALL with n
 
 Program variables: `NP-0216` invalid name, `NP-0217` duplicate name, `NP-0218` invalid class/type, `NP-0219` LOCAL block with unknown variable.
 
+Timers: `NP-0220` invalid `pt_ms` on `TON` / `TOF` / `TP`.
+
 ## Implementation
 
 Types, validation, `compileFbdToIr()`, and `compileProjectToIr()` (entry PROGRAM plus transitive `CALL`s) live in **`packages/ir-schema/`**. The VS Code extension depends on this package via `file:../packages/ir-schema`.
 
 ### Simulator
 
-`PlcSimulator` loads compiled `PlcIr` and runs the ordered `schedule` each scan. A `call` step runs the matching `pou_schedules` entry (shared vars / process image; recursion is skipped at runtime and rejected at compile). Supported ops include `read_di`, `read_ai`, `write_do`, `and`, `or`, `not`, `ton`, `move`, `const`, `call`, math, and bit ops. The simulation webview is a watch list: add **DI / DO / AI** by module and channel, and add PROGRAM **IN / IN_OUT / OUT / VAR / TEMP** symbols.
+`PlcSimulator` loads compiled `PlcIr` and runs the ordered `schedule` each scan. A `call` step runs the matching `pou_schedules` entry (shared vars / process image; recursion is skipped at runtime and rejected at compile). Supported ops include `read_di`, `read_ai`, `write_do`, `and`, `or`, `not`, `ton`, `tof`, `tp`, `move`, `const`, `call`, math, and bit ops. The simulation webview is a watch list: add **DI / DO / AI** by module and channel, and add PROGRAM **IN / IN_OUT / OUT / VAR / TEMP** symbols.
 
 ### C codegen
 

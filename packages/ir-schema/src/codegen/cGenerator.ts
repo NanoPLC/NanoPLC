@@ -159,6 +159,57 @@ function bitSetOp(step: ScheduleStep, set: boolean): string[] {
   return [`    ${out} = ${expr};`];
 }
 
+const TIMER_OPS = new Set<ScheduleStep["op"]>(["ton", "tof", "tp"]);
+
+/** Mirrors `executeTimer` in the TS simulator (docs/BLOCK_SEMANTICS.md). */
+function timerLines(step: ScheduleStep, dtExpr: string): string[] {
+  const s = `npgen_tmr_${cIdent(step.block_id ?? step.op)}`;
+  const pt = `${step.pt_ms ?? 1000}u`;
+  const out = varRef(step.out);
+  const inn = varRef(step.in1);
+  const advance = `        ${s}.et_ms = npgen_et_advance(${s}.et_ms, ${dtExpr}, ${pt});`;
+  let body: string[];
+  switch (step.op) {
+    case "ton":
+      body = [
+        `    if (${inn}) {`,
+        advance,
+        `        ${s}.q = (${s}.et_ms >= ${pt});`,
+        `    } else {`,
+        `        ${s}.et_ms = 0;`,
+        `        ${s}.q = false;`,
+        `    }`,
+      ];
+      break;
+    case "tof":
+      body = [
+        `    if (${inn}) {`,
+        `        ${s}.et_ms = 0;`,
+        `        ${s}.q = true;`,
+        `    } else if (${s}.q) {`,
+        advance,
+        `        ${s}.q = (${s}.et_ms < ${pt});`,
+        `    }`,
+      ];
+      break;
+    default:
+      body = [
+        `    if (!${s}.q && ${inn} && !${s}.in_prev) {`,
+        `        ${s}.q = true;`,
+        `        ${s}.et_ms = 0;`,
+        `    }`,
+        `    if (${s}.q) {`,
+        advance,
+        `        ${s}.q = (${s}.et_ms < ${pt});`,
+        `    } else if (!${inn}) {`,
+        `        ${s}.et_ms = 0;`,
+        `    }`,
+      ];
+      break;
+  }
+  return [...body, `    ${s}.in_prev = ${inn};`, `    ${out} = ${s}.q;`];
+}
+
 function line(step: ScheduleStep, dtExpr: string): string[] {
   switch (step.op) {
     case "read_di": {
@@ -209,24 +260,10 @@ function line(step: ScheduleStep, dtExpr: string): string[] {
         `    ${out} = npgen_rs_${id}.q;`,
       ];
     }
-    case "ton": {
-      const id = cIdent(step.block_id ?? "ton");
-      const pt = step.pt_ms ?? 1000;
-      const out = varRef(step.out);
-      const inn = varRef(step.in1);
-      return [
-        `    if (${inn}) {`,
-        `        if (npgen_ton_${id}.et_ms < ${pt}u) {`,
-        `            npgen_ton_${id}.et_ms += ${dtExpr};`,
-        `        }`,
-        `        npgen_ton_${id}.q = (npgen_ton_${id}.et_ms >= ${pt}u);`,
-        `    } else {`,
-        `        npgen_ton_${id}.et_ms = 0;`,
-        `        npgen_ton_${id}.q = false;`,
-        `    }`,
-        `    ${out} = npgen_ton_${id}.q;`,
-      ];
-    }
+    case "ton":
+    case "tof":
+    case "tp":
+      return timerLines(step, dtExpr);
     case "move":
       return [`    ${varRef(step.out)} = ${varRef(step.in1)};`];
     case "const": {
@@ -325,11 +362,11 @@ function uniqueById<T extends { id: string }>(rows: T[]): T[] {
   return out;
 }
 
-function tonBlocks(ir: PlcIr): { id: string; pt_ms: number }[] {
+function timerBlocks(ir: PlcIr): { id: string }[] {
   return uniqueById(
     allSteps(ir)
-      .filter((s) => s.op === "ton")
-      .map((s) => ({ id: cIdent(s.block_id ?? "ton"), pt_ms: s.pt_ms ?? 1000 }))
+      .filter((s) => TIMER_OPS.has(s.op))
+      .map((s) => ({ id: cIdent(s.block_id ?? s.op) }))
   );
 }
 
@@ -355,7 +392,7 @@ export function codegenC(ir: PlcIr, irSha256Hex: string, _ioMap?: IoMap): Codege
   const aiCount = Math.max(0, ...ir.io_image.ai.map((d) => d.index + 1), 0);
   const doCount = Math.max(0, ...ir.io_image.do.map((d) => d.index + 1), 0);
   const typedVars = collectTypedVars(ir);
-  const tons = tonBlocks(ir);
+  const timers = timerBlocks(ir);
   const rss = rsBlocks(ir);
   const magic = computeIrMagic(ir, irSha256Hex);
   const dtExpr = "npgen_scan_dt_ms";
@@ -368,9 +405,18 @@ export function codegenC(ir: PlcIr, irSha256Hex: string, _ioMap?: IoMap): Codege
       return `static ${cTypeFor(v.type)} npgen_v_${cIdent(v.name)}${init};`;
     })
     .join("\n");
-  const tonStructs = tons
-    .map((t) => `static struct { uint32_t et_ms; bool q; } npgen_ton_${t.id};`)
-    .join("\n");
+  const timerStructs = timers.length
+    ? [
+        ...timers.map(
+          (t) => `static struct { uint32_t et_ms; bool q; bool in_prev; } npgen_tmr_${t.id};`
+        ),
+        "",
+        "static inline uint32_t npgen_et_advance(uint32_t et_ms, uint32_t dt_ms, uint32_t pt_ms)",
+        "{",
+        "    return (dt_ms >= pt_ms - et_ms) ? pt_ms : et_ms + dt_ms;",
+        "}",
+      ].join("\n")
+    : "";
   const rsStructs = rss.map((r) => `static struct { bool q; } npgen_rs_${r.id};`).join("\n");
 
   const pous = ir.pou_schedules ?? [];
@@ -384,7 +430,7 @@ export function codegenC(ir: PlcIr, irSha256Hex: string, _ioMap?: IoMap): Codege
     })
     .join("\n\n");
   const body = ir.schedule.flatMap((step) => line(step, dtExpr)).join("\n");
-  const needsDt = tons.length > 0;
+  const needsDt = timers.length > 0;
   const dtDecl = needsDt && pous.length > 0 ? "static uint32_t npgen_scan_dt_ms;\n" : "";
   const scanDt = !needsDt
     ? ""
@@ -405,7 +451,7 @@ uint32_t nanoplc_runtime_scan_period_ms(void);
 #include <stdbool.h>
 #include <stdint.h>
 ${needMath ? "#include <math.h>\n" : ""}
-${scanPeriodProto}${diCount > 0 ? `static bool npgen_di[${diCount}];\n` : ""}${aiCount > 0 ? `static float npgen_ai[${aiCount}];\n` : ""}${doCount > 0 ? `static bool npgen_do[${doCount}];\n` : ""}${varDecls ? `${varDecls}\n` : ""}${tonStructs ? `${tonStructs}\n` : ""}${rsStructs ? `${rsStructs}\n` : ""}${dtDecl}${pouProtos ? `${pouProtos}\n` : ""}
+${scanPeriodProto}${diCount > 0 ? `static bool npgen_di[${diCount}];\n` : ""}${aiCount > 0 ? `static float npgen_ai[${aiCount}];\n` : ""}${doCount > 0 ? `static bool npgen_do[${doCount}];\n` : ""}${varDecls ? `${varDecls}\n` : ""}${timerStructs ? `${timerStructs}\n` : ""}${rsStructs ? `${rsStructs}\n` : ""}${dtDecl}${pouProtos ? `${pouProtos}\n` : ""}
 uint32_t nanoplc_generated_magic(void)
 {
     return 0x${magic.toString(16).padStart(8, "0")}u;

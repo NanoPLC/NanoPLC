@@ -259,7 +259,7 @@ Compile copies IN / IN_OUT into the callee before its schedule (`call_in`), runs
 ## 6. What to simulate (order)
 
 1. Digital I/O (buttons, coils, lamps). **Done (v0)** — `DI` / `DO` blocks, simulator **watch list** (add by module/channel), GPIO / AW9523 / StamPLC IO DO paths.
-2. Standard timers (TON, TOF, pulse—per your block library). **Partial (v0)** — TON in IR + simulator; TOF/pulse todo.
+2. Standard timers (TON, TOF, pulse—per your block library). **Done (v0)** — `TON` / `TOF` / `TP` in IR, simulator, C codegen, and FBD palette; ET saturates at PT; verified C ↔ TS on the same input trace.
 3. Analog I/O vs analog **device stubs**. **Partial (v0)** — **`AI` block**, `read_ai` in schedule, simulator **AI** watch fields (module/channel), StamPLC IO voltage read on device; **todo:** themed virtual transmitters (temperature, pressure, generic ADC profiles) as simulator widgets above raw REAL values.
 4. Virtual devices (tank, motor, conveyor, valve)—layer above I/O («mini Factory I/O»).
 5. Virtual fieldbuses (Modbus, MQTT, OPC UA—as needed to test SCADA without hardware).
@@ -594,7 +594,7 @@ Enough for drills + golden regressions:
 | LOCAL | Read/write a program variable (IN, IN_OUT, OUT, VAR, TEMP) |
 | CONST | Typed literal (`BOOL`, `INT`, `DINT`, `UINT`, `WORD`, `REAL`) |
 | RS / SR latch (optional v0.1) | persistent state |
-| TON, TOF | timers with PT/ET/Q |
+| TON, TOF, TP | timers with PT/ET/Q (**done v0**) |
 | MOVE (INT/REAL) | when MVP exposes analog-ish consumers for CONST |
 | INT GT/EQ compare | sequencing |
 
@@ -607,7 +607,7 @@ Document semantics in **`docs/BLOCK_SEMANTICS.md`**: evaluation order, PT=0 edge
 Surface Problems entries:
 
 - **Structural:** dangling wire, incompatible types (`NP-0305`), unresolved variable refs (`NP-0219`).
-- **I/O binding:** DI/DO/AI missing binding (`NP-0214`), duplicate symbol (`NP-0213`); invalid CONST (`NP-0215`). Local channel numbers may repeat across modules; uniqueness is by **symbol** (process-image row).
+- **I/O binding:** DI/DO/AI missing binding (`NP-0214`), duplicate symbol (`NP-0213`); invalid CONST (`NP-0215`); invalid timer PT (`NP-0220`). Local channel numbers may repeat across modules; uniqueness is by **symbol** (process-image row).
 - **Program interface:** invalid / duplicate variable (`NP-0216`…`NP-0218`); CALL self-call / cycle / missing target (`NP-0410`…`NP-0413`).
 - **Ordering:** combinational-feedback cycles without deliberate trigger semantics—either forbid or insert implicit delay with warning (product rule).
 - **Resource:** FB instance/IR size caps on low-end targets.
@@ -1038,3 +1038,4 @@ Unchanged: IR format lock, ordered graph compile, TS simulator, C codegen, onlin
 - **Simulator watch list (2026-08-16):** panel no longer dumps compiled `io_image`; user adds DI/DO/AI (module + channel, same as FBD) and PROGRAM IN/IN_OUT/OUT/VAR/TEMP; `SimIoCapacity` sizes the process image from the device map; watches persist per project (§5.8).
 - **FBD green-trace (2026-08-16):** while **Run simulation** is active, FBD BOOL wires highlight true/false and blocks show live values (`fbdSourcePortIrName` + `simLive` snapshots). Sticky force still later.
 - **Watch BOOL toggles (2026-08-16):** simulator watch panel updates DI/AI/var values in place on each scan so TRUE/FALSE buttons respond on the first click.
+- **TOF / TP timers (2026-11-22):** IR ops `tof` / `tp`, simulator, C codegen (`npgen_tmr_<id>` + `npgen_et_advance`), FBD palette; TON ET now saturates at PT in the simulator too (was unbounded, C was clamped); `NP-0220` invalid PT.

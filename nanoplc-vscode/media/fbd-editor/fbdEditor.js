@@ -118,7 +118,7 @@
   const MATH_BLOCKS = new Set(["ADD", "SUB", "MUL", "DIV"]);
   const REAL_MATH_BLOCKS = new Set(["POW", "SQRT"]);
   const BIT_BLOCKS = new Set(["SETBIT", "RESETBIT", "SHL", "SHR", "ROL", "ROR"]);
-  const BOOL_BLOCKS = new Set(["AND", "OR", "NOT", "TON", "RS"]);
+  const BOOL_BLOCKS = new Set(["AND", "OR", "NOT", "TON", "TOF", "TP", "RS"]);
   const NUMERIC_RANK = { BOOL: 0, WORD: 1, UINT: 2, INT: 3, DINT: 4, REAL: 5 };
 
   function parseConstDataType(params) {
@@ -263,6 +263,8 @@
         return ["IN1", "IN2"];
       case "NOT":
       case "TON":
+      case "TOF":
+      case "TP":
         return ["IN"];
       case "RS":
         return ["SET", "RESET1"];

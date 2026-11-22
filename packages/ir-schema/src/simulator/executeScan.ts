@@ -4,7 +4,7 @@ import type {
   SimIoCapacity,
   SimState,
   SimulatorSnapshot,
-  TonInstanceState,
+  TimerInstanceState,
 } from "./types";
 import { pouIrName } from "../pouVars";
 
@@ -63,11 +63,11 @@ function toInt(v: number, type: PlcPrimitiveType | undefined): number {
   return Math.trunc(v) & 0xffff;
 }
 
-function tonState(state: SimState, blockId: string): TonInstanceState {
-  let t = state.ton.get(blockId);
+function timerState(state: SimState, blockId: string): TimerInstanceState {
+  let t = state.timers.get(blockId);
   if (!t) {
-    t = { et_ms: 0, q: false };
-    state.ton.set(blockId, t);
+    t = { et_ms: 0, q: false, in_prev: false };
+    state.timers.set(blockId, t);
   }
   return t;
 }
@@ -81,19 +81,52 @@ function rsState(state: SimState, blockId: string): RsInstanceState {
   return r;
 }
 
-function executeTon(state: SimState, step: ScheduleStep, dt_ms: number): void {
-  const blockId = step.block_id ?? "ton";
-  const t = tonState(state, blockId);
+/** ET advances by the pass Δt and saturates at PT (see docs/BLOCK_SEMANTICS.md). */
+function advanceEt(et_ms: number, dt_ms: number, pt_ms: number): number {
+  return Math.min(et_ms + dt_ms, pt_ms);
+}
+
+function executeTimer(state: SimState, step: ScheduleStep, dt_ms: number): void {
+  const blockId = step.block_id ?? step.op;
+  const t = timerState(state, blockId);
   const pt = step.pt_ms ?? 1000;
   const inn = readBool(state, step.in1);
 
-  if (!inn) {
-    t.et_ms = 0;
-    t.q = false;
-  } else {
-    t.et_ms += dt_ms;
-    t.q = t.et_ms >= pt;
+  switch (step.op) {
+    case "ton":
+      if (inn) {
+        t.et_ms = advanceEt(t.et_ms, dt_ms, pt);
+        t.q = t.et_ms >= pt;
+      } else {
+        t.et_ms = 0;
+        t.q = false;
+      }
+      break;
+    case "tof":
+      if (inn) {
+        t.et_ms = 0;
+        t.q = true;
+      } else if (t.q) {
+        t.et_ms = advanceEt(t.et_ms, dt_ms, pt);
+        t.q = t.et_ms < pt;
+      }
+      break;
+    case "tp":
+      if (!t.q && inn && !t.in_prev) {
+        t.q = true;
+        t.et_ms = 0;
+      }
+      if (t.q) {
+        t.et_ms = advanceEt(t.et_ms, dt_ms, pt);
+        t.q = t.et_ms < pt;
+      } else if (!inn) {
+        t.et_ms = 0;
+      }
+      break;
+    default:
+      break;
   }
+  t.in_prev = inn;
 
   writeBool(state, step.out, t.q);
   state.vars[`${blockId}.ET`] = t.et_ms;
@@ -212,7 +245,9 @@ export function executeScheduleStep(state: SimState, step: ScheduleStep, dt_ms: 
       executeRs(state, step);
       break;
     case "ton":
-      executeTon(state, step, dt_ms);
+    case "tof":
+    case "tp":
+      executeTimer(state, step, dt_ms);
       break;
     case "const": {
       if (!step.out) {
@@ -301,7 +336,7 @@ export function createSimState(ir: PlcIr, capacity?: SimIoCapacity): SimState {
     di: Array.from({ length: diLen }, () => false),
     ai: Array.from({ length: aiLen }, () => 0),
     do: Array.from({ length: doLen }, () => false),
-    ton: new Map(),
+    timers: new Map(),
     rs: new Map(),
     scan_index: 0,
     elapsed_ms: 0,

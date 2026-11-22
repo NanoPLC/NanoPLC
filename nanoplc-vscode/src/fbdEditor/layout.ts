@@ -31,6 +31,8 @@ function columnForType(type: string): number {
     case "ROR":
       return 2;
     case "TON":
+    case "TOF":
+    case "TP":
       return 1;
     default:
       return 2;

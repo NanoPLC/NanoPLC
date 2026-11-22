@@ -180,6 +180,44 @@ test("compileFbdToIr rejects WORD constant out of range", () => {
   assert.ok(result.diagnostics.some((d) => d.code === "NP-0215"));
 });
 
+test("compileFbdToIr emits tof / tp steps and timer instances", () => {
+  const fbd: FbdSource = {
+    schema_version: FBD_SOURCE_SCHEMA_VERSION,
+    name: "Main",
+    blocks: [
+      { id: "tof1", type: "TOF", params: { pt_ms: 250 } },
+      { id: "tp1", type: "TP", params: { pt_ms: "40" } },
+    ],
+    wires: [],
+  };
+  const result = compileFbdToIr(baseProject, fbd, "main");
+  assert.equal(result.ok, true, result.diagnostics.map((d) => d.message).join("; "));
+  const tof = result.ir?.schedule.find((s) => s.block_id === "tof1");
+  const tp = result.ir?.schedule.find((s) => s.block_id === "tp1");
+  assert.equal(tof?.op, "tof");
+  assert.equal(tof?.pt_ms, 250);
+  assert.equal(tp?.op, "tp");
+  assert.equal(tp?.pt_ms, 40);
+  assert.deepEqual(
+    result.ir?.instances.map((i) => i.type),
+    ["TOF", "TP"]
+  );
+});
+
+test("compileFbdToIr rejects invalid timer PT (NP-0220)", () => {
+  for (const pt of [-5, 1.5, "abc"]) {
+    const fbd: FbdSource = {
+      schema_version: FBD_SOURCE_SCHEMA_VERSION,
+      name: "Main",
+      blocks: [{ id: "t1", type: "TON", params: { pt_ms: pt } }],
+      wires: [],
+    };
+    const result = compileFbdToIr(baseProject, fbd, "main");
+    assert.equal(result.ok, false, `PT ${pt} should be rejected`);
+    assert.ok(result.diagnostics.some((d) => d.code === "NP-0220" && d.block_id === "t1"));
+  }
+});
+
 test("compileFbdToIr maps Analog In to read_ai schedule step", () => {
   const fbd: FbdSource = {
     schema_version: FBD_SOURCE_SCHEMA_VERSION,

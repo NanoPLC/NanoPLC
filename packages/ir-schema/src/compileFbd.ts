@@ -45,6 +45,8 @@ const SUPPORTED_BLOCKS = new Set([
   "OR",
   "NOT",
   "TON",
+  "TOF",
+  "TP",
   "CONST",
   "RS",
   "ADD",
@@ -62,6 +64,48 @@ const SUPPORTED_BLOCKS = new Set([
   "CALL",
   "LOCAL",
 ]);
+
+const TIMER_BLOCKS = new Set(["TON", "TOF", "TP"]);
+
+const DEFAULT_TIMER_PT_MS = 1000;
+
+function rawTimerPt(block: FbdBlock): unknown {
+  return block.params?.pt_ms ?? block.params?.PT;
+}
+
+function timerPtMs(block: FbdBlock): number {
+  const raw = rawTimerPt(block);
+  if (raw === undefined || raw === null || (typeof raw === "string" && raw.trim() === "")) {
+    return DEFAULT_TIMER_PT_MS;
+  }
+  const n = typeof raw === "number" ? raw : Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : DEFAULT_TIMER_PT_MS;
+}
+
+function validateTimerBlocks(blocks: FbdBlock[]): CompileDiagnostic[] {
+  const diagnostics: CompileDiagnostic[] = [];
+  for (const block of blocks) {
+    const t = block.type.toUpperCase();
+    if (!TIMER_BLOCKS.has(t)) {
+      continue;
+    }
+    const raw = rawTimerPt(block);
+    if (raw === undefined || raw === null || (typeof raw === "string" && raw.trim() === "")) {
+      continue;
+    }
+    const n = typeof raw === "number" ? raw : Number(raw);
+    if (!Number.isInteger(n) || n < 0 || n > 0xffffffff) {
+      diagnostics.push(
+        diag(
+          "NP-0220",
+          `${t} block "${block.id}" has invalid PT "${String(raw)}". Use a whole number of milliseconds ≥ 0.`,
+          block.id
+        )
+      );
+    }
+  }
+  return diagnostics;
+}
 
 function diag(
   code: string,
@@ -523,19 +567,19 @@ function emitScheduleStep(
           out,
         },
       ];
-    case "TON": {
-      const pt = block.params?.pt_ms ?? block.params?.PT ?? 1000;
+    case "TON":
+    case "TOF":
+    case "TP":
       return [
         {
           step: stepIndex,
-          op: "ton",
+          op: t.toLowerCase() as "ton" | "tof" | "tp",
           block_id: block.id,
           in1: wireIns.get("IN") ?? "",
           out,
-          pt_ms: typeof pt === "number" ? pt : Number(pt),
+          pt_ms: timerPtMs(block),
         },
       ];
-    }
     case "CONST": {
       const dataType = parseConstDataType(block.params);
       const parsed = parseConstValue(block.params, dataType);
@@ -675,6 +719,7 @@ export function compileFbdToIr(
   diagnostics.push(...validateLocalBlocks(fbd.blocks, localVars));
   diagnostics.push(...validateIoBindings(fbd.blocks));
   diagnostics.push(...validateConstBlocks(fbd.blocks));
+  diagnostics.push(...validateTimerBlocks(fbd.blocks));
 
   const outputTypes = buildBlockOutputTypes(blocks, fbd.wires, portCtx);
   diagnostics.push(...validateWires(blocks, fbd.wires, outputTypes, portCtx));
@@ -760,16 +805,12 @@ export function compileFbdToIr(
   const instances = fbd.blocks
     .filter((b) => {
       const t = b.type.toUpperCase();
-      return t === "TON" || t === "RS";
+      return TIMER_BLOCKS.has(t) || t === "RS";
     })
     .map((b) => {
       const t = b.type.toUpperCase();
-      if (t === "TON") {
-        return {
-          id: b.id,
-          type: "TON",
-          params: { pt_ms: b.params?.pt_ms ?? b.params?.PT ?? 1000 },
-        };
+      if (TIMER_BLOCKS.has(t)) {
+        return { id: b.id, type: t, params: { pt_ms: timerPtMs(b) } };
       }
       return { id: b.id, type: "RS", params: {} };
     });
