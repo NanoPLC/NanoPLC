@@ -242,6 +242,22 @@ function line(step: ScheduleStep, dtExpr: string): string[] {
       return [`    ${varRef(step.out)} = (${varRef(step.in1)} || ${varRef(step.in2)});`];
     case "not":
       return [`    ${varRef(step.out)} = !${varRef(step.in1)};`];
+    case "cmp": {
+      const rel: Record<string, string> = {
+        eq: "==",
+        ne: "!=",
+        lt: "<",
+        le: "<=",
+        gt: ">",
+        ge: ">=",
+      };
+      const op = rel[step.rel ?? "eq"] ?? "==";
+      return [`    ${varRef(step.out)} = (${varRef(step.in1)} ${op} ${varRef(step.in2)});`];
+    }
+    case "jump":
+      return [`    goto l${step.target ?? 0};`];
+    case "jump_if_false":
+      return [`    if (!${varRef(step.in1)}) goto l${step.target ?? 0};`];
     case "rs": {
       const id = cIdent(step.block_id ?? "rs");
       const out = varRef(step.out);
@@ -355,8 +371,23 @@ function cString(text: string): string {
 }
 
 function cFunction(signature: string, steps: ScheduleStep[], dtExpr: string): string {
-  const body = steps.flatMap((step) => line(step, dtExpr));
-  return [signature, "{", `    (void)${dtExpr};`, ...body, "}"].join("\n");
+  const targets = new Set<number>();
+  for (const step of steps) {
+    if ((step.op === "jump" || step.op === "jump_if_false") && step.target !== undefined) {
+      targets.add(step.target);
+    }
+  }
+  const body = [`    (void)${dtExpr};`];
+  for (const step of steps) {
+    if (targets.has(step.step)) {
+      body.push(`l${step.step}: ;`);
+    }
+    body.push(...line(step, dtExpr));
+  }
+  if (targets.has(steps.length)) {
+    body.push(`l${steps.length}: ;`);
+  }
+  return [signature, "{", ...body, "}"].join("\n");
 }
 
 /** Every variable `plc_program.c` declares, with its PLC type. */

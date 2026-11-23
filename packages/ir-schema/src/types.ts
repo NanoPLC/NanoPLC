@@ -229,7 +229,13 @@ export type ScheduleOp =
   | "ror"
   | "rs"
   | "call"
-  | "fb";
+  | "fb"
+  | "cmp"
+  | "jump"
+  | "jump_if_false";
+
+/** Comparison encoded by a `cmp` step. The result is always BOOL. */
+export type CmpRel = "eq" | "ne" | "lt" | "le" | "gt" | "ge";
 
 export interface ScheduleStep {
   step: number;
@@ -250,6 +256,10 @@ export interface ScheduleStep {
   /** Callee program id for `call`, or function-block id for `fb`. */
   program?: string;
   /** Function-block instance id for `fb` (also `block_id`). */
+  /** Comparison for a `cmp` step. */
+  rel?: CmpRel;
+  /** Next step index for `jump` and `jump_if_false`. Equal to the schedule length means "after the last step". */
+  target?: number;
   /** Caller wire names for callee IN / IN_OUT ports (`port → source`). */
   call_in?: Record<string, string>;
   /** Caller dest names for callee OUT / IN_OUT ports (`port → dest`). */

@@ -279,6 +279,33 @@ export function executeScheduleStep(
     case "not":
       writeBool(state, step.out, !readBool(state, step.in1));
       break;
+    case "cmp": {
+      const left = readNumeric(state, step.in1);
+      const right = readNumeric(state, step.in2);
+      let result = false;
+      switch (step.rel) {
+        case "ne":
+          result = left !== right;
+          break;
+        case "lt":
+          result = left < right;
+          break;
+        case "le":
+          result = left <= right;
+          break;
+        case "gt":
+          result = left > right;
+          break;
+        case "ge":
+          result = left >= right;
+          break;
+        default:
+          result = left === right;
+          break;
+      }
+      writeBool(state, step.out, result);
+      break;
+    }
     case "rs":
       executeRs(state, step);
       break;
@@ -414,14 +441,33 @@ function executeSteps(
   dt_ms: number,
   callStack: string[]
 ): void {
-  for (const step of steps) {
+  const hasJump = steps.some((step) => step.op === "jump" || step.op === "jump_if_false");
+  const budget = hasJump ? 100_000 : steps.length + 1;
+  let guard = 0;
+  let pc = 0;
+  while (pc >= 0 && pc < steps.length && guard < budget) {
+    guard += 1;
+    const step = steps[pc];
+    if (!step) {
+      break;
+    }
+    if (step.op === "jump") {
+      pc = step.target ?? pc + 1;
+      continue;
+    }
+    if (step.op === "jump_if_false") {
+      pc = readBool(state, step.in1) ? pc + 1 : (step.target ?? pc + 1);
+      continue;
+    }
     if (step.op === "call") {
       const target = step.program;
       if (!target || callStack.includes(target)) {
+        pc += 1;
         continue;
       }
       const pou = ir.pou_schedules?.find((p) => p.id === target);
       if (!pou) {
+        pc += 1;
         continue;
       }
       for (const [port, src] of Object.entries(step.call_in ?? {})) {
@@ -433,12 +479,14 @@ function executeSteps(
         const src = pouIrName(target, port);
         assignVar(state, ir, dest, state.vars[src]);
       }
+      pc += 1;
       continue;
     }
     if (step.op === "fb") {
       const instance = step.block_id;
       const body = ir.fb_instances?.find((item) => item.id === instance);
       if (!instance || !body || callStack.includes(instance)) {
+        pc += 1;
         continue;
       }
       for (const [port, src] of Object.entries(step.call_in ?? {})) {
@@ -448,9 +496,11 @@ function executeSteps(
       for (const [port, dest] of Object.entries(step.call_out ?? {})) {
         assignVar(state, ir, dest, state.vars[`${instance}__${port}`]);
       }
+      pc += 1;
       continue;
     }
     executeScheduleStep(state, step, dt_ms, ir);
+    pc += 1;
   }
 }
 

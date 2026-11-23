@@ -65,6 +65,14 @@ export function buildCodegenIoContext(projectRoot: string, project: NanoPlcProje
 export function loadProjectFbdSourcesFromDisk(projectRoot: string, project: NanoPlcProject): Map<string, unknown> {
   const sources = new Map<string, unknown>();
   for (const prog of project.programs) {
+    if (prog.language === "st") {
+      try {
+        sources.set(prog.id, readFileSync(join(projectRoot, prog.source), "utf8"));
+      } catch {
+        // compileTasksToIr reports a missing source.
+      }
+      continue;
+    }
     if (prog.language !== "fbd") {
       continue;
     }

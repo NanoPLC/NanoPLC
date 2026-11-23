@@ -364,7 +364,7 @@ Mitigate simulator/MCU mismatch: tight IR spec + tests + (later) shared C runtim
 
 ### Phase 1 — MVP «mini PLC IDE»
 
-1. [x] IDE structure: **Device/project tree** (§3.2); **FBD** Node-RED–style canvas (§3.1); **ST** plain VS Code editor (§3.1). **Done:** CODESYS-style **Project tree**; **FBD canvas v0** (palette, wiring, Variables/CALL, green-trace, undo/redo, autosave); **ST language service v0** (block diagnostics, completion, hover, outline — not a compiler). LAD stays grammar-only.
+1. [x] IDE structure: **Device/project tree** (§3.2); **FBD** Node-RED–style canvas (§3.1); **ST** plain VS Code editor (§3.1). **Done:** CODESYS-style **Project tree**; **FBD canvas v0** (palette, wiring, Variables/CALL, green-trace, undo/redo, autosave); **ST editor and compiler** (diagnostics, completion, and a PROGRAM subset compiled to IR). LAD stays grammar-only.
 2. [x] **JS/TS Virtual PLC** + **Run Simulation** (watch list: add DI/DO/AI by module/channel and POU vars; scan loop; **green-trace** on the FBD canvas).
 3. [x] **C codegen** from IR → `firmware/components/nanoplc_generated/` (auto on compile; CLI `tools/codegen`).
 4. [x] **ESP-IDF** skeleton under `firmware/` with working `idf.py build`; **manual** CLI flash/monitor. **Done:** NanoPLC IDE commands for Build/Flash/Monitor (§7.4); **per-project firmware scaffold** + **build on compile** (§7.4 item 3).
@@ -1011,7 +1011,7 @@ _Last reviewed: 2026-11-22._
 
 ### Phase 0 / later phases
 
-Phase 0–2 foundation items above are done for the MVP. Phase 3 virtual plant and Phase 4 virtual fieldbuses are simulator-only. Simulator sticky force is in the watch panel. Structured Text has a structural language service (not a compiler). Function-block instances are in the FBD compiler (`fb_def` plus per-instance schedules). `nanoplc_core` has host-tested integer wrap helpers; the shared schedule interpreter is not started. Remaining later work: user FB packages, on-target golden (needs hardware or QEMU; not run here), shared schedule interpreter, 3D scene, UART force/unforce.
+Phase 0–2 foundation items above are done for the MVP. Phase 3 virtual plant and Phase 4 virtual fieldbuses are simulator-only. Simulator sticky force is in the watch panel. Structured Text compiles a PROGRAM subset into the same IR as FBD. Function-block instances are in the FBD compiler (`fb_def` plus per-instance schedules). `nanoplc_core` has host-tested integer wrap helpers; the shared schedule interpreter is not started. Remaining later work: user FB packages, on-target golden (needs hardware or QEMU; not run here), shared schedule interpreter, 3D scene, UART force/unforce.
 
 ---
 
@@ -1060,6 +1060,7 @@ Phase 0–2 foundation items above are done for the MVP. Phase 3 virtual plant a
 - **Virtual plant (Phase 3 v0, 2026-11-22):** `virtual_plant` on `nanoplc.project.json`. Simulator integrates pushbutton, switch, lamp, transmitter, motor, valve, tank, and conveyor against the process image before each task pass. I/O panel in **Run simulation**; Project tree lists the devices. Not emitted by codegen (`NP-0130`…`NP-0133`).
 - **Virtual fieldbuses (Phase 4 v0, 2026-11-22):** localhost Modbus TCP, MQTT 3.1.1, and OPC UA (anonymous, no security) while the simulator runs. See `docs/FIELDBUS.md`.
 - **Sticky force (2026-11-22):** watch-panel Force/Unforce. The simulator reapplies DI/AI after the plant and DO/variables after each task pass. Watchdog `outputs_off` still wins over a DO force. UART force is unchanged.
-- **ST language service (v0, 2026-11-22):** `iec-st` diagnostics for unclosed or mismatched blocks, duplicate variables, and non-elementary types (`ST0001`…`ST0005`); keyword/type/variable completion; hover; document outline. Not compiled to IR. LAD remains grammar-only. The editor grammar, snippets, and keyword list follow the MIT Structured Text extension and `st-lsp` keyword table. Formatting, go to definition, `.scl`, and `.iecstl` are in-process. The Rust language server and tree-sitter parser are not bundled.
+- **ST language service (v0, 2026-11-22):** `iec-st` diagnostics for unclosed or mismatched blocks, duplicate variables, and non-elementary types (`ST0001`…`ST0005`); keyword/type/variable completion; hover; document outline. LAD remains grammar-only. The editor grammar, snippets, and keyword list follow the MIT Structured Text extension and `st-lsp` keyword table. Formatting, go to definition, `.scl`, and `.iecstl` are in-process. The Rust language server and tree-sitter parser are not bundled.
+- **ST to IR (2026-11-22):** a project program with `"language": "st"` compiles through `compileStToIr()` into the FBD schedule (`move`, `cmp`, `jump`, `jump_if_false`, `call`, I/O reads and writes). `IF`, `WHILE`, `REPEAT`, `FOR`, and `CALL` are included. `CASE`, `MOD`, strings, and non-IR types are rejected. The simulator and C generator execute the new steps.
 - **Function blocks (T3 v0, 2026-11-22):** `function_blocks[]` plus FBD `FB` instances. IR keeps `fb_defs` and a schedule per instance so timers and VARs are not shared. Diagnostics `NP-0420`…`NP-0423`. Nested FB is rejected.
 - **Shared C core (first slice, 2026-11-22):** `firmware/components/nanoplc_core` integer wrap (`nanoplc_wrap_i16` / `i32` / `u16`), host-tested. The schedule interpreter is still generated C. On-target golden was not run (no hardware or QEMU in this environment).

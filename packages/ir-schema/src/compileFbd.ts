@@ -32,6 +32,7 @@ import {
   resolveTaskConfiguration,
   taskEntryProgramId,
 } from "./tasks";
+import { compileStToIr, stProgramInterface } from "./st/compileSt";
 import { validateFbdSource } from "./validate";
 import {
   callPortIrName,
@@ -897,11 +898,11 @@ function validateCallBlocks(
       );
       continue;
     }
-    if (prog.language !== "fbd") {
+    if (prog.language === "lad") {
       diagnostics.push(
         diag(
           "NP-0205",
-          `CALL currently supports FBD programs only ("${prog.name}" is ${prog.language}).`,
+          `CALL supports FBD and ST programs only ("${prog.name}" is LAD).`,
           block.id
         )
       );
@@ -1075,6 +1076,11 @@ function compileClosure(
   const diagnostics: CompileDiagnostic[] = [];
   const programVars = new Map<string, FbdVariable[]>();
   for (const [id, raw] of sources) {
+    const prog = project.programs.find((item) => item.id === id);
+    if (prog?.language === "st" && typeof raw === "string") {
+      programVars.set(id, stProgramInterface(raw));
+      continue;
+    }
     const varsRaw =
       raw && typeof raw === "object" ? (raw as { variables?: unknown }).variables : undefined;
     programVars.set(id, parsePouVariables(varsRaw).variables);
@@ -1094,19 +1100,30 @@ function compileClosure(
       diagnostics.push(diag("NP-0413", `Unknown program "${id}".`));
       continue;
     }
-    if (prog.language !== "fbd") {
+    if (prog.language === "lad") {
+      diagnostics.push(diag("NP-0205", `LAD is not compiled ("${prog.name}").`));
+      continue;
+    }
+    if (prog.language !== "fbd" && prog.language !== "st") {
       diagnostics.push(
-        diag("NP-0205", `Compile supports FBD JSON only (${prog.language} not yet implemented).`)
+        diag("NP-0205", `Compile supports FBD and ST only (${prog.language} not yet implemented).`)
       );
       continue;
     }
     const raw = sources.get(id);
     if (raw === undefined) {
-      diagnostics.push(diag("NP-0200", `Cannot read FBD source for program "${prog.name}".`));
+      diagnostics.push(diag("NP-0200", `Cannot read source for program "${prog.name}".`));
+      continue;
+    }
+    if (prog.language === "st" && typeof raw !== "string") {
+      diagnostics.push(diag("NP-0200", `ST source for program "${prog.name}" is not text.`));
       continue;
     }
 
-    const result = compileFbdToIr(project, raw, id, ioMap, programVars);
+    const result =
+      prog.language === "st"
+        ? compileStToIr(project, raw as string, id, ioMap, programVars)
+        : compileFbdToIr(project, raw, id, ioMap, programVars);
     compiled.set(id, result);
     for (const d of result.diagnostics) {
       diagnostics.push({ ...d, program_id: id });
@@ -1195,8 +1212,8 @@ function assembleIr(
 }
 
 /**
- * Compile the entry PROGRAM and every FBD PROGRAM it calls (transitively).
- * `sources` maps program id → FBD JSON.
+ * Compile the entry PROGRAM and every FBD or ST PROGRAM it calls (transitively).
+ * `sources` maps program id → FBD JSON, or ST source text.
  */
 export function compileProjectToIr(
   project: NanoPlcProject,

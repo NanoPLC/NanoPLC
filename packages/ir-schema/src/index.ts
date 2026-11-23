@@ -177,6 +177,7 @@ export {
   ST_KEYWORDS,
   ST_TYPES,
 } from "./st/analyzeSt";
+export { compileStToIr, stProgramInterface } from "./st/compileSt";
 export type { StAnalysis, StCompletion, StDiagnostic, StLocation, StSymbol } from "./st/analyzeSt";
 export type { ResolvedDeviceTree } from "./projectTreeDefaults";
 export { validateFbdSource, validateProject } from "./validate";

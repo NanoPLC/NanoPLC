@@ -102,9 +102,17 @@ function publishCompileDiagnostics(
   publishDiagnostics(rootPath, "nanoplc.project.json", leftover);
 }
 
-function loadProjectFbdSources(rootPath: string, project: NanoPlcProject): Map<string, unknown> {
+function loadProjectSources(rootPath: string, project: NanoPlcProject): Map<string, unknown> {
   const sources = new Map<string, unknown>();
   for (const prog of project.programs) {
+    if (prog.language === "st") {
+      try {
+        sources.set(prog.id, loadTextFile(rootPath, prog.source));
+      } catch {
+        // compileTasksToIr reports a missing source.
+      }
+      continue;
+    }
     if (prog.language !== "fbd") {
       continue;
     }
@@ -115,6 +123,15 @@ function loadProjectFbdSources(rootPath: string, project: NanoPlcProject): Map<s
     }
   }
   return sources;
+}
+
+function loadTextFile(rootPath: string, relSource: string): string {
+  const abs = path.normalize(path.join(rootPath, relSource));
+  const open = vscode.workspace.textDocuments.find((document) => path.normalize(document.uri.fsPath) === abs);
+  if (open) {
+    return open.getText();
+  }
+  return fs.readFileSync(abs, "utf8");
 }
 
 function sha256(text: string): string {
@@ -152,14 +169,14 @@ export function gateProjectFbd(rootPath: string, project: NanoPlcProject): Proje
     };
   }
 
-  if (program.language !== "fbd") {
+  if (program.language === "lad") {
     return {
       ok: false,
       unboundIoBlocks: [],
       diagnostics: [
         {
           code: "NP-0205",
-          message: `Compile supports FBD JSON only (${program.language} not yet implemented).`,
+          message: "LAD is not compiled.",
           severity: "error",
         },
       ],
@@ -177,7 +194,7 @@ export function gateProjectFbd(rootPath: string, project: NanoPlcProject): Proje
     ioMap = undefined;
   }
 
-  const sources = loadProjectFbdSources(rootPath, project);
+  const sources = loadProjectSources(rootPath, project);
   const result = compileTasksToIr(project, sources, ioMap);
   publishCompileDiagnostics(rootPath, project, result.diagnostics);
 
@@ -243,10 +260,8 @@ export async function compileProjectAt(
     return false;
   }
 
-  if (program.language !== "fbd") {
-    void vscode.window.showWarningMessage(
-      `NanoPLC: Compile supports FBD JSON only in this release (${program.language} not yet implemented).`
-    );
+  if (program.language === "lad") {
+    void vscode.window.showWarningMessage("NanoPLC: LAD is not compiled.");
     return false;
   }
 
@@ -260,7 +275,7 @@ export async function compileProjectAt(
     );
   }
 
-  const sources = loadProjectFbdSources(rootPath, project);
+  const sources = loadProjectSources(rootPath, project);
   const result = compileTasksToIr(project, sources, ioMap);
   publishCompileDiagnostics(rootPath, project, [...projectDiags, ...result.diagnostics]);
 
